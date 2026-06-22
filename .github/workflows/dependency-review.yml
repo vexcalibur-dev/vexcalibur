@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   dependency-review:
@@ -20,4 +20,3 @@ jobs:
         with:
           comment-summary-in-pr: always
           fail-on-severity: high
-
