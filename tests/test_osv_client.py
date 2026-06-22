@@ -4,7 +4,7 @@ import httpx
 import pytest
 from packageurl import PackageURL
 
-from vexcalibur.sources.osv import OsvClient
+from vexcalibur.sources.osv import OsvClient, OsvClientError, OsvResponseError
 
 
 def test_query_sends_purl_to_osv_query_endpoint() -> None:
@@ -32,6 +32,45 @@ def test_query_sends_purl_to_osv_query_endpoint() -> None:
         "package": {
             "purl": "pkg:maven/org.example/demo@1.0.0",
         }
+    }
+
+
+def test_query_follows_next_page_token() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "vulns": [{"id": "GHSA-test-0001"}],
+                    "next_page_token": "page-2",
+                },
+            )
+        return httpx.Response(200, json={"vulns": [{"id": "GHSA-test-0002"}]})
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    result = client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+    assert [vuln.id for vuln in result.vulnerabilities] == [
+        "GHSA-test-0001",
+        "GHSA-test-0002",
+    ]
+    assert [request.url for request in requests] == [
+        "https://osv.example.test/v1/query",
+        "https://osv.example.test/v1/query",
+    ]
+    assert json.loads(requests[1].content) == {
+        "package": {
+            "purl": "pkg:pypi/example@1.0.0",
+        },
+        "page_token": "page-2",
     }
 
 
@@ -86,6 +125,72 @@ def test_query_batch_maps_results_to_input_purls() -> None:
     }
 
 
+def test_query_batch_follows_next_page_token_for_paginated_results_only() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "vulns": [{"id": "GHSA-test-0001"}],
+                            "next_page_token": "first-purl-page-2",
+                        },
+                        {"vulns": [{"id": "GHSA-test-0003"}]},
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"results": [{"vulns": [{"id": "GHSA-test-0002"}]}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    results = client.query_batch(
+        [
+            PackageURL.from_string("pkg:pypi/example@1.0.0"),
+            PackageURL.from_string("pkg:npm/example@2.0.0"),
+        ]
+    )
+
+    assert [vuln.id for vuln in results[0].vulnerabilities] == [
+        "GHSA-test-0001",
+        "GHSA-test-0002",
+    ]
+    assert [vuln.id for vuln in results[1].vulnerabilities] == ["GHSA-test-0003"]
+    assert json.loads(requests[1].content) == {
+        "queries": [
+            {
+                "package": {
+                    "purl": "pkg:pypi/example@1.0.0",
+                },
+                "page_token": "first-purl-page-2",
+            }
+        ]
+    }
+
+
+def test_query_batch_with_no_purls_does_not_call_osv() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"unexpected OSV request: {request.url}")
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    assert client.query_batch([]) == []
+
+
 def test_get_vulnerability_fetches_full_payload() -> None:
     requests: list[httpx.Request] = []
 
@@ -111,6 +216,7 @@ def test_get_vulnerability_fetches_full_payload() -> None:
     assert vulnerability.id == "GHSA-test-0003"
     assert vulnerability.raw["summary"] == "Example vulnerability"
     assert requests[0].url == "https://osv.example.test/v1/vulns/GHSA-test-0003"
+    assert requests[0].content == b""
 
 
 def test_get_vulnerability_encodes_id_as_path_segment() -> None:
@@ -139,7 +245,7 @@ def test_query_rejects_non_list_vulns_field() -> None:
         client=httpx.Client(transport=transport),
     )
 
-    with pytest.raises(TypeError, match="must be a list"):
+    with pytest.raises(OsvResponseError, match="must be a list"):
         client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
 
 
@@ -150,7 +256,7 @@ def test_query_batch_rejects_non_list_results_field() -> None:
         client=httpx.Client(transport=transport),
     )
 
-    with pytest.raises(TypeError, match=r"results.*must be a list"):
+    with pytest.raises(OsvResponseError, match=r"results.*must be a list"):
         client.query_batch([PackageURL.from_string("pkg:pypi/example@1.0.0")])
 
 
@@ -161,7 +267,7 @@ def test_query_batch_rejects_non_object_result_entries() -> None:
         client=httpx.Client(transport=transport),
     )
 
-    with pytest.raises(TypeError, match="result entries must be objects"):
+    with pytest.raises(OsvResponseError, match="result entries must be objects"):
         client.query_batch([PackageURL.from_string("pkg:pypi/example@1.0.0")])
 
 
@@ -172,7 +278,86 @@ def test_query_rejects_non_object_vulnerability_entries() -> None:
         client=httpx.Client(transport=transport),
     )
 
-    with pytest.raises(TypeError, match="vulnerability entries must be objects"):
+    with pytest.raises(OsvResponseError, match="vulnerability entries must be objects"):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+def test_query_batch_rejects_result_count_mismatch() -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"results": [{}]}))
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match="response count must match request count"):
+        client.query_batch(
+            [
+                PackageURL.from_string("pkg:pypi/example@1.0.0"),
+                PackageURL.from_string("pkg:npm/example@2.0.0"),
+            ]
+        )
+
+
+def test_query_rejects_missing_vulnerability_id() -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"vulns": [{}]}))
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match=r"id.*non-empty string"):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+def test_query_rejects_non_string_modified_timestamp() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"vulns": [{"id": "GHSA-test-0001", "modified": 123}]},
+        )
+    )
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match=r"modified.*non-empty string"):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+def test_get_vulnerability_rejects_non_string_id() -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"id": 123}))
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match=r"id.*non-empty string"):
+        client.get_vulnerability("GHSA-test-0001")
+
+
+def test_query_rejects_invalid_json_response() -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"not json"))
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match="must be JSON"):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+def test_query_wraps_http_errors() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, request=request)
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvClientError, match="HTTP 503"):
         client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
 
 

@@ -29,7 +29,7 @@ def query_osv(
     ],
 ) -> None:
     """Query OSV for one or more package URLs and print vulnerability IDs."""
-    parsed = [PackageURL.from_string(value) for value in purl]
+    parsed = _parse_package_urls(purl)
     results = OsvClient().query_batch(parsed)
 
     for result in results:
@@ -39,6 +39,17 @@ def query_osv(
 
         ids = ", ".join(vuln.id for vuln in result.vulnerabilities)
         console.print(f"{result.purl}: {ids}")
+
+
+def _parse_package_urls(values: list[str]) -> list[PackageURL]:
+    parsed: list[PackageURL] = []
+    for value in values:
+        try:
+            parsed.append(PackageURL.from_string(value))
+        except ValueError as exc:
+            msg = f"{value!r} is not a valid package URL: {exc}"
+            raise typer.BadParameter(msg) from exc
+    return parsed
 
 
 if __name__ == "__main__":

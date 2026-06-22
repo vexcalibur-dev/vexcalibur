@@ -52,6 +52,15 @@ def test_query_osv_requires_at_least_one_purl() -> None:
     assert "Missing argument" in result.output
 
 
+def test_query_osv_reports_invalid_purl_without_traceback() -> None:
+    result = runner.invoke(cli.app, ["query-osv", "not a purl"])
+
+    assert result.exit_code != 0
+    assert "not a purl" in result.output
+    assert "not a valid package URL" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_vexcalibur_root_shows_help_without_args() -> None:
     result = runner.invoke(cli.app, ["--help"])
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -40,6 +40,20 @@ class OsvQueryResult:
     vulnerabilities: tuple[OsvVulnerabilitySummary, ...]
 
 
+class OsvClientError(RuntimeError):
+    """Base error raised for OSV client failures."""
+
+
+class OsvResponseError(OsvClientError):
+    """Raised when OSV returns a response that does not match the expected API shape."""
+
+
+@dataclass(frozen=True)
+class _BatchPageResult:
+    vulnerabilities: tuple[OsvVulnerabilitySummary, ...]
+    next_page_token: str | None
+
+
 class OsvClient:
     """Small client for OSV's public API."""
 
@@ -56,98 +70,172 @@ class OsvClient:
 
     def query(self, purl: PackageURL) -> OsvQueryResult:
         """Query OSV for one package URL."""
-        response = self._post(
-            "/v1/query",
-            {
-                "package": {
-                    "purl": purl.to_string(),
-                }
-            },
-        )
+        raw_vulnerabilities: list[Any] = []
+        page_token: str | None = None
+
+        while True:
+            response = self._post("/v1/query", _query_payload(purl, page_token=page_token))
+            raw_vulnerabilities.extend(_get_optional_list_field(response, "vulns"))
+
+            page_token = _get_optional_string_field(response, "next_page_token")
+            if page_token is None:
+                break
+
         return OsvQueryResult(
             purl=purl.to_string(),
-            vulnerabilities=_parse_vulnerability_summaries(response.get("vulns", [])),
+            vulnerabilities=_parse_vulnerability_summaries(raw_vulnerabilities),
         )
 
     def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
         """Query OSV for package URLs using the batch endpoint."""
-        payload = {
-            "queries": [
+        if not purls:
+            return []
+
+        vulnerabilities_by_index: list[list[OsvVulnerabilitySummary]] = [[] for _ in purls]
+        active_queries: list[tuple[int, PackageURL, str | None]] = [
+            (index, purl, None) for index, purl in enumerate(purls)
+        ]
+
+        while active_queries:
+            response = self._post(
+                "/v1/querybatch",
                 {
-                    "package": {
-                        "purl": purl.to_string(),
-                    }
-                }
-                for purl in purls
-            ]
-        }
-        response = self._post("/v1/querybatch", payload)
-        raw_results = response.get("results", [])
-        if not isinstance(raw_results, list):
-            msg = "OSV response field 'results' must be a list"
-            raise TypeError(msg)
+                    "queries": [
+                        _query_payload(purl, page_token=page_token)
+                        for _, purl, page_token in active_queries
+                    ]
+                },
+            )
+            page_results = _parse_batch_page_results(response, expected_count=len(active_queries))
+
+            next_queries: list[tuple[int, PackageURL, str | None]] = []
+            for query, page_result in zip(active_queries, page_results, strict=True):
+                original_index, purl, _ = query
+                vulnerabilities_by_index[original_index].extend(page_result.vulnerabilities)
+                if page_result.next_page_token is not None:
+                    next_queries.append((original_index, purl, page_result.next_page_token))
+
+            active_queries = next_queries
 
         return [
-            OsvQueryResult(
-                purl=purl.to_string(),
-                vulnerabilities=_parse_vulnerability_summaries(
-                    _get_optional_list_field(raw_result, "vulns")
-                ),
-            )
-            for purl, raw_result in zip(purls, raw_results, strict=True)
+            OsvQueryResult(purl=purl.to_string(), vulnerabilities=tuple(vulnerabilities))
+            for purl, vulnerabilities in zip(purls, vulnerabilities_by_index, strict=True)
         ]
 
     def get_vulnerability(self, vulnerability_id: str) -> OsvVulnerability:
         """Fetch a full OSV vulnerability by ID."""
         response = self._get(f"/v1/vulns/{quote(vulnerability_id, safe='')}")
-        return OsvVulnerability(id=str(response["id"]), raw=response)
+        vulnerability_id = _get_required_string_field(response, "id")
+        return OsvVulnerability(id=vulnerability_id, raw=response)
 
     def _get(self, path: str) -> dict[str, Any]:
-        client = self._client
-        if client is not None:
-            response = client.get(f"{self._base_url}{path}", timeout=self._timeout)
-            response.raise_for_status()
-            return cast(dict[str, Any], response.json())
-
-        with httpx.Client() as owned_client:
-            response = owned_client.get(
-                f"{self._base_url}{path}",
-                timeout=self._timeout,
-            )
-            response.raise_for_status()
-            return cast(dict[str, Any], response.json())
+        return self._request_json("GET", path)
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request_json("POST", path, payload=payload)
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         client = self._client
         if client is not None:
-            response = client.post(f"{self._base_url}{path}", json=payload, timeout=self._timeout)
-            response.raise_for_status()
-            return cast(dict[str, Any], response.json())
+            return self._send_json_request(client, method, path, payload=payload)
 
         with httpx.Client() as owned_client:
-            response = owned_client.post(
-                f"{self._base_url}{path}",
-                json=payload,
-                timeout=self._timeout,
-            )
+            return self._send_json_request(owned_client, method, path, payload=payload)
+
+    def _send_json_request(
+        self,
+        client: httpx.Client,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        try:
+            url = f"{self._base_url}{path}"
+            if payload is None:
+                response = client.request(method, url, timeout=self._timeout)
+            else:
+                response = client.request(method, url, json=payload, timeout=self._timeout)
             response.raise_for_status()
-            return cast(dict[str, Any], response.json())
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            msg = f"OSV API {method} {path} failed with HTTP {status_code}"
+            raise OsvClientError(msg) from exc
+        except httpx.HTTPError as exc:
+            msg = f"OSV API {method} {path} request failed"
+            raise OsvClientError(msg) from exc
+
+        try:
+            response_body = response.json()
+        except ValueError as exc:
+            msg = "OSV response body must be JSON"
+            raise OsvResponseError(msg) from exc
+
+        if not isinstance(response_body, dict):
+            msg = "OSV response body must be an object"
+            raise OsvResponseError(msg)
+
+        return response_body
+
+
+def _query_payload(purl: PackageURL, *, page_token: str | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "package": {
+            "purl": purl.to_string(),
+        }
+    }
+    if page_token is not None:
+        payload["page_token"] = page_token
+    return payload
+
+
+def _parse_batch_page_results(
+    response: dict[str, Any],
+    *,
+    expected_count: int,
+) -> list[_BatchPageResult]:
+    raw_results = response.get("results", [])
+    if not isinstance(raw_results, list):
+        msg = "OSV response field 'results' must be a list"
+        raise OsvResponseError(msg)
+    if len(raw_results) != expected_count:
+        msg = (
+            "OSV query batch response count must match request count "
+            f"({len(raw_results)} != {expected_count})"
+        )
+        raise OsvResponseError(msg)
+
+    return [
+        _BatchPageResult(
+            vulnerabilities=_parse_vulnerability_summaries(
+                _get_optional_list_field(raw_result, "vulns")
+            ),
+            next_page_token=_get_optional_string_field(raw_result, "next_page_token"),
+        )
+        for raw_result in raw_results
+    ]
 
 
 def _parse_vulnerability_summaries(raw_vulnerabilities: Any) -> tuple[OsvVulnerabilitySummary, ...]:
     if not isinstance(raw_vulnerabilities, list):
         msg = "OSV response field 'vulns' must be a list"
-        raise TypeError(msg)
+        raise OsvResponseError(msg)
 
     parsed: list[OsvVulnerabilitySummary] = []
     for vuln in raw_vulnerabilities:
         if not isinstance(vuln, dict):
             msg = "OSV vulnerability entries must be objects"
-            raise TypeError(msg)
+            raise OsvResponseError(msg)
         parsed.append(
             OsvVulnerabilitySummary(
-                id=str(vuln["id"]),
-                modified=cast(str | None, vuln.get("modified")),
+                id=_get_required_string_field(vuln, "id"),
+                modified=_get_optional_string_field(vuln, "modified"),
             )
         )
     return tuple(parsed)
@@ -156,10 +244,32 @@ def _parse_vulnerability_summaries(raw_vulnerabilities: Any) -> tuple[OsvVulnera
 def _get_optional_list_field(raw_value: Any, field_name: str) -> list[Any]:
     if not isinstance(raw_value, dict):
         msg = "OSV query batch result entries must be objects"
-        raise TypeError(msg)
+        raise OsvResponseError(msg)
 
     field_value = raw_value.get(field_name, [])
     if not isinstance(field_value, list):
         msg = f"OSV response field '{field_name}' must be a list"
-        raise TypeError(msg)
+        raise OsvResponseError(msg)
+    return field_value
+
+
+def _get_required_string_field(raw_value: dict[str, Any], field_name: str) -> str:
+    field_value = raw_value.get(field_name)
+    if not isinstance(field_value, str) or not field_value:
+        msg = f"OSV response field '{field_name}' must be a non-empty string"
+        raise OsvResponseError(msg)
+    return field_value
+
+
+def _get_optional_string_field(raw_value: Any, field_name: str) -> str | None:
+    if not isinstance(raw_value, dict):
+        msg = "OSV response objects must be objects"
+        raise OsvResponseError(msg)
+
+    field_value = raw_value.get(field_name)
+    if field_value is None:
+        return None
+    if not isinstance(field_value, str) or not field_value:
+        msg = f"OSV response field '{field_name}' must be a non-empty string when present"
+        raise OsvResponseError(msg)
     return field_value
