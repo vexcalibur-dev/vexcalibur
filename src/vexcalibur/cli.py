@@ -6,7 +6,7 @@ import typer
 from packageurl import PackageURL
 from rich.console import Console
 
-from vexcalibur.sources.osv import OsvClient
+from vexcalibur.sources.osv import OsvClient, OsvClientError
 
 app = typer.Typer(
     name="vexcalibur",
@@ -30,7 +30,11 @@ def query_osv(
 ) -> None:
     """Query OSV for one or more package URLs and print vulnerability IDs."""
     parsed = _parse_package_urls(purl)
-    results = OsvClient().query_batch(parsed)
+    try:
+        results = OsvClient().query_batch(parsed)
+    except OsvClientError as exc:
+        typer.echo(f"OSV query failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     for result in results:
         if not result.vulnerabilities:

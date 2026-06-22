@@ -10,6 +10,7 @@ import httpx
 from packageurl import PackageURL
 
 DEFAULT_OSV_API_URL = "https://api.osv.dev"
+DEFAULT_MAX_OSV_PAGES = 100
 
 
 @dataclass(frozen=True)
@@ -62,24 +63,37 @@ class OsvClient:
         *,
         base_url: str = DEFAULT_OSV_API_URL,
         timeout: float = 30.0,
+        max_pages: int = DEFAULT_MAX_OSV_PAGES,
         client: httpx.Client | None = None,
     ) -> None:
+        if max_pages < 1:
+            msg = "max_pages must be at least 1"
+            raise ValueError(msg)
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._max_pages = max_pages
         self._client = client
 
     def query(self, purl: PackageURL) -> OsvQueryResult:
         """Query OSV for one package URL."""
         raw_vulnerabilities: list[Any] = []
         page_token: str | None = None
+        seen_page_tokens: set[str] = set()
 
-        while True:
+        for _ in range(self._max_pages):
             response = self._post("/v1/query", _query_payload(purl, page_token=page_token))
             raw_vulnerabilities.extend(_get_optional_list_field(response, "vulns"))
 
             page_token = _get_optional_string_field(response, "next_page_token")
             if page_token is None:
                 break
+            if page_token in seen_page_tokens:
+                msg = "OSV query response repeated next_page_token"
+                raise OsvResponseError(msg)
+            seen_page_tokens.add(page_token)
+        else:
+            msg = f"OSV query exceeded pagination limit of {self._max_pages} pages"
+            raise OsvResponseError(msg)
 
         return OsvQueryResult(
             purl=purl.to_string(),
@@ -95,8 +109,9 @@ class OsvClient:
         active_queries: list[tuple[int, PackageURL, str | None]] = [
             (index, purl, None) for index, purl in enumerate(purls)
         ]
+        seen_page_tokens_by_index: list[set[str]] = [set() for _ in purls]
 
-        while active_queries:
+        for _ in range(self._max_pages):
             response = self._post(
                 "/v1/querybatch",
                 {
@@ -113,9 +128,18 @@ class OsvClient:
                 original_index, purl, _ = query
                 vulnerabilities_by_index[original_index].extend(page_result.vulnerabilities)
                 if page_result.next_page_token is not None:
+                    if page_result.next_page_token in seen_page_tokens_by_index[original_index]:
+                        msg = "OSV query batch response repeated next_page_token"
+                        raise OsvResponseError(msg)
+                    seen_page_tokens_by_index[original_index].add(page_result.next_page_token)
                     next_queries.append((original_index, purl, page_result.next_page_token))
 
             active_queries = next_queries
+            if not active_queries:
+                break
+        else:
+            msg = f"OSV query batch exceeded pagination limit of {self._max_pages} pages"
+            raise OsvResponseError(msg)
 
         return [
             OsvQueryResult(purl=purl.to_string(), vulnerabilities=tuple(vulnerabilities))

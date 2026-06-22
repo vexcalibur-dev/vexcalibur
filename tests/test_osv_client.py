@@ -74,6 +74,50 @@ def test_query_follows_next_page_token() -> None:
     }
 
 
+def test_query_rejects_repeated_next_page_token() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "vulns": [],
+                "next_page_token": "same-token",
+            },
+        )
+    )
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match="repeated next_page_token"):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+def test_query_rejects_excessive_pages() -> None:
+    token_number = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal token_number
+        token_number += 1
+        return httpx.Response(
+            200,
+            json={
+                "vulns": [],
+                "next_page_token": f"page-{token_number}",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        max_pages=2,
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match="exceeded pagination limit"):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
 def test_query_batch_maps_results_to_input_purls() -> None:
     requests: list[httpx.Request] = []
 
@@ -176,6 +220,136 @@ def test_query_batch_follows_next_page_token_for_paginated_results_only() -> Non
             }
         ]
     }
+
+
+def test_query_batch_keeps_paginating_each_active_query_until_complete() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        match len(requests):
+            case 1:
+                response_body = {
+                    "results": [
+                        {
+                            "vulns": [{"id": "GHSA-test-0001"}],
+                            "next_page_token": "first-page-2",
+                        },
+                        {
+                            "vulns": [{"id": "GHSA-test-0003"}],
+                            "next_page_token": "second-page-2",
+                        },
+                    ]
+                }
+            case 2:
+                response_body = {
+                    "results": [
+                        {"vulns": [{"id": "GHSA-test-0002"}]},
+                        {
+                            "vulns": [{"id": "GHSA-test-0004"}],
+                            "next_page_token": "second-page-3",
+                        },
+                    ]
+                }
+            case _:
+                response_body = {
+                    "results": [
+                        {"vulns": [{"id": "GHSA-test-0005"}]},
+                    ]
+                }
+        return httpx.Response(200, json=response_body)
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    results = client.query_batch(
+        [
+            PackageURL.from_string("pkg:pypi/example@1.0.0"),
+            PackageURL.from_string("pkg:npm/example@2.0.0"),
+        ]
+    )
+
+    assert [vuln.id for vuln in results[0].vulnerabilities] == [
+        "GHSA-test-0001",
+        "GHSA-test-0002",
+    ]
+    assert [vuln.id for vuln in results[1].vulnerabilities] == [
+        "GHSA-test-0003",
+        "GHSA-test-0004",
+        "GHSA-test-0005",
+    ]
+    assert json.loads(requests[1].content) == {
+        "queries": [
+            {
+                "package": {
+                    "purl": "pkg:pypi/example@1.0.0",
+                },
+                "page_token": "first-page-2",
+            },
+            {
+                "package": {
+                    "purl": "pkg:npm/example@2.0.0",
+                },
+                "page_token": "second-page-2",
+            },
+        ]
+    }
+    assert json.loads(requests[2].content) == {
+        "queries": [
+            {
+                "package": {
+                    "purl": "pkg:npm/example@2.0.0",
+                },
+                "page_token": "second-page-3",
+            },
+        ]
+    }
+
+
+def test_query_batch_rejects_repeated_next_page_token() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"results": [{"vulns": [], "next_page_token": "same-token"}]},
+        )
+    )
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match="repeated next_page_token"):
+        client.query_batch([PackageURL.from_string("pkg:pypi/example@1.0.0")])
+
+
+def test_query_batch_rejects_excessive_pages() -> None:
+    token_number = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal token_number
+        token_number += 1
+        return httpx.Response(
+            200,
+            json={"results": [{"vulns": [], "next_page_token": f"page-{token_number}"}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        max_pages=2,
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match="exceeded pagination limit"):
+        client.query_batch([PackageURL.from_string("pkg:pypi/example@1.0.0")])
+
+
+def test_client_rejects_invalid_max_pages() -> None:
+    with pytest.raises(ValueError, match="max_pages"):
+        OsvClient(max_pages=0)
 
 
 def test_query_batch_with_no_purls_does_not_call_osv() -> None:
