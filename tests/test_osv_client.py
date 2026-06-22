@@ -229,35 +229,43 @@ def test_query_batch_keeps_paginating_each_active_query_until_complete() -> None
         requests.append(request)
         match len(requests):
             case 1:
-                response_body = {
-                    "results": [
-                        {
-                            "vulns": [{"id": "GHSA-test-0001"}],
-                            "next_page_token": "first-page-2",
-                        },
-                        {
-                            "vulns": [{"id": "GHSA-test-0003"}],
-                            "next_page_token": "second-page-2",
-                        },
-                    ]
-                }
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "vulns": [{"id": "GHSA-test-0001"}],
+                                "next_page_token": "first-page-2",
+                            },
+                            {
+                                "vulns": [{"id": "GHSA-test-0003"}],
+                                "next_page_token": "second-page-2",
+                            },
+                        ]
+                    },
+                )
             case 2:
-                response_body = {
-                    "results": [
-                        {"vulns": [{"id": "GHSA-test-0002"}]},
-                        {
-                            "vulns": [{"id": "GHSA-test-0004"}],
-                            "next_page_token": "second-page-3",
-                        },
-                    ]
-                }
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {"vulns": [{"id": "GHSA-test-0002"}]},
+                            {
+                                "vulns": [{"id": "GHSA-test-0004"}],
+                                "next_page_token": "second-page-3",
+                            },
+                        ]
+                    },
+                )
             case _:
-                response_body = {
-                    "results": [
-                        {"vulns": [{"id": "GHSA-test-0005"}]},
-                    ]
-                }
-        return httpx.Response(200, json=response_body)
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {"vulns": [{"id": "GHSA-test-0005"}]},
+                        ]
+                    },
+                )
 
     transport = httpx.MockTransport(handler)
     client = OsvClient(
