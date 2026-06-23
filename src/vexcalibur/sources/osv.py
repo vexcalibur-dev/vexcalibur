@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from packageurl import PackageURL
@@ -14,6 +14,7 @@ from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
 
 DEFAULT_OSV_API_URL = "https://api.osv.dev"
 DEFAULT_MAX_OSV_PAGES = 100
+PUBLIC_OSV_API_HOST = "api.osv.dev"
 OSV_SOURCE_NAME = "OSV"
 OSV_SOURCE_URL = "https://osv.dev/"
 
@@ -63,6 +64,10 @@ class OsvResponseError(OsvClientError):
     """Raised when OSV returns a response that does not match the expected API shape."""
 
 
+class OsvConfigurationError(OsvClientError, ValueError):
+    """Raised when OSV source configuration is unsafe or invalid."""
+
+
 @dataclass(frozen=True)
 class _BatchPageResult:
     vulnerabilities: tuple[OsvVulnerabilitySummary, ...]
@@ -87,6 +92,11 @@ class OsvClient:
         self._timeout = timeout
         self._max_pages = max_pages
         self._client = client
+
+    @property
+    def base_url(self) -> str:
+        """Base URL used for OSV API requests."""
+        return self._base_url
 
     def query(self, purl: PackageURL, *, version: str | None = None) -> OsvQueryResult:
         """Query OSV for one package URL."""
@@ -232,6 +242,62 @@ class OsvClient:
             raise OsvResponseError(msg)
 
         return response_body
+
+
+def osv_client_for_url(*, osv_base_url: str, allow_public_osv: bool) -> OsvClient:
+    """Build an OSV client, requiring explicit opt-in for public OSV."""
+    ensure_osv_url_allowed(
+        osv_base_url=osv_base_url,
+        allow_public_osv=allow_public_osv,
+    )
+    return OsvClient(base_url=osv_base_url)
+
+
+def ensure_osv_url_allowed(*, osv_base_url: str, allow_public_osv: bool) -> None:
+    """Reject public OSV URLs unless the caller explicitly opted in."""
+    if is_public_osv_url(osv_base_url) and not allow_public_osv:
+        msg = (
+            "public OSV queries require explicit opt-in; pass --allow-public-osv "
+            "or configure a private OSV mirror with --osv-url"
+        )
+        raise OsvConfigurationError(msg)
+
+
+def ensure_osv_client_allowed(
+    *,
+    osv_client: object,
+    osv_base_url: str,
+    allow_public_osv: bool,
+) -> None:
+    """Reject injected public OSV clients unless the caller explicitly opted in."""
+    client_base_url = _client_base_url(osv_client) or osv_base_url
+    ensure_osv_url_allowed(
+        osv_base_url=client_base_url,
+        allow_public_osv=allow_public_osv,
+    )
+
+
+def is_public_osv_url(osv_base_url: str) -> bool:
+    parsed = urlparse(osv_base_url)
+    hostname = parsed.hostname
+    if hostname is None:
+        return False
+    return _normalized_hostname(hostname) == PUBLIC_OSV_API_HOST
+
+
+def _client_base_url(osv_client: object) -> str | None:
+    base_url = getattr(osv_client, "base_url", None)
+    if isinstance(base_url, str):
+        return base_url
+    return None
+
+
+def _normalized_hostname(hostname: str) -> str:
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        ascii_hostname = hostname
+    return ascii_hostname.rstrip(".").lower()
 
 
 def findings_from_osv_results(

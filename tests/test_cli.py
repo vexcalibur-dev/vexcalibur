@@ -1,10 +1,11 @@
 from pathlib import Path
 
+import pytest
 from packageurl import PackageURL
 from typer.testing import CliRunner
 
+import vexcalibur.sources.osv as osv_module
 from vexcalibur import cli
-from vexcalibur import generate as generate_module
 from vexcalibur.compat import vexy
 from vexcalibur.sources.osv import (
     OsvClientError,
@@ -21,8 +22,12 @@ GOLDEN_ROOT = Path(__file__).parent / "golden"
 
 def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
     captured_purls: list[str] = []
+    captured_base_urls: list[str] = []
 
     class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            captured_base_urls.append(base_url)
+
         def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
             captured_purls.extend(purl.to_string() for purl in purls)
             return [
@@ -36,7 +41,7 @@ def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
                 ),
             ]
 
-    monkeypatch.setattr(cli, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -44,16 +49,98 @@ def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
             "query-osv",
             "pkg:pypi/example@1.0.0",
             "pkg:npm/example@2.0.0",
+            "--allow-public-osv",
         ],
     )
 
     assert result.exit_code == 0
+    assert captured_base_urls == ["https://api.osv.dev"]
     assert captured_purls == [
         "pkg:pypi/example@1.0.0",
         "pkg:npm/example@2.0.0",
     ]
     assert "pkg:pypi/example@1.0.0: GHSA-test-0001" in result.output
     assert "pkg:npm/example@2.0.0: no vulnerabilities found" in result.output
+
+
+def test_query_osv_requires_public_osv_opt_in_without_traceback(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("public OSV client should not be constructed")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(cli.app, ["query-osv", "pkg:pypi/example@1.0.0"])
+
+    assert result.exit_code == 1
+    assert "OSV query failed" in result.output
+    assert "--allow-public-osv" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    "osv_url",
+    (
+        "https://api.osv.dev",
+        "https://api.osv.dev/",
+        "https://API.OSV.DEV",
+        "https://api.osv.dev.",
+        "https://api.osv.dev./",
+        "https://api.osv.dev\u3002",
+        "https://api.osv.dev\uff0e",
+        "https://api.osv.dev\uff61",
+    ),
+)
+def test_query_osv_rejects_public_osv_url_variants_without_traceback(
+    monkeypatch,
+    osv_url: str,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("public OSV client should not be constructed")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "query-osv",
+            "pkg:pypi/example@1.0.0",
+            "--osv-url",
+            osv_url,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "OSV query failed" in result.output
+    assert "--allow-public-osv" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_query_osv_allows_private_osv_url_without_public_opt_in(monkeypatch) -> None:
+    captured_base_urls: list[str] = []
+
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            captured_base_urls.append(base_url)
+
+        def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
+            return []
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "query-osv",
+            "pkg:pypi/example@1.0.0",
+            "--osv-url",
+            "https://osv.internal.example",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured_base_urls == ["https://osv.internal.example"]
 
 
 def test_query_osv_requires_at_least_one_purl() -> None:
@@ -74,12 +161,18 @@ def test_query_osv_reports_invalid_purl_without_traceback() -> None:
 
 def test_query_osv_reports_osv_client_errors_without_traceback(monkeypatch) -> None:
     class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
         def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
             raise OsvClientError("OSV API POST /v1/querybatch failed with HTTP 503")
 
-    monkeypatch.setattr(cli, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
 
-    result = runner.invoke(cli.app, ["query-osv", "pkg:pypi/example@1.0.0"])
+    result = runner.invoke(
+        cli.app,
+        ["query-osv", "pkg:pypi/example@1.0.0", "--allow-public-osv"],
+    )
 
     assert result.exit_code == 1
     assert "OSV query failed: OSV API POST /v1/querybatch failed with HTTP 503" in result.output
@@ -88,8 +181,12 @@ def test_query_osv_reports_osv_client_errors_without_traceback(monkeypatch) -> N
 
 def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
     captured_queries: list[OsvPackageQuery] = []
+    captured_base_urls: list[str] = []
 
     class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            captured_base_urls.append(base_url)
+
         def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
             captured_queries.extend(queries)
             return [
@@ -113,7 +210,7 @@ def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
                 ),
             ]
 
-    monkeypatch.setattr(generate_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -122,15 +219,101 @@ def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
             str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
             "--timestamp",
             "2026-06-23T00:00:00Z",
+            "--allow-public-osv",
         ],
     )
 
     assert result.exit_code == 0
+    assert captured_base_urls == ["https://api.osv.dev"]
     assert [(query.purl.to_string(), query.version) for query in captured_queries] == [
         ("pkg:npm/minimist@0.0.8", None),
         ("pkg:pypi/django@1.2", None),
     ]
     assert result.output == (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
+
+
+def test_generate_requires_public_osv_opt_in_without_traceback(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("public OSV client should not be constructed")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["generate", str(FIXTURE_ROOT / "cyclonedx-json-simple.json")],
+    )
+
+    assert result.exit_code == 1
+    assert "VEX generation failed" in result.output
+    assert "--allow-public-osv" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    "osv_url",
+    (
+        "https://api.osv.dev",
+        "https://api.osv.dev/",
+        "https://API.OSV.DEV",
+        "https://api.osv.dev.",
+        "https://api.osv.dev./",
+        "https://api.osv.dev\u3002",
+        "https://api.osv.dev\uff0e",
+        "https://api.osv.dev\uff61",
+    ),
+)
+def test_generate_rejects_public_osv_url_variants_without_traceback(
+    monkeypatch,
+    osv_url: str,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("public OSV client should not be constructed")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--osv-url",
+            osv_url,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--allow-public-osv" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_allows_private_osv_url_without_public_opt_in(monkeypatch) -> None:
+    captured_base_urls: list[str] = []
+
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            captured_base_urls.append(base_url)
+
+        def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
+            return []
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+            "--osv-url",
+            "https://osv.internal.example",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured_base_urls == ["https://osv.internal.example"]
 
 
 def test_generate_writes_output_file(monkeypatch, tmp_path: Path) -> None:
@@ -187,14 +370,21 @@ def test_generate_reports_sbom_errors_without_traceback(tmp_path: Path) -> None:
 
 def test_generate_reports_osv_errors_without_traceback(monkeypatch) -> None:
     class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
         def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
             raise OsvClientError("OSV API POST /v1/querybatch failed with HTTP 503")
 
-    monkeypatch.setattr(generate_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
-        ["generate", str(FIXTURE_ROOT / "cyclonedx-json-simple.json")],
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--allow-public-osv",
+        ],
     )
 
     assert result.exit_code == 1
