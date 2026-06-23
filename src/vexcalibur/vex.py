@@ -26,6 +26,10 @@ from vexcalibur.domain import ComponentIdentity, VexAnalysisState, Vulnerability
 _FindingGroupKey = tuple[str, str, str, VexAnalysisState, str]
 
 
+class VexRenderError(ValueError):
+    """Raised when domain findings cannot be rendered as a valid VEX document."""
+
+
 def render_cyclonedx_vex_json(
     *,
     components: tuple[ComponentIdentity, ...],
@@ -35,6 +39,7 @@ def render_cyclonedx_vex_json(
     """Render deterministic CycloneDX VEX JSON for vulnerability findings."""
     timestamp = _normalize_timestamp(timestamp or datetime.now(tz=timezone.utc))
     findings = _canonical_findings(findings)
+    _validate_finding_refs(components=components, findings=findings)
     bom = Bom(
         serial_number=_serial_number(
             components=components,
@@ -48,17 +53,12 @@ def render_cyclonedx_vex_json(
         ],
         vulnerabilities=[
             _cyclonedx_vulnerability(
-                vulnerability_id=vulnerability_id,
-                source=VulnerabilitySource(name=source_name, url=XsUri(source_url)),
+                group_key=group_key,
+                vulnerability_id=group_key[0],
+                source=VulnerabilitySource(name=group_key[1], url=XsUri(group_key[2])),
                 findings=vulnerability_findings,
             )
-            for (
-                vulnerability_id,
-                source_name,
-                source_url,
-                analysis_state,
-                analysis_detail,
-            ), vulnerability_findings in _group_findings(findings)
+            for group_key, vulnerability_findings in _group_findings(findings)
         ],
     )
 
@@ -79,6 +79,7 @@ def parse_timestamp(value: str) -> datetime:
 
 def _cyclonedx_vulnerability(
     *,
+    group_key: _FindingGroupKey,
     vulnerability_id: str,
     source: VulnerabilitySource,
     findings: tuple[VulnerabilityFinding, ...],
@@ -88,9 +89,7 @@ def _cyclonedx_vulnerability(
     representative = findings[0]
     return Vulnerability(
         bom_ref=_vulnerability_bom_ref(
-            vulnerability_id=vulnerability_id,
-            source_name=representative.source_name,
-            source_url=representative.source_url,
+            group_key=group_key,
         ),
         id=vulnerability_id,
         source=source,
@@ -147,6 +146,23 @@ def _group_findings(
             )
         ].append(finding)
     return tuple((group_key, tuple(grouped[group_key])) for group_key in sorted(grouped))
+
+
+def _validate_finding_refs(
+    *,
+    components: tuple[ComponentIdentity, ...],
+    findings: tuple[VulnerabilityFinding, ...],
+) -> None:
+    component_refs = {component.ref for component in components}
+    missing_refs = sorted(
+        finding.component_ref for finding in findings if finding.component_ref not in component_refs
+    )
+    if missing_refs:
+        msg = (
+            "findings reference components that are not present in the VEX: "
+            f"{', '.join(missing_refs)}"
+        )
+        raise VexRenderError(msg)
 
 
 def _latest_modified_timestamp(findings: tuple[VulnerabilityFinding, ...]) -> datetime | None:
@@ -225,11 +241,20 @@ def _canonical_findings(
 
 def _vulnerability_bom_ref(
     *,
-    vulnerability_id: str,
-    source_name: str,
-    source_url: str,
+    group_key: _FindingGroupKey,
 ) -> str:
-    source_uuid = uuid5(NAMESPACE_URL, f"{source_name}:{source_url}:{vulnerability_id}")
+    canonical = json.dumps(
+        {
+            "analysis_detail": group_key[4],
+            "analysis_state": group_key[3].value,
+            "id": group_key[0],
+            "source_name": group_key[1],
+            "source_url": group_key[2],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    source_uuid = uuid5(NAMESPACE_URL, canonical)
     return f"vulnerability:{source_uuid}"
 
 

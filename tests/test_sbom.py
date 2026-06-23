@@ -45,6 +45,106 @@ def test_load_cyclonedx_json_includes_metadata_component(tmp_path: Path) -> None
     ] == [("component:app", "application", "pkg:pypi/app@1.0.0")]
 
 
+def test_load_cyclonedx_json_includes_nested_metadata_components(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "metadata-nested-component.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "version": 1,
+          "metadata": {
+            "component": {
+              "type": "application",
+              "bom-ref": "component:app",
+              "name": "app",
+              "version": "1.0.0",
+              "purl": "pkg:pypi/app@1.0.0",
+              "components": [
+                {
+                  "type": "library",
+                  "bom-ref": "component:child",
+                  "name": "child",
+                  "version": "2.0.0",
+                  "purl": "pkg:pypi/child@2.0.0"
+                }
+              ]
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    components = load_cyclonedx_json(sbom_path)
+
+    assert [(component.ref, component.purl.to_string()) for component in components] == [
+        ("component:app", "pkg:pypi/app@1.0.0"),
+        ("component:child", "pkg:pypi/child@2.0.0"),
+    ]
+
+
+def test_load_cyclonedx_json_accepts_defaulted_bom_version(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "defaulted-bom-version.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "components": [
+            {
+              "type": "library",
+              "bom-ref": "component:demo",
+              "name": "demo",
+              "version": "1.0.0",
+              "purl": "pkg:pypi/demo@1.0.0"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    components = load_cyclonedx_json(sbom_path)
+
+    assert [(component.ref, component.purl.to_string()) for component in components] == [
+        ("component:demo", "pkg:pypi/demo@1.0.0")
+    ]
+
+
+def test_load_cyclonedx_json_rejects_duplicate_component_refs(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "duplicate-refs.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "version": 1,
+          "components": [
+            {
+              "type": "library",
+              "bom-ref": "component:dup",
+              "name": "django",
+              "version": "1.2",
+              "purl": "pkg:pypi/django@1.2"
+            },
+            {
+              "type": "library",
+              "bom-ref": "component:dup",
+              "name": "flask",
+              "version": "2.0.0",
+              "purl": "pkg:pypi/flask@2.0.0"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match="duplicate component bom-ref"):
+        load_cyclonedx_json(sbom_path)
+
+
 def test_load_cyclonedx_json_rejects_invalid_json(tmp_path: Path) -> None:
     sbom_path = tmp_path / "invalid.json"
     sbom_path.write_text("{not json", encoding="utf-8")
@@ -118,4 +218,21 @@ def test_load_cyclonedx_json_rejects_malformed_metadata(tmp_path: Path) -> None:
     )
 
     with pytest.raises(SbomError, match=r"metadata.*object"):
+        load_cyclonedx_json(sbom_path)
+
+
+def test_load_cyclonedx_json_rejects_non_integer_bom_version(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "bad-version.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "version": "1"
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match=r"version.*integer"):
         load_cyclonedx_json(sbom_path)

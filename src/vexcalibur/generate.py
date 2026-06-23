@@ -23,7 +23,12 @@ def generate_vex_from_sbom(
         raise SbomError(msg)
 
     client = osv_client or OsvClient()
-    results = client.query_batch_packages(osv_queries_for_components(components))
+    queries = osv_queries_for_components(components)
+    if not queries:
+        msg = "no components with versioned package URLs were found"
+        raise SbomError(msg)
+
+    results = client.query_batch_packages(queries)
     return render_cyclonedx_vex_json(
         components=components,
         findings=findings_from_osv_results(components=components, results=results),

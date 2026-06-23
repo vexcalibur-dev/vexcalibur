@@ -4,8 +4,15 @@ from packageurl import PackageURL
 from typer.testing import CliRunner
 
 from vexcalibur import cli
+from vexcalibur import generate as generate_module
 from vexcalibur.compat import vexy
-from vexcalibur.sources.osv import OsvClientError, OsvQueryResult, OsvVulnerabilitySummary
+from vexcalibur.sources.osv import (
+    OsvClientError,
+    OsvPackageQuery,
+    OsvQueryResult,
+    OsvVulnerabilitySummary,
+)
+from vexcalibur.vex import parse_timestamp
 
 runner = CliRunner()
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
@@ -80,13 +87,33 @@ def test_query_osv_reports_osv_client_errors_without_traceback(monkeypatch) -> N
 
 
 def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
-    captured_timestamp: list[str] = []
+    captured_queries: list[OsvPackageQuery] = []
 
-    def fake_generate_vex_from_sbom(**kwargs) -> str:
-        captured_timestamp.append(kwargs["timestamp"].isoformat())
-        return (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
+    class FakeOsvClient:
+        def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
+            captured_queries.extend(queries)
+            return [
+                OsvQueryResult(
+                    purl="pkg:npm/minimist@0.0.8",
+                    vulnerabilities=(
+                        OsvVulnerabilitySummary(
+                            id="GHSA-minimist-0001",
+                            modified=parse_timestamp("2026-01-02T00:00:00Z"),
+                        ),
+                    ),
+                ),
+                OsvQueryResult(
+                    purl="pkg:pypi/django@1.2",
+                    vulnerabilities=(
+                        OsvVulnerabilitySummary(
+                            id="GHSA-django-0001",
+                            modified=parse_timestamp("2026-01-01T00:00:00Z"),
+                        ),
+                    ),
+                ),
+            ]
 
-    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
+    monkeypatch.setattr(generate_module, "OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -99,7 +126,10 @@ def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
-    assert captured_timestamp == ["2026-06-23T00:00:00+00:00"]
+    assert [(query.purl.to_string(), query.version) for query in captured_queries] == [
+        ("pkg:npm/minimist@0.0.8", None),
+        ("pkg:pypi/django@1.2", None),
+    ]
     assert result.output == (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
 
 
@@ -140,6 +170,59 @@ def test_generate_reports_invalid_timestamp_without_traceback() -> None:
 
     assert result.exit_code != 0
     assert "not a valid ISO-8601 timestamp" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_reports_sbom_errors_without_traceback(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "invalid.json"
+    sbom_path.write_text("{not json", encoding="utf-8")
+
+    result = runner.invoke(cli.app, ["generate", str(sbom_path)])
+
+    assert result.exit_code == 1
+    assert "SBOM ingest failed" in result.output
+    assert "not valid JSON" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_reports_osv_errors_without_traceback(monkeypatch) -> None:
+    class FakeOsvClient:
+        def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
+            raise OsvClientError("OSV API POST /v1/querybatch failed with HTTP 503")
+
+    monkeypatch.setattr(generate_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["generate", str(FIXTURE_ROOT / "cyclonedx-json-simple.json")],
+    )
+
+    assert result.exit_code == 1
+    assert "OSV query failed: OSV API POST /v1/querybatch failed with HTTP 503" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_reports_output_write_errors_without_traceback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def fake_generate_vex_from_sbom(**kwargs) -> str:
+        return "{}\n"
+
+    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--output",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Could not write VEX output" in result.output
     assert "Traceback" not in result.output
 
 

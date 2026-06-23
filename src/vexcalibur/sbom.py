@@ -50,6 +50,7 @@ def load_cyclonedx_json(path: Path) -> tuple[ComponentIdentity, ...]:
 
     components = _component_tree(bom)
     identities = tuple(_component_identity(component) for component in components if component.purl)
+    _validate_unique_component_refs(identities)
     return tuple(
         sorted(
             _dedupe_components(identities),
@@ -73,14 +74,15 @@ def _validate_cyclonedx_json_shape(raw_bom: Any, *, path: Path) -> None:
             f"supported: {supported_versions}"
         )
         raise SbomError(msg)
-    if not isinstance(raw_bom.get("version"), int):
-        msg = f"SBOM {path} must have an integer version"
+    if "version" in raw_bom and not isinstance(raw_bom["version"], int):
+        msg = f"SBOM {path} field 'version' must be an integer when present"
         raise SbomError(msg)
     metadata = raw_bom.get("metadata", {})
     if not isinstance(metadata, dict):
         msg = f"SBOM {path} field 'metadata' must be an object when present"
         raise SbomError(msg)
-    _validate_raw_component(metadata.get("component"), path=path)
+    if metadata.get("component") is not None:
+        _validate_raw_component_tree(metadata["component"], path=path, depth=0)
     components = raw_bom.get("components", [])
     if not isinstance(components, list):
         msg = f"SBOM {path} field 'components' must be a list when present"
@@ -122,7 +124,7 @@ def _validate_raw_component(component: Any, *, path: Path) -> None:
 def _component_tree(bom: Bom) -> tuple[Component, ...]:
     collected: list[Component] = []
     if bom.metadata and bom.metadata.component:
-        collected.append(bom.metadata.component)
+        collected.extend(_iter_components((bom.metadata.component,)))
     collected.extend(_iter_components(bom.components))
     if len(collected) > MAX_COMPONENTS:
         msg = f"SBOM contains more than {MAX_COMPONENTS} components"
@@ -166,6 +168,19 @@ def _component_identity(component: Component) -> ComponentIdentity:
         purl=component.purl,
         type=component.type.value,
     )
+
+
+def _validate_unique_component_refs(components: tuple[ComponentIdentity, ...]) -> None:
+    seen_refs: set[str] = set()
+    duplicate_refs: set[str] = set()
+    for component in components:
+        if component.ref in seen_refs:
+            duplicate_refs.add(component.ref)
+        seen_refs.add(component.ref)
+    if duplicate_refs:
+        duplicate_list = ", ".join(sorted(duplicate_refs))
+        msg = f"SBOM contains duplicate component bom-ref values: {duplicate_list}"
+        raise SbomError(msg)
 
 
 def _dedupe_components(components: tuple[ComponentIdentity, ...]) -> tuple[ComponentIdentity, ...]:

@@ -76,11 +76,13 @@ Expected result: the command prints the submitted package URL and any OSV vulner
 
 Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM:
 
+`generate` sends package URLs and component versions from the SBOM to the public OSV API at `https://api.osv.dev`. Do not use it with private SBOMs or sensitive package inventories until Vexcalibur has an offline or private OSV mirror mode.
+
 ```bash
 poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --output /tmp/vexcalibur-vex.json
 ```
 
-For reproducible CI output, provide a timestamp:
+For a deterministic document timestamp, provide `--timestamp`. Live OSV data can change over time, so identical inputs can still produce different vulnerability findings unless OSV responses are controlled.
 
 ```bash
 poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --timestamp 2026-06-23T00:00:00Z --output /tmp/vexcalibur-vex.json
@@ -91,14 +93,20 @@ from pathlib import Path
 vex = json.loads(Path("/tmp/vexcalibur-vex.json").read_text())
 assert vex["bomFormat"] == "CycloneDX"
 assert vex["specVersion"] == "1.6"
-assert vex["vulnerabilities"][0]["analysis"]["state"] == "in_triage"
-print(f"validated {len(vex['vulnerabilities'])} generated VEX findings")
+assert vex["metadata"]["timestamp"] == "2026-06-23T00:00:00+00:00"
+print(f"validated {len(vex.get('vulnerabilities', []))} generated VEX findings")
 PY
 ```
 
 The initial generator queries OSV for versioned components with package URLs, emits CycloneDX vulnerability entries for OSV matches, and marks findings `in_triage` by default.
 
-By default, `generate` sends package URL inventory from the SBOM to the public OSV API at `https://api.osv.dev`. Do not use it with private SBOMs or sensitive package inventories until Vexcalibur has an offline or private OSV mirror mode.
+Supported input for `generate`:
+
+- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is not implemented yet.
+- SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
+- Components with package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
+- Unique component `bom-ref` values. Duplicate refs are rejected because VEX `affects` entries refer to components by ref.
+- A non-zero query set. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
 
 ## Project Links
 

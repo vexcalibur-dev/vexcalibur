@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from vexcalibur.generate import generate_vex_from_sbom
+from vexcalibur.sbom import SbomError
 from vexcalibur.sources.osv import OsvPackageQuery, OsvQueryResult, OsvVulnerabilitySummary
 from vexcalibur.vex import parse_timestamp
 
@@ -88,3 +91,36 @@ def test_generate_vex_from_sbom_uses_component_version_for_unversioned_purl(
     assert [(query.purl.to_string(), query.version) for query in client.queries] == [
         ("pkg:pypi/django", "1.2")
     ]
+
+
+def test_generate_vex_from_sbom_rejects_sboms_without_versioned_purls(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "sbom.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "version": 1,
+          "components": [
+            {
+              "type": "library",
+              "name": "django",
+              "purl": "pkg:pypi/django"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    client = FakeOsvClient()
+
+    with pytest.raises(SbomError, match="versioned package URLs"):
+        generate_vex_from_sbom(
+            input_file=sbom_path,
+            timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+            osv_client=client,
+        )
+
+    assert client.queries == []

@@ -42,7 +42,7 @@
         "detail": "Detected by OSV; manual exploitability analysis required.",
         "state": "in_triage"
       },
-      "bom-ref": "vulnerability:32186f8a-4316-53ea-a493-11e44ff147e3",
+      "bom-ref": "vulnerability:a36228a0-0303-58bd-9ee1-774f16103899",
       "id": "GHSA-django-0001",
       "references": [
         {
@@ -69,7 +69,7 @@
         "detail": "Detected by OSV; manual exploitability analysis required.",
         "state": "in_triage"
       },
-      "bom-ref": "vulnerability:3f0891f7-ff5c-5da3-8070-04fed2978449",
+      "bom-ref": "vulnerability:5e6589d8-8d7b-5c85-8458-fafcd0e70620",
       "id": "GHSA-minimist-0001",
       "references": [
         {
