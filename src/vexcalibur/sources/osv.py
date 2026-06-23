@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 from packageurl import PackageURL
 
+from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+
 DEFAULT_OSV_API_URL = "https://api.osv.dev"
 DEFAULT_MAX_OSV_PAGES = 100
+OSV_SOURCE_NAME = "OSV"
+OSV_SOURCE_URL = "https://osv.dev/"
 
 
 @dataclass(frozen=True)
@@ -18,7 +23,7 @@ class OsvVulnerabilitySummary:
     """Minimal OSV vulnerability data returned by query endpoints."""
 
     id: str
-    modified: str | None = None
+    modified: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,15 @@ class OsvQueryResult:
 
     purl: str
     vulnerabilities: tuple[OsvVulnerabilitySummary, ...]
+    version: str | None = None
+
+
+@dataclass(frozen=True)
+class OsvPackageQuery:
+    """OSV package query with optional top-level version fallback."""
+
+    purl: PackageURL
+    version: str | None = None
 
 
 class OsvClientError(RuntimeError):
@@ -74,14 +88,15 @@ class OsvClient:
         self._max_pages = max_pages
         self._client = client
 
-    def query(self, purl: PackageURL) -> OsvQueryResult:
+    def query(self, purl: PackageURL, *, version: str | None = None) -> OsvQueryResult:
         """Query OSV for one package URL."""
+        query = OsvPackageQuery(purl=purl, version=version)
         raw_vulnerabilities: list[Any] = []
         page_token: str | None = None
         seen_page_tokens: set[str] = set()
 
         for _ in range(self._max_pages):
-            response = self._post("/v1/query", _query_payload(purl, page_token=page_token))
+            response = self._post("/v1/query", _query_payload(query, page_token=page_token))
             raw_vulnerabilities.extend(_get_optional_list_field(response, "vulns"))
 
             page_token = _get_optional_string_field(response, "next_page_token")
@@ -98,41 +113,48 @@ class OsvClient:
         return OsvQueryResult(
             purl=purl.to_string(),
             vulnerabilities=_parse_vulnerability_summaries(raw_vulnerabilities),
+            version=version,
         )
 
     def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
         """Query OSV for package URLs using the batch endpoint."""
-        if not purls:
+        return self.query_batch_packages([OsvPackageQuery(purl=purl) for purl in purls])
+
+    def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
+        """Query OSV for packages using the batch endpoint."""
+        if not queries:
             return []
 
-        vulnerabilities_by_index: list[list[OsvVulnerabilitySummary]] = [[] for _ in purls]
-        active_queries: list[tuple[int, PackageURL, str | None]] = [
-            (index, purl, None) for index, purl in enumerate(purls)
+        vulnerabilities_by_index: list[list[OsvVulnerabilitySummary]] = [[] for _ in queries]
+        active_queries: list[tuple[int, OsvPackageQuery, str | None]] = [
+            (index, query, None) for index, query in enumerate(queries)
         ]
-        seen_page_tokens_by_index: list[set[str]] = [set() for _ in purls]
+        seen_page_tokens_by_index: list[set[str]] = [set() for _ in queries]
 
         for _ in range(self._max_pages):
             response = self._post(
                 "/v1/querybatch",
                 {
                     "queries": [
-                        _query_payload(purl, page_token=page_token)
-                        for _, purl, page_token in active_queries
+                        _query_payload(query, page_token=page_token)
+                        for _, query, page_token in active_queries
                     ]
                 },
             )
             page_results = _parse_batch_page_results(response, expected_count=len(active_queries))
 
-            next_queries: list[tuple[int, PackageURL, str | None]] = []
+            next_queries: list[tuple[int, OsvPackageQuery, str | None]] = []
             for query, page_result in zip(active_queries, page_results, strict=True):
-                original_index, purl, _ = query
+                original_index, package_query, _ = query
                 vulnerabilities_by_index[original_index].extend(page_result.vulnerabilities)
                 if page_result.next_page_token is not None:
                     if page_result.next_page_token in seen_page_tokens_by_index[original_index]:
                         msg = "OSV query batch response repeated next_page_token"
                         raise OsvResponseError(msg)
                     seen_page_tokens_by_index[original_index].add(page_result.next_page_token)
-                    next_queries.append((original_index, purl, page_result.next_page_token))
+                    next_queries.append(
+                        (original_index, package_query, page_result.next_page_token)
+                    )
 
             active_queries = next_queries
             if not active_queries:
@@ -142,8 +164,12 @@ class OsvClient:
             raise OsvResponseError(msg)
 
         return [
-            OsvQueryResult(purl=purl.to_string(), vulnerabilities=tuple(vulnerabilities))
-            for purl, vulnerabilities in zip(purls, vulnerabilities_by_index, strict=True)
+            OsvQueryResult(
+                purl=query.purl.to_string(),
+                vulnerabilities=tuple(vulnerabilities),
+                version=query.version,
+            )
+            for query, vulnerabilities in zip(queries, vulnerabilities_by_index, strict=True)
         ]
 
     def get_vulnerability(self, vulnerability_id: str) -> OsvVulnerability:
@@ -208,12 +234,72 @@ class OsvClient:
         return response_body
 
 
-def _query_payload(purl: PackageURL, *, page_token: str | None = None) -> dict[str, Any]:
+def findings_from_osv_results(
+    *,
+    components: tuple[ComponentIdentity, ...],
+    results: list[OsvQueryResult],
+) -> tuple[VulnerabilityFinding, ...]:
+    """Map OSV query results onto affected SBOM component references."""
+    components_by_query: dict[tuple[str, str | None], list[ComponentIdentity]] = {}
+    for component in components:
+        key = (component.purl.to_string(), _osv_query_version(component))
+        components_by_query.setdefault(key, []).append(component)
+
+    findings: list[VulnerabilityFinding] = []
+    for result in results:
+        for vulnerability in result.vulnerabilities:
+            for component in components_by_query.get((result.purl, result.version), []):
+                findings.append(
+                    VulnerabilityFinding(
+                        id=vulnerability.id,
+                        source_name=OSV_SOURCE_NAME,
+                        source_url=OSV_SOURCE_URL,
+                        component_ref=component.ref,
+                        purl=result.purl,
+                        modified=vulnerability.modified,
+                    )
+                )
+
+    return tuple(
+        sorted(
+            findings,
+            key=lambda finding: (
+                finding.id,
+                finding.source_name,
+                finding.component_ref,
+                finding.purl,
+            ),
+        )
+    )
+
+
+def osv_queries_for_components(
+    components: tuple[ComponentIdentity, ...],
+) -> list[OsvPackageQuery]:
+    """Build precise OSV package queries for SBOM components."""
+    queries_by_key: dict[tuple[str, str | None], OsvPackageQuery] = {}
+    for component in components:
+        if component.purl.version is None and component.version is None:
+            continue
+        query = OsvPackageQuery(purl=component.purl, version=_osv_query_version(component))
+        queries_by_key[(query.purl.to_string(), query.version)] = query
+    return [queries_by_key[key] for key in sorted(queries_by_key)]
+
+
+def _osv_query_version(component: ComponentIdentity) -> str | None:
+    if component.purl.version is not None:
+        return None
+    return component.version
+
+
+def _query_payload(query: OsvPackageQuery, *, page_token: str | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "package": {
-            "purl": purl.to_string(),
+            "purl": query.purl.to_string(),
         }
     }
+    if query.version is not None:
+        payload["version"] = query.version
     if page_token is not None:
         payload["page_token"] = page_token
     return payload
@@ -259,7 +345,7 @@ def _parse_vulnerability_summaries(raw_vulnerabilities: Any) -> tuple[OsvVulnera
         parsed.append(
             OsvVulnerabilitySummary(
                 id=_get_required_string_field(vuln, "id"),
-                modified=_get_optional_string_field(vuln, "modified"),
+                modified=_get_optional_timestamp_field(vuln, "modified"),
             )
         )
     return tuple(parsed)
@@ -297,3 +383,17 @@ def _get_optional_string_field(raw_value: Any, field_name: str) -> str | None:
         msg = f"OSV response field '{field_name}' must be a non-empty string when present"
         raise OsvResponseError(msg)
     return field_value
+
+
+def _get_optional_timestamp_field(raw_value: Any, field_name: str) -> datetime | None:
+    field_value = _get_optional_string_field(raw_value, field_name)
+    if field_value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(field_value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        msg = f"OSV response field '{field_name}' must be an ISO-8601 timestamp"
+        raise OsvResponseError(msg) from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

@@ -3,8 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
 
 from packageurl import PackageURL
+
+DEFAULT_ANALYSIS_DETAIL = "Detected by OSV; manual exploitability analysis required."
+
+
+class VexAnalysisState(str, Enum):
+    """CycloneDX VEX analysis states supported by the domain model."""
+
+    RESOLVED = "resolved"
+    EXPLOITABLE = "exploitable"
+    IN_TRIAGE = "in_triage"
+    FALSE_POSITIVE = "false_positive"
+    NOT_AFFECTED = "not_affected"
 
 
 @dataclass(frozen=True)
@@ -15,6 +29,7 @@ class ComponentIdentity:
     name: str
     version: str | None
     purl: PackageURL
+    type: str = "library"
 
 
 @dataclass(frozen=True)
@@ -26,4 +41,6 @@ class VulnerabilityFinding:
     source_url: str
     component_ref: str
     purl: str
-    modified: str | None = None
+    modified: datetime | None = None
+    analysis_state: VexAnalysisState = VexAnalysisState.IN_TRIAGE
+    analysis_detail: str = DEFAULT_ANALYSIS_DETAIL

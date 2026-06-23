@@ -4,7 +4,13 @@ import httpx
 import pytest
 from packageurl import PackageURL
 
-from vexcalibur.sources.osv import OsvClient, OsvClientError, OsvResponseError
+from vexcalibur.sources.osv import (
+    OsvClient,
+    OsvClientError,
+    OsvPackageQuery,
+    OsvResponseError,
+)
+from vexcalibur.vex import parse_timestamp
 
 
 def test_query_sends_purl_to_osv_query_endpoint() -> None:
@@ -32,6 +38,30 @@ def test_query_sends_purl_to_osv_query_endpoint() -> None:
         "package": {
             "purl": "pkg:maven/org.example/demo@1.0.0",
         }
+    }
+
+
+def test_query_sends_top_level_version_when_supplied() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"vulns": []})
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    result = client.query(PackageURL.from_string("pkg:pypi/django"), version="1.2")
+
+    assert result.version == "1.2"
+    assert json.loads(requests[0].content) == {
+        "package": {
+            "purl": "pkg:pypi/django",
+        },
+        "version": "1.2",
     }
 
 
@@ -151,6 +181,7 @@ def test_query_batch_maps_results_to_input_purls() -> None:
         "pkg:npm/example@2.0.0",
     ]
     assert [vuln.id for vuln in results[0].vulnerabilities] == ["GHSA-test-0001"]
+    assert results[0].vulnerabilities[0].modified == parse_timestamp("2026-01-01T00:00:00Z")
     assert results[1].vulnerabilities == ()
     assert requests[0].url == "https://osv.example.test/v1/querybatch"
     assert json.loads(requests[0].content) == {
@@ -165,6 +196,36 @@ def test_query_batch_maps_results_to_input_purls() -> None:
                     "purl": "pkg:npm/example@2.0.0",
                 }
             },
+        ]
+    }
+
+
+def test_query_batch_packages_sends_top_level_version_when_supplied() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"results": [{}]})
+
+    transport = httpx.MockTransport(handler)
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    results = client.query_batch_packages(
+        [OsvPackageQuery(purl=PackageURL.from_string("pkg:pypi/django"), version="1.2")]
+    )
+
+    assert [(result.purl, result.version) for result in results] == [("pkg:pypi/django", "1.2")]
+    assert json.loads(requests[0].content) == {
+        "queries": [
+            {
+                "package": {
+                    "purl": "pkg:pypi/django",
+                },
+                "version": "1.2",
+            }
         ]
     }
 
@@ -504,6 +565,22 @@ def test_query_rejects_non_string_modified_timestamp() -> None:
     )
 
     with pytest.raises(OsvResponseError, match=r"modified.*non-empty string"):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+def test_query_rejects_invalid_modified_timestamp() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"vulns": [{"id": "GHSA-test-0001", "modified": "not-a-timestamp"}]},
+        )
+    )
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match=r"modified.*ISO-8601 timestamp"):
         client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
 
 

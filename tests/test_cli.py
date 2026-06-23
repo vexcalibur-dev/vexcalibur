@@ -80,33 +80,13 @@ def test_query_osv_reports_osv_client_errors_without_traceback(monkeypatch) -> N
 
 
 def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
-    captured_purls: list[str] = []
+    captured_timestamp: list[str] = []
 
-    class FakeOsvClient:
-        def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
-            captured_purls.extend(purl.to_string() for purl in purls)
-            return [
-                OsvQueryResult(
-                    purl="pkg:npm/minimist@0.0.8",
-                    vulnerabilities=(
-                        OsvVulnerabilitySummary(
-                            id="GHSA-minimist-0001",
-                            modified="2026-01-02T00:00:00Z",
-                        ),
-                    ),
-                ),
-                OsvQueryResult(
-                    purl="pkg:pypi/django@1.2",
-                    vulnerabilities=(
-                        OsvVulnerabilitySummary(
-                            id="GHSA-django-0001",
-                            modified="2026-01-01T00:00:00Z",
-                        ),
-                    ),
-                ),
-            ]
+    def fake_generate_vex_from_sbom(**kwargs) -> str:
+        captured_timestamp.append(kwargs["timestamp"].isoformat())
+        return (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
 
-    monkeypatch.setattr(cli, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
 
     result = runner.invoke(
         cli.app,
@@ -119,19 +99,15 @@ def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
-    assert captured_purls == [
-        "pkg:npm/minimist@0.0.8",
-        "pkg:pypi/django@1.2",
-    ]
+    assert captured_timestamp == ["2026-06-23T00:00:00+00:00"]
     assert result.output == (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
 
 
 def test_generate_writes_output_file(monkeypatch, tmp_path: Path) -> None:
-    class FakeOsvClient:
-        def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
-            return []
+    def fake_generate_vex_from_sbom(**kwargs) -> str:
+        return "{}\n"
 
-    monkeypatch.setattr(cli, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
     output_path = tmp_path / "vex.json"
 
     result = runner.invoke(
@@ -148,7 +124,7 @@ def test_generate_writes_output_file(monkeypatch, tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert result.output == ""
-    assert '"vulnerabilities"' not in output_path.read_text(encoding="utf-8")
+    assert output_path.read_text(encoding="utf-8") == "{}\n"
 
 
 def test_generate_reports_invalid_timestamp_without_traceback() -> None:
