@@ -6,7 +6,7 @@ import typer
 from packageurl import PackageURL
 from rich.console import Console
 
-from vexcalibur.sources.osv import OsvClient
+from vexcalibur.sources.osv import OsvClient, OsvClientError
 
 app = typer.Typer(
     name="vexcalibur",
@@ -29,8 +29,12 @@ def query_osv(
     ],
 ) -> None:
     """Query OSV for one or more package URLs and print vulnerability IDs."""
-    parsed = [PackageURL.from_string(value) for value in purl]
-    results = OsvClient().query_batch(parsed)
+    parsed = _parse_package_urls(purl)
+    try:
+        results = OsvClient().query_batch(parsed)
+    except OsvClientError as exc:
+        typer.echo(f"OSV query failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     for result in results:
         if not result.vulnerabilities:
@@ -39,6 +43,17 @@ def query_osv(
 
         ids = ", ".join(vuln.id for vuln in result.vulnerabilities)
         console.print(f"{result.purl}: {ids}")
+
+
+def _parse_package_urls(values: list[str]) -> list[PackageURL]:
+    parsed: list[PackageURL] = []
+    for value in values:
+        try:
+            parsed.append(PackageURL.from_string(value))
+        except ValueError as exc:
+            msg = f"{value!r} is not a valid package URL: {exc}"
+            raise typer.BadParameter(msg) from exc
+    return parsed
 
 
 if __name__ == "__main__":

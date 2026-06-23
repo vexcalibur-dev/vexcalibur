@@ -3,7 +3,7 @@ from typer.testing import CliRunner
 
 from vexcalibur import cli
 from vexcalibur.compat import vexy
-from vexcalibur.sources.osv import OsvQueryResult, OsvVulnerabilitySummary
+from vexcalibur.sources.osv import OsvClientError, OsvQueryResult, OsvVulnerabilitySummary
 
 runner = CliRunner()
 
@@ -50,6 +50,29 @@ def test_query_osv_requires_at_least_one_purl() -> None:
 
     assert result.exit_code != 0
     assert "Missing argument" in result.output
+
+
+def test_query_osv_reports_invalid_purl_without_traceback() -> None:
+    result = runner.invoke(cli.app, ["query-osv", "not a purl"])
+
+    assert result.exit_code != 0
+    assert "not a purl" in result.output
+    assert "not a valid package URL" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_query_osv_reports_osv_client_errors_without_traceback(monkeypatch) -> None:
+    class FakeOsvClient:
+        def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
+            raise OsvClientError("OSV API POST /v1/querybatch failed with HTTP 503")
+
+    monkeypatch.setattr(cli, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(cli.app, ["query-osv", "pkg:pypi/example@1.0.0"])
+
+    assert result.exit_code == 1
+    assert "OSV query failed: OSV API POST /v1/querybatch failed with HTTP 503" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_vexcalibur_root_shows_help_without_args() -> None:
