@@ -1,0 +1,90 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "component:django",
+      "name": "django",
+      "purl": "pkg:pypi/django@1.2",
+      "type": "library",
+      "version": "1.2"
+    },
+    {
+      "bom-ref": "pkg:npm/minimist@0.0.8",
+      "name": "minimist",
+      "purl": "pkg:npm/minimist@0.0.8",
+      "type": "library",
+      "version": "0.0.8"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "component:django"
+    },
+    {
+      "ref": "pkg:npm/minimist@0.0.8"
+    }
+  ],
+  "metadata": {
+    "timestamp": "2026-06-23T00:00:00+00:00"
+  },
+  "serialNumber": "urn:uuid:394e0226-8fc3-5032-bfab-808fe4dce7d5",
+  "specVersion": "1.6",
+  "version": 1,
+  "vulnerabilities": [
+    {
+      "affects": [
+        {
+          "ref": "component:django"
+        }
+      ],
+      "analysis": {
+        "detail": "Detected by OSV; manual exploitability analysis required.",
+        "state": "in_triage"
+      },
+      "bom-ref": "vulnerability:a36228a0-0303-58bd-9ee1-774f16103899",
+      "id": "GHSA-django-0001",
+      "references": [
+        {
+          "id": "GHSA-django-0001",
+          "source": {
+            "name": "OSV",
+            "url": "https://osv.dev/"
+          }
+        }
+      ],
+      "source": {
+        "name": "OSV",
+        "url": "https://osv.dev/"
+      },
+      "updated": "2026-01-01T00:00:00+00:00"
+    },
+    {
+      "affects": [
+        {
+          "ref": "pkg:npm/minimist@0.0.8"
+        }
+      ],
+      "analysis": {
+        "detail": "Detected by OSV; manual exploitability analysis required.",
+        "state": "in_triage"
+      },
+      "bom-ref": "vulnerability:5e6589d8-8d7b-5c85-8458-fafcd0e70620",
+      "id": "GHSA-minimist-0001",
+      "references": [
+        {
+          "id": "GHSA-minimist-0001",
+          "source": {
+            "name": "OSV",
+            "url": "https://osv.dev/"
+          }
+        }
+      ],
+      "source": {
+        "name": "OSV",
+        "url": "https://osv.dev/"
+      },
+      "updated": "2026-01-02T00:00:00+00:00"
+    }
+  ]
+}

@@ -1,12 +1,16 @@
 """Command-line entrypoint for Vexcalibur."""
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
 from packageurl import PackageURL
 from rich.console import Console
 
+from vexcalibur.generate import generate_vex_from_sbom
+from vexcalibur.sbom import SbomError
 from vexcalibur.sources.osv import OsvClient, OsvClientError
+from vexcalibur.vex import parse_timestamp
 
 app = typer.Typer(
     name="vexcalibur",
@@ -43,6 +47,59 @@ def query_osv(
 
         ids = ", ".join(vuln.id for vuln in result.vulnerabilities)
         console.print(f"{result.purl}: {ids}")
+
+
+@app.command("generate")
+def generate(
+    input_file: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="CycloneDX JSON SBOM to convert into VEX.",
+        ),
+    ],
+    output_file: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Write VEX JSON to this file instead of stdout."),
+    ] = None,
+    timestamp: Annotated[
+        str | None,
+        typer.Option("--timestamp", help="ISO-8601 timestamp to use for deterministic output."),
+    ] = None,
+) -> None:
+    """Generate CycloneDX VEX JSON from a CycloneDX SBOM and OSV findings."""
+    parsed_timestamp = None
+    if timestamp is not None:
+        try:
+            parsed_timestamp = parse_timestamp(timestamp)
+        except ValueError as exc:
+            msg = f"{timestamp!r} is not a valid ISO-8601 timestamp"
+            raise typer.BadParameter(msg) from exc
+
+    try:
+        vex_json = generate_vex_from_sbom(
+            input_file=input_file,
+            timestamp=parsed_timestamp,
+        )
+    except SbomError as exc:
+        typer.echo(f"SBOM ingest failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except OsvClientError as exc:
+        typer.echo(f"OSV query failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if output_file is None:
+        typer.echo(vex_json, nl=False)
+        return
+
+    try:
+        output_file.write_text(vex_json, encoding="utf-8")
+    except OSError as exc:
+        typer.echo(f"Could not write VEX output {output_file}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 def _parse_package_urls(values: list[str]) -> list[PackageURL]:
