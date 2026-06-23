@@ -59,7 +59,14 @@ def test_render_cyclonedx_vex_json_supports_all_cli_analysis_states() -> None:
         purl="pkg:pypi/test@1.0.0",
     )
 
-    for state in VexAnalysisState:
+    states = (
+        VexAnalysisState.RESOLVED,
+        VexAnalysisState.EXPLOITABLE,
+        VexAnalysisState.IN_TRIAGE,
+        VexAnalysisState.FALSE_POSITIVE,
+        VexAnalysisState.NOT_AFFECTED,
+    )
+    for state in states:
         generated = render_cyclonedx_vex_json(
             findings=(finding,),
             analysis_state=state,
