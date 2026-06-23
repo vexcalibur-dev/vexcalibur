@@ -35,19 +35,13 @@ Install dependencies:
 poetry install
 ```
 
-Run tests:
-
-```bash
-poetry run pytest
-```
-
-Run only offline tests:
+Run offline tests:
 
 ```bash
 poetry run pytest -m "not live"
 ```
 
-Run the live OSV compatibility smoke test:
+Run the live OSV compatibility smoke test only when you intentionally want to call the public OSV service:
 
 ```bash
 poetry run pytest -m live -q
