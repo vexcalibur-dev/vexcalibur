@@ -69,23 +69,31 @@ poetry run vexcalibur --help
 Query OSV for a package URL:
 
 ```bash
-poetry run vexcalibur query-osv pkg:pypi/django@1.2
+poetry run vexcalibur query-osv pkg:pypi/django@1.2 --allow-public-osv
 ```
 
 Expected result: the command prints the submitted package URL and any OSV vulnerability IDs returned by `https://api.osv.dev`.
 
+Like `generate`, `query-osv` requires `--allow-public-osv` for the public OSV API and accepts `--osv-url` for private mirrors.
+
 Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM:
 
-`generate` sends package URLs and component versions from the SBOM to the public OSV API at `https://api.osv.dev`. Do not use it with private SBOMs or sensitive package inventories until Vexcalibur has an offline or private OSV mirror mode.
+`generate` refuses to send package URLs or component versions to the public OSV API unless you pass `--allow-public-osv`. Do not use that flag with private SBOMs or sensitive package inventories. Use `--osv-url` for a private OSV mirror. Library callers that inject an OSV client must also provide the matching `osv_base_url`; the same public-OSV opt-in check is enforced before the client is used.
 
 ```bash
-poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --output /tmp/vexcalibur-vex.json
+poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --output /tmp/vexcalibur-vex.json
+```
+
+Illustrative private-mirror command, replacing the URL with your internal OSV endpoint:
+
+```bash
+poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --osv-url https://osv.internal.example --output /tmp/vexcalibur-vex.json
 ```
 
 For a deterministic document timestamp, provide `--timestamp`. Live OSV data can change over time, so identical inputs can still produce different vulnerability findings unless OSV responses are controlled.
 
 ```bash
-poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --timestamp 2026-06-23T00:00:00Z --output /tmp/vexcalibur-vex.json
+poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --timestamp 2026-06-23T00:00:00Z --output /tmp/vexcalibur-vex.json
 python - <<'PY'
 import json
 from pathlib import Path
@@ -107,6 +115,7 @@ Supported input for `generate`:
 - Components with package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
 - Unique component `bom-ref` values. Duplicate refs are rejected because VEX `affects` entries refer to components by ref.
 - A non-zero query set. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
+- Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`.
 
 ## Project Links
 

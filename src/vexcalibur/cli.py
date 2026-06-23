@@ -9,7 +9,12 @@ from rich.console import Console
 
 from vexcalibur.generate import generate_vex_from_sbom
 from vexcalibur.sbom import SbomError
-from vexcalibur.sources.osv import OsvClient, OsvClientError
+from vexcalibur.sources.osv import (
+    DEFAULT_OSV_API_URL,
+    OsvClientError,
+    OsvConfigurationError,
+    osv_client_for_url,
+)
 from vexcalibur.vex import parse_timestamp
 
 app = typer.Typer(
@@ -31,11 +36,28 @@ def query_osv(
         list[str],
         typer.Argument(help="One or more package URLs to query with OSV."),
     ],
+    osv_url: Annotated[
+        str,
+        typer.Option("--osv-url", help="OSV API base URL. Use this for private OSV mirrors."),
+    ] = DEFAULT_OSV_API_URL,
+    allow_public_osv: Annotated[
+        bool,
+        typer.Option(
+            "--allow-public-osv",
+            help="Allow sending package URLs to the public OSV API.",
+        ),
+    ] = False,
 ) -> None:
     """Query OSV for one or more package URLs and print vulnerability IDs."""
     parsed = _parse_package_urls(purl)
     try:
-        results = OsvClient().query_batch(parsed)
+        results = osv_client_for_url(
+            osv_base_url=osv_url,
+            allow_public_osv=allow_public_osv,
+        ).query_batch(parsed)
+    except OsvConfigurationError as exc:
+        typer.echo(f"OSV query failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except OsvClientError as exc:
         typer.echo(f"OSV query failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -69,6 +91,17 @@ def generate(
         str | None,
         typer.Option("--timestamp", help="ISO-8601 timestamp to use for deterministic output."),
     ] = None,
+    osv_url: Annotated[
+        str,
+        typer.Option("--osv-url", help="OSV API base URL. Use this for private OSV mirrors."),
+    ] = DEFAULT_OSV_API_URL,
+    allow_public_osv: Annotated[
+        bool,
+        typer.Option(
+            "--allow-public-osv",
+            help="Allow sending SBOM package URLs and versions to the public OSV API.",
+        ),
+    ] = False,
 ) -> None:
     """Generate CycloneDX VEX JSON from a CycloneDX SBOM and OSV findings."""
     parsed_timestamp = None
@@ -83,9 +116,14 @@ def generate(
         vex_json = generate_vex_from_sbom(
             input_file=input_file,
             timestamp=parsed_timestamp,
+            osv_base_url=osv_url,
+            allow_public_osv=allow_public_osv,
         )
     except SbomError as exc:
         typer.echo(f"SBOM ingest failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except OsvConfigurationError as exc:
+        typer.echo(f"VEX generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     except OsvClientError as exc:
         typer.echo(f"OSV query failed: {exc}", err=True)
