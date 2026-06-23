@@ -52,6 +52,7 @@ ruff = "^0.14.0"
 pre-commit = "^4.6.0"
 detect-secrets = "^1.5.0"
 pip-audit = "^2.10.1"
+jsonschema = { version = ">=4.25,<5", extras = ["format-nongpl"] }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

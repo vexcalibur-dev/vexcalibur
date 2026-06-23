@@ -1,0 +1,66 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "metadata": {
+    "timestamp": "2026-06-23T00:00:00+00:00"
+  },
+  "serialNumber": "urn:uuid:d4c265db-26a8-51e0-aad2-9045f3abbc68",
+  "specVersion": "1.6",
+  "version": 1,
+  "vulnerabilities": [
+    {
+      "affects": [
+        {
+          "ref": "component:django"
+        }
+      ],
+      "analysis": {
+        "detail": "Detected by OSV; manual exploitability analysis required.",
+        "state": "in_triage"
+      },
+      "bom-ref": "vulnerability:GHSA-django-0001",
+      "id": "GHSA-django-0001",
+      "references": [
+        {
+          "id": "GHSA-django-0001",
+          "source": {
+            "name": "OSV",
+            "url": "https://osv.dev/"
+          }
+        }
+      ],
+      "source": {
+        "name": "OSV",
+        "url": "https://osv.dev/"
+      },
+      "updated": "2026-01-01T00:00:00+00:00"
+    },
+    {
+      "affects": [
+        {
+          "ref": "pkg:npm/minimist@0.0.8"
+        }
+      ],
+      "analysis": {
+        "detail": "Detected by OSV; manual exploitability analysis required.",
+        "state": "in_triage"
+      },
+      "bom-ref": "vulnerability:GHSA-minimist-0001",
+      "id": "GHSA-minimist-0001",
+      "references": [
+        {
+          "id": "GHSA-minimist-0001",
+          "source": {
+            "name": "OSV",
+            "url": "https://osv.dev/"
+          }
+        }
+      ],
+      "source": {
+        "name": "OSV",
+        "url": "https://osv.dev/"
+      },
+      "updated": "2026-01-02T00:00:00+00:00"
+    }
+  ]
+}
