@@ -1,0 +1,141 @@
+# AGENTS.md
+
+This file gives AI agents and automated contributors repo-specific guidance for Vexcalibur.
+
+## Project Overview
+
+Vexcalibur is a pre-alpha VEX toolkit for workflows around SBOMs, package URLs, vulnerability sources, and VEX documents. It is intended to replace legacy `vexy` usage while remaining a general-purpose VEX tool, not a Python-only vulnerability tool.
+
+The current implementation is Python, but product and domain decisions should stay ecosystem-neutral unless an issue explicitly narrows the scope.
+
+## Non-Negotiables
+
+- Do not send SBOM contents, package URLs, component versions, or project inventories to public services unless the user, command, test, or issue explicitly opts in.
+- Public OSV access requires `--allow-public-osv`; use fixtures, fakes, or private mirror URLs for normal tests and examples.
+- Keep changes focused. Avoid broad refactors unless the active issue requires them.
+- Preserve public API and output compatibility notes in PR descriptions when behavior changes.
+- Treat documentation as product surface. Keep docs accurate for the current pre-alpha behavior.
+- Do not revert unrelated local changes. Work with them or ask if they block the task.
+
+## Technology Stack
+
+- Language: Python 3.10+
+- Packaging: Poetry 2.x, `pyproject.toml`
+- CLI: Typer
+- HTTP: httpx
+- Data modeling: Pydantic where structured validation is needed
+- SBOM/VEX domain: CycloneDX JSON first, with room for more formats
+- CI: GitHub Actions across Python 3.10 through 3.14
+- Quality: Ruff, MyPy strict mode, pytest, pytest-cov, pip-audit, detect-secrets
+
+## Common Commands
+
+Install dependencies:
+
+```bash
+poetry install
+```
+
+Run the usual local gate:
+
+```bash
+make check
+```
+
+Run individual checks:
+
+```bash
+make lint
+make typecheck
+make test
+make audit
+make build
+make pre-commit
+```
+
+Run live OSV compatibility only when the change intentionally exercises the public OSV service:
+
+```bash
+make test-live
+```
+
+If a sandboxed agent cannot write Poetry or pip cache files under the home directory, use an in-repo virtualenv and `/tmp` cache:
+
+```bash
+POETRY_VIRTUALENVS_IN_PROJECT=true \
+POETRY_CACHE_DIR=/tmp/vexcalibur-poetry-cache \
+ASDF_PYTHON_VERSION="$(cat .python-version)" \
+poetry install
+```
+
+Use the same environment variables on subsequent `poetry run ...` commands in that session.
+
+## Architecture
+
+Core modules live under `src/vexcalibur/`:
+
+- `cli.py`: Typer commands and user-facing error handling.
+- `generate.py`: SBOM-to-VEX workflow orchestration.
+- `sbom.py`: SBOM parsing and component identity extraction.
+- `vex.py`: CycloneDX VEX rendering and timestamp handling.
+- `sources/osv.py`: OSV client, OSV response parsing, source policy checks, and OSV-to-domain mapping.
+- `domain.py`: Shared domain objects.
+- `compat/vexy.py`: Legacy command entrypoint. Vexy compatibility is intentionally lower priority than core VEX engine work.
+
+Keep source-provider concerns in `sources/`. Workflow modules should orchestrate providers, not duplicate provider policy or parsing details.
+
+## Public Data Policy
+
+Vexcalibur must fail closed for public vulnerability services.
+
+- `query-osv` and `generate` must not query `https://api.osv.dev` unless `--allow-public-osv` is present.
+- Private mirrors should use `--osv-url`.
+- Tests that verify public OSV behavior should use fakes unless marked `live`.
+- Host checks must handle public OSV aliases that resolve through case folding, trailing dots, or IDNA dot normalization.
+- Injected source clients should still be checked against their effective base URL when that URL is knowable.
+
+## Code Style
+
+Use the project-owned [Python style policy](docs/development/python-style.md) as the canonical style contract. The vendored [Google Python Style Guide](docs/external/google-python-style-guide.md) is background reference material only; do not treat conflicting upstream rules as enforceable Vexcalibur policy.
+
+## Testing
+
+- Put unit and integration tests under `tests/`.
+- Keep external-service tests marked with `@pytest.mark.live`.
+- Use deterministic fixtures and golden files for VEX output.
+- Add regression tests for security and compatibility fixes.
+- For SBOM and VEX changes, test both successful behavior and malformed/unsafe input.
+- Maintain the configured coverage floor unless a PR intentionally adjusts the quality policy.
+
+## Documentation
+
+Docs should grow deliberately using Diataxis categories:
+
+- Tutorials for guided first-use workflows.
+- How-to guides for task-oriented recipes.
+- Reference for CLI, action inputs, schemas, and APIs.
+- Explanation for architecture, trust boundaries, source-provider behavior, and VEX semantics.
+
+The README should stay accurate and concise for the current release state. Avoid promising features that are only planned. When docs change, run a documentation-focused review before merge; use the scorched-earth documentation review skill when available.
+
+## PR Expectations
+
+Use conventional commit style for branch commits and PR titles. PRs should be ready for review unless the user explicitly asks for a draft.
+
+Before merging meaningful changes, run or confirm:
+
+```bash
+poetry check
+poetry check --lock
+poetry run ruff format --check .
+poetry run ruff check .
+poetry run mypy src
+poetry run pytest -m "not live" --cov-fail-under=75
+poetry build
+poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
+poetry run detect-secrets scan --baseline .secrets.baseline
+```
+
+Run `poetry run pytest -m live -q` only when the change intentionally validates public OSV compatibility.
+
+For new PRs, run separate review passes for security, code correctness, QA, and code quality when subagent review is available. Run thermonuclear code review for substantive code changes and scorched-earth documentation review for substantive documentation changes.

@@ -1,0 +1,61 @@
+name: Sync Google Python Style Guide
+
+on:
+  schedule:
+    - cron: "23 8 1 * *"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  sync-style-guide:
+    name: Sync Style Guide
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Fetch latest style guide
+        id: fetch
+        run: |
+          source_sha="$(git ls-remote https://github.com/google/styleguide.git refs/heads/gh-pages | awk '{print $1}')"
+          curl -fsSL "https://raw.githubusercontent.com/google/styleguide/${source_sha}/pyguide.md" \
+            -o docs/external/google-python-style-guide.md
+          perl -0pi -e 's/[ \t]+$//mg; s/\n+\z/\n/' docs/external/google-python-style-guide.md
+          perl -0pi -e 's/^        \+   \[3\.19\.16 Build Dependencies\]\(#s3\.19\.16-build-dependencies\)\n//m; s@\[settings file for Vim\]\(google_python_style\.vim\)@[settings file for Vim](https://github.com/google/styleguide/blob/gh-pages/google_python_style.vim)@; s@\[above\]\(#from-future-imports\)@[above](#s2.20-modern-python)@' docs/external/google-python-style-guide.md
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet docs/external/google-python-style-guide.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            today="$(date -u +%F)"
+            sed -i "s|^- Current source branch snapshot:.*|- Current source branch snapshot: \`google/styleguide@${{ steps.fetch.outputs.source_sha }}\`|" docs/external/README.md
+            sed -i "s|^- Fetched on:.*|- Fetched on: ${today}|" docs/external/README.md
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pull request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: update Google Python Style Guide"
+          title: "docs: update Google Python Style Guide"
+          body: |
+            Updates the vendored Google Python Style Guide.
+
+            Source: https://github.com/google/styleguide/blob/gh-pages/pyguide.md
+            Source commit: ${{ steps.fetch.outputs.source_sha }}
+
+            Review for conflicts with Vexcalibur's documented local style exceptions.
+          branch: docs/sync-google-python-style-guide
+          delete-branch: true
+          labels: |
+            type: task
+            area: docs

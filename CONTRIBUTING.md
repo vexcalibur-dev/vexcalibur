@@ -27,6 +27,10 @@ Run the live OSV compatibility test when changing OSV behavior:
 make test-live
 ```
 
+## Style
+
+Vexcalibur's enforceable Python style policy is [docs/development/python-style.md](docs/development/python-style.md). The vendored Google Python Style Guide is reference material only; when it conflicts with the project policy or `pyproject.toml`, follow the project policy.
+
 ## Pull Requests
 
 Pull requests should include:
