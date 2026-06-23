@@ -121,4 +121,6 @@ Supported input for `generate`:
 
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
+- [Python style policy](docs/development/python-style.md)
+- [AI agent and style guidance](AGENTS.md)
 - [License](LICENSE)
