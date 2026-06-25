@@ -2,7 +2,7 @@
 
 Vexcalibur is an early VEX toolkit for vulnerability exploitability workflows across SBOM, package URL, and vulnerability data ecosystems.
 
-The project is intended to replace legacy `vexy` usage while staying general-purpose instead of becoming Python-specific. The current scaffold includes an OSV-backed package URL query command, a typed OSV API client, a placeholder `vexy` compatibility command, and CI for Python package quality gates.
+The project is intended to replace legacy `vexy` usage while staying general-purpose instead of becoming Python-specific. The current scaffold includes an OSV-backed package URL query command, CycloneDX JSON SBOM ingest, CycloneDX 1.6 VEX generation, a placeholder `vexy` compatibility command, and CI for Python package and documentation quality gates.
 
 ## Status
 
@@ -52,6 +52,13 @@ Run static checks:
 ```bash
 poetry run ruff check .
 poetry run mypy src
+```
+
+Build the documentation:
+
+```bash
+poetry install --with docs
+poetry run sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
 
 Try the CLI:
@@ -113,6 +120,7 @@ Supported input for `generate`:
 
 ## Project Links
 
+- [Documentation](docs/index.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Python style policy](docs/development/python-style.md)

@@ -36,6 +36,12 @@ Install dependencies:
 poetry install
 ```
 
+Install documentation dependencies:
+
+```bash
+poetry install --with docs
+```
+
 Run the usual local gate:
 
 ```bash
@@ -48,6 +54,7 @@ Run individual checks:
 make lint
 make typecheck
 make test
+make docs
 make audit
 make build
 make pre-commit
@@ -118,6 +125,8 @@ Docs should grow deliberately using Diataxis categories:
 
 The README should stay accurate and concise for the current release state. Avoid promising features that are only planned. When docs change, run a documentation-focused review before merge; use the scorched-earth documentation review skill when available.
 
+Sphinx documentation lives under `docs/` and builds with `make docs`. Keep conceptual documentation in Diataxis sections, but keep API details close to code through docstrings and `docs/reference/python-api.rst` autodoc pages.
+
 ## PR Expectations
 
 Use conventional commit style for branch commits and PR titles. PRs should be ready for review unless the user explicitly asks for a draft.
@@ -127,10 +136,11 @@ Before merging meaningful changes, run or confirm:
 ```bash
 poetry check
 poetry check --lock
-poetry run ruff format --check .
-poetry run ruff check .
+poetry run ruff format --check src tests docs/conf.py
+poetry run ruff check src tests docs/conf.py
 poetry run mypy src
 poetry run pytest -m "not live" --cov-fail-under=75
+poetry run sphinx-build -W --keep-going -b html docs docs/_build/html
 poetry build
 poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
 poetry run detect-secrets scan --baseline .secrets.baseline
