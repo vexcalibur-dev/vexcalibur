@@ -316,6 +316,130 @@ def test_generate_allows_private_osv_url_without_public_opt_in(monkeypatch) -> N
     assert captured_base_urls == ["https://osv.internal.example"]
 
 
+def test_generate_offline_uses_local_findings_without_osv_client(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("offline generation should not construct an OSV client")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        """
+        {
+          "findings": [
+            {
+              "id": "CVE-2026-0001",
+              "component_ref": "component:django",
+              "analysis_state": "not_affected",
+              "analysis_detail": "Reviewed and not affected."
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--offline",
+            "--findings-file",
+            str(findings_path),
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"id": "CVE-2026-0001"' in result.output
+    assert '"state": "not_affected"' in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_findings_file_disallows_public_osv_opt_in(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text('{"findings": []}', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(findings_path),
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--allow-public-osv cannot be combined with --findings-file" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_findings_file_disallows_osv_url(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text('{"findings": []}', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(findings_path),
+            "--osv-url",
+            "https://osv.internal.example",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--osv-url cannot be combined with --findings-file" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_offline_requires_findings_file() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--offline",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--offline requires --findings-file" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_reports_local_findings_errors_without_traceback(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:missing"}]}',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(findings_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Local findings ingest failed" in result.output
+    assert "unknown component_ref" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_generate_writes_output_file(monkeypatch, tmp_path: Path) -> None:
     def fake_generate_vex_from_sbom(**kwargs) -> str:
         return "{}\n"

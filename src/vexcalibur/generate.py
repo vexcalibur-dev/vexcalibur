@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from vexcalibur.sbom import SbomError, load_cyclonedx_json
+from vexcalibur.sources.local import load_local_findings
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
     OsvClient,
@@ -53,5 +54,24 @@ def generate_vex_from_sbom(
     return render_cyclonedx_vex_json(
         components=components,
         findings=findings_from_osv_results(components=components, results=results),
+        timestamp=timestamp,
+    )
+
+
+def generate_vex_from_local_findings(
+    *,
+    input_file: Path,
+    findings_file: Path,
+    timestamp: datetime | None = None,
+) -> str:
+    """Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and local findings."""
+    components = load_cyclonedx_json(input_file)
+    if not components:
+        msg = "no components with package URLs were found"
+        raise SbomError(msg)
+
+    return render_cyclonedx_vex_json(
+        components=components,
+        findings=load_local_findings(findings_file, components=components),
         timestamp=timestamp,
     )

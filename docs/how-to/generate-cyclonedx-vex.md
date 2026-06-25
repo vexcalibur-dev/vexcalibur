@@ -36,6 +36,20 @@ poetry run vexcalibur generate \
 
 The configured endpoint must implement the OSV query API shape used by Vexcalibur's provider client.
 
+## Generate Offline From Local Findings
+
+Use `--findings-file` when another trusted process has already produced vulnerability findings or exploitability analysis. This mode never contacts OSV.
+
+```bash
+poetry run vexcalibur generate \
+  path/to/sbom.json \
+  --offline \
+  --findings-file path/to/findings.json \
+  --output /tmp/vexcalibur-vex.json
+```
+
+The findings file uses Vexcalibur's [local findings JSON format](../reference/local-findings.md). Local findings must identify SBOM components by `component_ref` or by a package URL that appears exactly once in the SBOM.
+
 ## Write To Standard Output
 
 Omit `--output` to write the VEX JSON to standard output:

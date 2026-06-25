@@ -7,8 +7,9 @@ import typer
 from packageurl import PackageURL
 from rich.console import Console
 
-from vexcalibur.generate import generate_vex_from_sbom
+from vexcalibur.generate import generate_vex_from_local_findings, generate_vex_from_sbom
 from vexcalibur.sbom import SbomError
+from vexcalibur.sources.local import LocalFindingsError
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
     OsvClientError,
@@ -91,6 +92,24 @@ def generate(
         str | None,
         typer.Option("--timestamp", help="ISO-8601 timestamp to use for deterministic output."),
     ] = None,
+    findings_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--findings-file",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Local Vexcalibur findings JSON file. When set, no OSV API request is sent.",
+        ),
+    ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Disable network vulnerability sources. Currently requires --findings-file.",
+        ),
+    ] = False,
     osv_url: Annotated[
         str,
         typer.Option("--osv-url", help="OSV API base URL. Use this for private OSV mirrors."),
@@ -103,7 +122,7 @@ def generate(
         ),
     ] = False,
 ) -> None:
-    """Generate CycloneDX VEX JSON from a CycloneDX SBOM and OSV findings."""
+    """Generate CycloneDX VEX JSON from a CycloneDX SBOM and vulnerability findings."""
     parsed_timestamp = None
     if timestamp is not None:
         try:
@@ -113,14 +132,30 @@ def generate(
             raise typer.BadParameter(msg) from exc
 
     try:
-        vex_json = generate_vex_from_sbom(
-            input_file=input_file,
-            timestamp=parsed_timestamp,
-            osv_base_url=osv_url,
+        _validate_generate_source_options(
+            findings_file=findings_file,
+            offline=offline,
+            osv_url=osv_url,
             allow_public_osv=allow_public_osv,
         )
+        if findings_file is None:
+            vex_json = generate_vex_from_sbom(
+                input_file=input_file,
+                timestamp=parsed_timestamp,
+                osv_base_url=osv_url,
+                allow_public_osv=allow_public_osv,
+            )
+        else:
+            vex_json = generate_vex_from_local_findings(
+                input_file=input_file,
+                findings_file=findings_file,
+                timestamp=parsed_timestamp,
+            )
     except SbomError as exc:
         typer.echo(f"SBOM ingest failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except LocalFindingsError as exc:
+        typer.echo(f"Local findings ingest failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     except OsvConfigurationError as exc:
         typer.echo(f"VEX generation failed: {exc}", err=True)
@@ -149,6 +184,26 @@ def _parse_package_urls(values: list[str]) -> list[PackageURL]:
             msg = f"{value!r} is not a valid package URL: {exc}"
             raise typer.BadParameter(msg) from exc
     return parsed
+
+
+def _validate_generate_source_options(
+    *,
+    findings_file: Path | None,
+    offline: bool,
+    osv_url: str,
+    allow_public_osv: bool,
+) -> None:
+    if offline and findings_file is None:
+        msg = "--offline requires --findings-file in this release"
+        raise typer.BadParameter(msg)
+    if findings_file is None:
+        return
+    if allow_public_osv:
+        msg = "--allow-public-osv cannot be combined with --findings-file"
+        raise typer.BadParameter(msg)
+    if osv_url != DEFAULT_OSV_API_URL:
+        msg = "--osv-url cannot be combined with --findings-file"
+        raise typer.BadParameter(msg)
 
 
 if __name__ == "__main__":

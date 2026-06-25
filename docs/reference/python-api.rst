@@ -39,3 +39,10 @@ environment.
 .. automodule:: vexcalibur.sources.osv
    :members:
    :show-inheritance:
+
+Local Findings Provider
+-----------------------
+
+.. automodule:: vexcalibur.sources.local
+   :members:
+   :show-inheritance:

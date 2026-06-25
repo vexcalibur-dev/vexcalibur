@@ -10,6 +10,7 @@ The project is intentionally general-purpose. The current implementation focuses
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md) covers task-oriented generation commands and source configuration.
 - [CLI reference](reference/cli.md) lists the current command surface.
 - [Python API reference](reference/python-api.rst) is generated from source docstrings.
+- [Local findings reference](reference/local-findings.md) defines the offline findings JSON format.
 - [Architecture](explanation/architecture.md) explains the current trust boundary and processing flow.
 
 ```{toctree}
@@ -20,6 +21,7 @@ tutorials/quickstart
 how-to/generate-cyclonedx-vex
 reference/cli
 reference/python-api
+reference/local-findings
 explanation/architecture
 development/python-style
 external/README

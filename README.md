@@ -12,6 +12,7 @@ Implemented now:
 
 - Query OSV for one or more package URLs with `vexcalibur query-osv`.
 - Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON SBOM input with `vexcalibur generate`.
+- Generate VEX from local findings without contacting OSV.
 - Use the same installed package through the legacy `vexy` executable name.
 - Run offline tests, live OSV compatibility tests, linting, formatting checks, type checks, build checks, secret scanning, CodeQL, dependency review, and OpenSSF Scorecard.
 
@@ -91,6 +92,12 @@ Illustrative private-mirror command, replacing the URL with your internal OSV en
 poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --osv-url https://osv.internal.example --output /tmp/vexcalibur-vex.json
 ```
 
+Offline command using local findings, replacing the file paths with your SBOM and findings JSON:
+
+```bash
+poetry run vexcalibur generate path/to/sbom.json --offline --findings-file path/to/findings.json --output /tmp/vexcalibur-vex.json
+```
+
 For a deterministic document timestamp, provide `--timestamp`. Live OSV data can change over time, so identical inputs can still produce different vulnerability findings unless OSV responses are controlled.
 
 ```bash
@@ -116,7 +123,7 @@ Supported input for `generate`:
 - Components with package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
 - Unique `bom-ref` values for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
 - A non-zero query set. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
-- Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`.
+- Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`; offline local findings use `--findings-file`.
 
 ## Project Links
 

@@ -12,6 +12,7 @@ The current implementation is Python, but product and domain decisions should st
 
 - Do not send SBOM contents, package URLs, component versions, or project inventories to public services unless the user, command, test, or issue explicitly opts in.
 - Public OSV access requires `--allow-public-osv`; use fixtures, fakes, or private mirror URLs for normal tests and examples.
+- Offline VEX generation uses `--findings-file` and must not construct or query an OSV client.
 - Keep changes focused. Avoid broad refactors unless the active issue requires them.
 - Preserve public API and output compatibility notes in PR descriptions when behavior changes.
 - Treat documentation as product surface. Keep docs accurate for the current pre-alpha behavior.
@@ -86,6 +87,7 @@ Core modules live under `src/vexcalibur/`:
 - `sbom.py`: SBOM parsing and component identity extraction.
 - `vex.py`: CycloneDX VEX rendering and timestamp handling.
 - `sources/osv.py`: OSV client, OSV response parsing, source policy checks, and OSV-to-domain mapping.
+- `sources/local.py`: Local findings parsing for offline VEX generation.
 - `domain.py`: Shared domain objects.
 - `compat/vexy.py`: Legacy command entrypoint. Vexy compatibility is intentionally lower priority than core VEX engine work.
 
