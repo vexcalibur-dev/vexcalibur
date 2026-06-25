@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import sys
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import version
 from pathlib import Path
+from shutil import copy2
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from sphinx.application import Sphinx
 
 project = "Vexcalibur"
 author = "Danny Sauer"
 copyright = "2026, Danny Sauer"
 
-try:
-    release = version("vexcalibur")
-except PackageNotFoundError:
-    release = "0.0.0"
-
+release = version("vexcalibur")
 version = release
 
 extensions = [
@@ -52,3 +48,17 @@ napoleon_numpy_docstring = False
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
 }
+
+
+def _copy_vendored_markdown(app: Sphinx, exception: Exception | None) -> None:
+    # The vendored guide uses upstream HTML anchors that MyST cannot validate.
+    if exception is not None or app.builder.format != "html":
+        return
+    source = Path(app.srcdir) / "external" / "google-python-style-guide.md"
+    target = Path(app.outdir) / "external" / "google-python-style-guide.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    copy2(source, target)
+
+
+def setup(app: Sphinx) -> None:
+    app.connect("build-finished", _copy_vendored_markdown)

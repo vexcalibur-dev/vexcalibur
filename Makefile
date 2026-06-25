@@ -10,7 +10,7 @@ install: ## Install project dependencies
 	$(POETRY) install
 
 install-docs: ## Install project and documentation dependencies
-	$(POETRY) install --with docs
+	$(POETRY) install --extras docs
 
 test: ## Run offline tests
 	$(POETRY) run pytest -m "not live"

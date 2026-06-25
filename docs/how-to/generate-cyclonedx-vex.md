@@ -55,7 +55,7 @@ poetry run vexcalibur generate \
 - Up to 10,000 components.
 - Component nesting up to 50 levels.
 - Components with package URLs and versions from either the PURL or CycloneDX `version` field.
-- Unique component `bom-ref` values.
+- Unique `bom-ref` values for components with package URLs.
 
 `generate` intentionally fails when no precise query set can be built. That is safer than producing an empty VEX document that could look authoritative.
 

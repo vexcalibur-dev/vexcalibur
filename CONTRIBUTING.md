@@ -30,7 +30,7 @@ make test-live
 Build documentation when changing docs, CLI behavior, package metadata, or public APIs:
 
 ```bash
-poetry install --with docs
+poetry install --extras docs
 make docs
 ```
 

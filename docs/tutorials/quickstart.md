@@ -25,6 +25,8 @@ poetry run vexcalibur --help
 
 Run `generate` against the fixture SBOM. The `--allow-public-osv` flag is required because this command sends fixture package URLs and versions to `https://api.osv.dev`.
 
+This step requires internet access. OSV data can change, so the number of vulnerability entries can vary over time.
+
 ```bash
 poetry run vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
@@ -37,6 +39,21 @@ Inspect the generated document:
 
 ```bash
 python -m json.tool /tmp/vexcalibur-vex.json | sed -n '1,80p'
+```
+
+Verify the stable document metadata:
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+vex = json.loads(Path("/tmp/vexcalibur-vex.json").read_text())
+assert vex["bomFormat"] == "CycloneDX"
+assert vex["specVersion"] == "1.6"
+assert vex["metadata"]["timestamp"] == "2026-06-23T00:00:00+00:00"
+print("generated CycloneDX VEX")
+PY
 ```
 
 The output is a CycloneDX 1.6 document with VEX vulnerability entries for OSV matches. Findings are currently marked `in_triage` because Vexcalibur has not yet implemented user-authored exploitability analysis or policy-driven VEX states.

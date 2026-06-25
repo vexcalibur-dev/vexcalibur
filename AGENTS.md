@@ -39,7 +39,7 @@ poetry install
 Install documentation dependencies:
 
 ```bash
-poetry install --with docs
+poetry install --extras docs
 ```
 
 Run the usual local gate:
@@ -140,7 +140,7 @@ poetry run ruff format --check src tests docs/conf.py
 poetry run ruff check src tests docs/conf.py
 poetry run mypy src
 poetry run pytest -m "not live" --cov-fail-under=75
-poetry run sphinx-build -W --keep-going -b html docs docs/_build/html
+make docs
 poetry build
 poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
 poetry run detect-secrets scan --baseline .secrets.baseline

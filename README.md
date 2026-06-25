@@ -57,8 +57,8 @@ poetry run mypy src
 Build the documentation:
 
 ```bash
-poetry install --with docs
-poetry run sphinx-build -W --keep-going -b html docs docs/_build/html
+poetry install --extras docs
+make docs
 ```
 
 Try the CLI:
@@ -114,7 +114,7 @@ Supported input for `generate`:
 - CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is not implemented yet.
 - SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
 - Components with package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
-- Unique component `bom-ref` values. Duplicate refs are rejected because VEX `affects` entries refer to components by ref.
+- Unique `bom-ref` values for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
 - A non-zero query set. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
 - Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`.
 
