@@ -4,7 +4,7 @@ This directory contains external reference material vendored for contributor and
 
 ## Google Python Style Guide
 
-- Vendored file: [google-python-style-guide.md](google-python-style-guide.md)
+- Vendored file: <a href="google-python-style-guide.md">google-python-style-guide.md</a>
 - Upstream source: <https://github.com/google/styleguide/blob/gh-pages/pyguide.md>
 - Current source branch snapshot: `google/styleguide@1809c769de31ba388c755ad15dd057a9ba8531fd`
 - Fetched on: 2026-06-23

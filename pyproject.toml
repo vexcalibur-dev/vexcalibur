@@ -33,6 +33,13 @@ dependencies = [
   "typer>=0.12,<1",
 ]
 
+[project.optional-dependencies]
+docs = [
+  "myst-parser>=4,<5",
+  "sphinx>=8,<9",
+  "sphinx-autodoc-typehints>=3,<4",
+]
+
 [project.urls]
 Homepage = "https://github.com/vexcalibur-dev/vexcalibur"
 Issues = "https://github.com/vexcalibur-dev/vexcalibur/issues"

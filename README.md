@@ -2,7 +2,7 @@
 
 Vexcalibur is an early VEX toolkit for vulnerability exploitability workflows across SBOM, package URL, and vulnerability data ecosystems.
 
-The project is intended to replace legacy `vexy` usage while staying general-purpose instead of becoming Python-specific. The current scaffold includes an OSV-backed package URL query command, a typed OSV API client, a placeholder `vexy` compatibility command, and CI for Python package quality gates.
+The project is intended to replace legacy `vexy` usage while staying general-purpose instead of becoming Python-specific. The current scaffold includes an OSV-backed package URL query command, CycloneDX JSON SBOM ingest, CycloneDX 1.6 VEX generation, a placeholder `vexy` compatibility command, and CI for Python package and documentation quality gates.
 
 ## Status
 
@@ -52,6 +52,13 @@ Run static checks:
 ```bash
 poetry run ruff check .
 poetry run mypy src
+```
+
+Build the documentation:
+
+```bash
+poetry install --extras docs
+make docs
 ```
 
 Try the CLI:
@@ -107,12 +114,13 @@ Supported input for `generate`:
 - CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is not implemented yet.
 - SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
 - Components with package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
-- Unique component `bom-ref` values. Duplicate refs are rejected because VEX `affects` entries refer to components by ref.
+- Unique `bom-ref` values for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
 - A non-zero query set. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
 - Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`.
 
 ## Project Links
 
+- [Documentation](docs/index.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Python style policy](docs/development/python-style.md)

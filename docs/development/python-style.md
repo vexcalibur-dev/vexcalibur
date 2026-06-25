@@ -1,6 +1,6 @@
 # Python Style Policy
 
-This is Vexcalibur's enforceable Python style policy. It is inspired by the vendored [Google Python Style Guide](../external/google-python-style-guide.md), but this document and the checked-in tool configuration are authoritative for this repository.
+This is Vexcalibur's enforceable Python style policy. It is inspired by the vendored <a href="../external/google-python-style-guide.md">Google Python Style Guide</a>, but this document and the checked-in tool configuration are authoritative for this repository.
 
 If this policy conflicts with the vendored Google guide, follow this policy. In particular, Vexcalibur does not require `pylint`, 80-character lines, Black, or Pyink just because those appear in the upstream guide.
 
@@ -23,10 +23,11 @@ For a full pre-PR pass, run:
 ```bash
 poetry check
 poetry check --lock
-poetry run ruff format --check .
-poetry run ruff check .
+poetry run ruff format --check src tests docs/conf.py
+poetry run ruff check src tests docs/conf.py
 poetry run mypy src
 poetry run pytest -m "not live" --cov-fail-under=75
+make docs
 poetry build
 poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
 poetry run detect-secrets scan --baseline .secrets.baseline
