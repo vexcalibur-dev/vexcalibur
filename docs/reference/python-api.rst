@@ -26,7 +26,7 @@ Generation Workflow
 -------------------
 
 .. automodule:: vexcalibur.generate
-   :members: generate_vex_from_sbom
+   :members: generate_vex_from_sbom, generate_vex_from_local_findings
 
 OSV Provider
 ------------

@@ -19,7 +19,7 @@ Implemented now:
 Not implemented yet:
 
 - CycloneDX XML SBOM input.
-- User-authored exploitability analysis details and policy-driven VEX states.
+- Policy-driven VEX state selection for OSV-derived findings.
 - Compatibility with existing `vexy` flags and output.
 - A stable `vexcalibur-action` release.
 
@@ -114,16 +114,21 @@ print(f"validated {len(vex.get('vulnerabilities', []))} generated VEX findings")
 PY
 ```
 
-The initial generator queries OSV for versioned components with package URLs, emits CycloneDX vulnerability entries for OSV matches, and marks findings `in_triage` by default.
+The OSV-backed generator queries OSV for versioned components with package URLs, emits CycloneDX vulnerability entries for OSV matches, and marks findings `in_triage` by default. Local findings can provide explicit VEX analysis states and details.
 
-Supported input for `generate`:
+Supported input for all `generate` source modes:
 
 - CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is not implemented yet.
 - SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
-- Components with package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
 - Unique `bom-ref` values for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
-- A non-zero query set. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
 - Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`; offline local findings use `--findings-file`.
+
+Additional OSV-backed requirements:
+
+- Components need package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
+- The OSV query set must be non-empty. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
+
+Local findings mode can produce an empty VEX document when the findings file explicitly contains `"findings": []`.
 
 ## Project Links
 

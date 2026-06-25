@@ -50,6 +50,16 @@ poetry run vexcalibur generate \
 
 The findings file uses Vexcalibur's [local findings JSON format](../reference/local-findings.md). Local findings must identify SBOM components by `component_ref` or by a package URL that appears exactly once in the SBOM.
 
+## Choose A Source Mode For CI
+
+Use exactly one vulnerability source mode in automated jobs:
+
+- Public fixture or intentionally public package inventory: use `--allow-public-osv`.
+- Private SBOM with an internal OSV-compatible service: use `--osv-url https://osv.internal.example`.
+- Offline or pre-reviewed vulnerability data: use `--offline --findings-file path/to/findings.json`.
+
+Do not pass `--allow-public-osv` for private SBOMs. Do not combine `--findings-file` with `--allow-public-osv` or `--osv-url`; local findings mode is the no-network path.
+
 ## Write To Standard Output
 
 Omit `--output` to write the VEX JSON to standard output:
@@ -62,22 +72,22 @@ poetry run vexcalibur generate \
 
 ## Supported Input
 
-`generate` currently supports:
+All `generate` source modes currently support:
 
 - CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`.
 - Files up to 10 MiB.
 - Up to 10,000 components.
 - Component nesting up to 50 levels.
-- Components with package URLs and versions from either the PURL or CycloneDX `version` field.
 - Unique `bom-ref` values for components with package URLs.
 
-`generate` intentionally fails when no precise query set can be built. That is safer than producing an empty VEX document that could look authoritative.
+OSV-backed generation also requires components with package URLs and versions from either the PURL or CycloneDX `version` field. It intentionally fails when no precise query set can be built. That is safer than producing an empty VEX document that could look authoritative.
+
+Local findings mode can produce an empty VEX document when the findings file explicitly contains no findings.
 
 ## Current Limitations
 
 The first generator does not yet support:
 
 - CycloneDX XML SBOM input.
-- User-authored exploitability analysis details.
-- Policy-driven VEX state selection.
+- Policy-driven VEX state selection for OSV-derived findings.
 - Existing `vexy` flags or output compatibility.

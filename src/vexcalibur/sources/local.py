@@ -52,10 +52,18 @@ class _LocalFindingModel(BaseModel):
     @classmethod
     def _validate_source_url(cls, value: str) -> str:
         parsed = urlparse(value)
-        if not parsed.scheme:
-            msg = "source_url must be an absolute URI"
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = "source_url must be an HTTP(S) URL with a host"
             raise ValueError(msg)
         return value
+
+    @field_validator("modified", mode="before")
+    @classmethod
+    def _validate_modified_input(cls, value: Any) -> Any:
+        if value is None or isinstance(value, str):
+            return value
+        msg = "modified must be an ISO-8601 timestamp string"
+        raise ValueError(msg)
 
     @field_validator("modified")
     @classmethod
@@ -77,7 +85,7 @@ class _LocalFindingModel(BaseModel):
 class _LocalFindingsDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    findings: tuple[_LocalFindingModel, ...] = Field(default=(), max_length=MAX_LOCAL_FINDINGS)
+    findings: tuple[_LocalFindingModel, ...] = Field(max_length=MAX_LOCAL_FINDINGS)
 
 
 def load_local_findings(
@@ -118,6 +126,9 @@ def _parse_local_findings_document(path: Path) -> _LocalFindingsDocument:
         raise LocalFindingsError(msg) from exc
     except json.JSONDecodeError as exc:
         msg = f"Local findings {path} is not valid JSON: {exc.msg}"
+        raise LocalFindingsError(msg) from exc
+    except RecursionError as exc:
+        msg = f"Local findings {path} is too deeply nested"
         raise LocalFindingsError(msg) from exc
 
     if not isinstance(raw_document, dict):

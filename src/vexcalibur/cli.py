@@ -18,6 +18,11 @@ from vexcalibur.sources.osv import (
 )
 from vexcalibur.vex import parse_timestamp
 
+
+class _GenerateSourceOptionError(Exception):
+    """Raised when generate source options are mutually incompatible."""
+
+
 app = typer.Typer(
     name="vexcalibur",
     help="Generate and transform VEX documents from SBOMs and vulnerability sources.",
@@ -111,9 +116,9 @@ def generate(
         ),
     ] = False,
     osv_url: Annotated[
-        str,
+        str | None,
         typer.Option("--osv-url", help="OSV API base URL. Use this for private OSV mirrors."),
-    ] = DEFAULT_OSV_API_URL,
+    ] = None,
     allow_public_osv: Annotated[
         bool,
         typer.Option(
@@ -142,7 +147,7 @@ def generate(
             vex_json = generate_vex_from_sbom(
                 input_file=input_file,
                 timestamp=parsed_timestamp,
-                osv_base_url=osv_url,
+                osv_base_url=osv_url or DEFAULT_OSV_API_URL,
                 allow_public_osv=allow_public_osv,
             )
         else:
@@ -151,6 +156,9 @@ def generate(
                 findings_file=findings_file,
                 timestamp=parsed_timestamp,
             )
+    except _GenerateSourceOptionError as exc:
+        typer.echo(f"Invalid generate options: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except SbomError as exc:
         typer.echo(f"SBOM ingest failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -190,20 +198,20 @@ def _validate_generate_source_options(
     *,
     findings_file: Path | None,
     offline: bool,
-    osv_url: str,
+    osv_url: str | None,
     allow_public_osv: bool,
 ) -> None:
     if offline and findings_file is None:
         msg = "--offline requires --findings-file in this release"
-        raise typer.BadParameter(msg)
+        raise _GenerateSourceOptionError(msg)
     if findings_file is None:
         return
     if allow_public_osv:
         msg = "--allow-public-osv cannot be combined with --findings-file"
-        raise typer.BadParameter(msg)
-    if osv_url != DEFAULT_OSV_API_URL:
+        raise _GenerateSourceOptionError(msg)
+    if osv_url is not None:
         msg = "--osv-url cannot be combined with --findings-file"
-        raise typer.BadParameter(msg)
+        raise _GenerateSourceOptionError(msg)
 
 
 if __name__ == "__main__":

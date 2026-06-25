@@ -1,6 +1,9 @@
+import json
 from pathlib import Path
 
 import pytest
+from cyclonedx.output import OutputFormat, SchemaVersion
+from cyclonedx.validation import make_schemabased_validator
 
 import vexcalibur.sources.osv as osv_module
 from vexcalibur.generate import generate_vex_from_local_findings, generate_vex_from_sbom
@@ -16,6 +19,7 @@ from vexcalibur.vex import parse_timestamp
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
 GOLDEN_ROOT = Path(__file__).parent / "golden"
+VALIDATOR = make_schemabased_validator(OutputFormat.JSON, SchemaVersion.V1_6)
 
 
 class FakeOsvClient:
@@ -96,6 +100,29 @@ def test_generate_vex_from_local_findings_renders_without_osv(tmp_path: Path) ->
     assert '"id": "CVE-2026-0001"' in generated
     assert '"name": "Internal Review"' in generated
     assert '"state": "not_affected"' in generated
+    assert VALIDATOR.validate_str(generated) is None
+
+    document = json.loads(generated)
+    vulnerability = document["vulnerabilities"][0]
+    assert vulnerability["source"] == {
+        "name": "Internal Review",
+        "url": "https://security.example.test/vulns/CVE-2026-0001",
+    }
+    assert vulnerability["analysis"]["detail"] == "Reviewed and not affected."
+
+
+def test_generate_vex_from_empty_local_findings_is_schema_valid(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text('{"findings": []}', encoding="utf-8")
+
+    generated = generate_vex_from_local_findings(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        findings_file=findings_path,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert VALIDATOR.validate_str(generated) is None
+    assert json.loads(generated).get("vulnerabilities", []) == []
 
 
 def test_generate_vex_from_sbom_uses_component_version_for_unversioned_purl(

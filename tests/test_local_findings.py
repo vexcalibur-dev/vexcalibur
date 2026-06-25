@@ -2,9 +2,15 @@ from pathlib import Path
 
 import pytest
 
+import vexcalibur.sources.local as local_module
 from vexcalibur.domain import VexAnalysisState
 from vexcalibur.sbom import load_cyclonedx_json
-from vexcalibur.sources.local import LocalFindingsError, load_local_findings
+from vexcalibur.sources.local import (
+    MAX_LOCAL_FINDINGS,
+    MAX_LOCAL_FINDINGS_BYTES,
+    LocalFindingsError,
+    load_local_findings,
+)
 from vexcalibur.vex import parse_timestamp
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
@@ -202,24 +208,28 @@ def test_load_local_findings_rejects_invalid_purl(tmp_path: Path) -> None:
         )
 
 
-def test_load_local_findings_rejects_relative_source_url(tmp_path: Path) -> None:
+@pytest.mark.parametrize("source_url", ("internal/vulns/CVE-2026-0001", "javascript:alert(1)"))
+def test_load_local_findings_rejects_unsafe_source_url(
+    tmp_path: Path,
+    source_url: str,
+) -> None:
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(
-        """
-        {
+        f"""
+        {{
           "findings": [
-            {
+            {{
               "id": "CVE-2026-0001",
               "component_ref": "component:django",
-              "source_url": "internal/vulns/CVE-2026-0001"
-            }
+              "source_url": "{source_url}"
+            }}
           ]
-        }
+        }}
         """,
         encoding="utf-8",
     )
 
-    with pytest.raises(LocalFindingsError, match="absolute URI"):
+    with pytest.raises(LocalFindingsError, match=r"HTTP\(S\) URL"):
         load_local_findings(
             findings_path,
             components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
@@ -234,4 +244,103 @@ def test_load_local_findings_rejects_malformed_json(tmp_path: Path) -> None:
         load_local_findings(
             findings_path,
             components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    (
+        ("[]", "must be a JSON object"),
+        ("{}", "Field required"),
+        (
+            '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", "x": 1}]}',
+            "Extra",
+        ),
+        ('{"findings": [{"id": "", "component_ref": "component:django"}]}', "at least 1"),
+        (
+            '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
+            '"analysis_state": "needs_review"}]}',
+            "Input should be",
+        ),
+        (
+            '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
+            '"modified": "not-a-date"}]}',
+            "valid datetime",
+        ),
+        (
+            '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
+            '"modified": 1700000000}]}',
+            "ISO-8601 timestamp string",
+        ),
+    ),
+)
+def test_load_local_findings_rejects_invalid_document_shapes(
+    tmp_path: Path,
+    document: str,
+    message: str,
+) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(LocalFindingsError, match=message):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+def test_load_local_findings_rejects_too_many_findings(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings = ",".join(
+        '{"id":"CVE-2026-0001","component_ref":"component:django"}'
+        for _ in range(MAX_LOCAL_FINDINGS + 1)
+    )
+    findings_path.write_text(f'{{"findings":[{findings}]}}', encoding="utf-8")
+
+    with pytest.raises(LocalFindingsError, match="at most"):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+def test_load_local_findings_rejects_oversized_files(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_bytes(b" " * (MAX_LOCAL_FINDINGS_BYTES + 1))
+
+    with pytest.raises(LocalFindingsError, match="exceeds"):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+def test_load_local_findings_rejects_non_utf8_json(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_bytes(b"\xff")
+
+    with pytest.raises(LocalFindingsError, match="not valid UTF-8"):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+def test_load_local_findings_rejects_deeply_nested_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text("{}", encoding="utf-8")
+    components = load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")
+
+    def raise_recursion_error(*args: object, **kwargs: object) -> object:
+        raise RecursionError
+
+    monkeypatch.setattr(local_module.json, "load", raise_recursion_error)
+
+    with pytest.raises(LocalFindingsError, match="too deeply nested"):
+        load_local_findings(
+            findings_path,
+            components=components,
         )
