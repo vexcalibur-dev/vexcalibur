@@ -265,11 +265,16 @@ def test_load_local_findings_rejects_malformed_json(tmp_path: Path) -> None:
         (
             '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
             '"modified": "not-a-date"}]}',
-            "valid datetime",
+            "ISO-8601 timestamp string",
         ),
         (
             '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
             '"modified": 1700000000}]}',
+            "ISO-8601 timestamp string",
+        ),
+        (
+            '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
+            '"modified": "1700000000"}]}',
             "ISO-8601 timestamp string",
         ),
     ),

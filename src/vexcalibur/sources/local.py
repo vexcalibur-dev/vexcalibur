@@ -60,8 +60,14 @@ class _LocalFindingModel(BaseModel):
     @field_validator("modified", mode="before")
     @classmethod
     def _validate_modified_input(cls, value: Any) -> Any:
-        if value is None or isinstance(value, str):
+        if value is None:
             return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                msg = "modified must be an ISO-8601 timestamp string"
+                raise ValueError(msg) from exc
         msg = "modified must be an ISO-8601 timestamp string"
         raise ValueError(msg)
 
