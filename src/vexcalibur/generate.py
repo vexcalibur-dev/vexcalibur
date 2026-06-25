@@ -5,17 +5,52 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from vexcalibur.domain import ComponentIdentity, VulnerabilitySource, VulnerabilitySourceInputError
 from vexcalibur.sbom import SbomError, load_cyclonedx_json
-from vexcalibur.sources.local import load_local_findings
+from vexcalibur.sources.local import LocalFindingsSource
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
     OsvClient,
-    ensure_osv_client_allowed,
-    findings_from_osv_results,
-    osv_client_for_url,
-    osv_queries_for_components,
+    OsvSource,
 )
 from vexcalibur.vex import render_cyclonedx_vex_json
+
+
+def generate_vex_from_source(
+    *,
+    input_file: Path,
+    source: VulnerabilitySource,
+    timestamp: datetime | None = None,
+) -> str:
+    """Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and source provider."""
+    components = load_cyclonedx_json(input_file)
+    if not components:
+        msg = "no components with package URLs were found"
+        raise SbomError(msg)
+
+    return _render_vex_from_components(
+        components=components,
+        source=source,
+        timestamp=timestamp,
+    )
+
+
+def _render_vex_from_components(
+    *,
+    components: tuple[ComponentIdentity, ...],
+    source: VulnerabilitySource,
+    timestamp: datetime | None,
+) -> str:
+    try:
+        findings = source.findings_for_components(components)
+    except VulnerabilitySourceInputError as exc:
+        raise SbomError(str(exc)) from exc
+
+    return render_cyclonedx_vex_json(
+        components=components,
+        findings=findings,
+        timestamp=timestamp,
+    )
 
 
 def generate_vex_from_sbom(
@@ -32,28 +67,13 @@ def generate_vex_from_sbom(
         msg = "no components with package URLs were found"
         raise SbomError(msg)
 
-    queries = osv_queries_for_components(components)
-    if not queries:
-        msg = "no components with versioned package URLs were found"
-        raise SbomError(msg)
-
-    if osv_client is None:
-        client = osv_client_for_url(
-            osv_base_url=osv_base_url,
-            allow_public_osv=allow_public_osv,
-        )
-    else:
-        ensure_osv_client_allowed(
-            osv_client=osv_client,
-            osv_base_url=osv_base_url,
-            allow_public_osv=allow_public_osv,
-        )
-        client = osv_client
-
-    results = client.query_batch_packages(queries)
-    return render_cyclonedx_vex_json(
+    return _render_vex_from_components(
         components=components,
-        findings=findings_from_osv_results(components=components, results=results),
+        source=OsvSource(
+            client=osv_client,
+            osv_base_url=osv_base_url,
+            allow_public_osv=allow_public_osv,
+        ),
         timestamp=timestamp,
     )
 
@@ -65,13 +85,8 @@ def generate_vex_from_local_findings(
     timestamp: datetime | None = None,
 ) -> str:
     """Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and local findings."""
-    components = load_cyclonedx_json(input_file)
-    if not components:
-        msg = "no components with package URLs were found"
-        raise SbomError(msg)
-
-    return render_cyclonedx_vex_json(
-        components=components,
-        findings=load_local_findings(findings_file, components=components),
+    return generate_vex_from_source(
+        input_file=input_file,
+        source=LocalFindingsSource(path=findings_file),
         timestamp=timestamp,
     )

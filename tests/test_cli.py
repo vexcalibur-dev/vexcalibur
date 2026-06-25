@@ -250,6 +250,43 @@ def test_generate_requires_public_osv_opt_in_without_traceback(monkeypatch) -> N
     assert "Traceback" not in result.output
 
 
+def test_generate_rejects_unversioned_sbom_before_public_osv_policy(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV client should not be constructed without a query set")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    sbom_path = tmp_path / "sbom.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "version": 1,
+          "components": [
+            {
+              "type": "library",
+              "name": "django",
+              "purl": "pkg:pypi/django"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli.app, ["generate", str(sbom_path)])
+
+    assert result.exit_code == 1
+    assert "SBOM ingest failed" in result.output
+    assert "versioned package URLs" in result.output
+    assert "--allow-public-osv" not in result.output
+    assert "Traceback" not in result.output
+
+
 @pytest.mark.parametrize(
     "osv_url",
     (

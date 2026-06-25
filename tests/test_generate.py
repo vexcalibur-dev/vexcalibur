@@ -6,13 +6,24 @@ from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
 
 import vexcalibur.sources.osv as osv_module
-from vexcalibur.generate import generate_vex_from_local_findings, generate_vex_from_sbom
+from vexcalibur.domain import (
+    DEFAULT_ANALYSIS_DETAIL,
+    ComponentIdentity,
+    VulnerabilityFinding,
+    VulnerabilitySourceError,
+)
+from vexcalibur.generate import (
+    generate_vex_from_local_findings,
+    generate_vex_from_sbom,
+    generate_vex_from_source,
+)
 from vexcalibur.sbom import SbomError
 from vexcalibur.sources.osv import (
     OsvClient,
     OsvConfigurationError,
     OsvPackageQuery,
     OsvQueryResult,
+    OsvSource,
     OsvVulnerabilitySummary,
 )
 from vexcalibur.vex import parse_timestamp
@@ -31,6 +42,84 @@ class FakeOsvClient:
     def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
         self.queries.extend(queries)
         return self._results
+
+
+class FakeVulnerabilitySource:
+    def __init__(self, findings: tuple[VulnerabilityFinding, ...]) -> None:
+        self.components: tuple[ComponentIdentity, ...] = ()
+        self._findings = findings
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        self.components = components
+        return self._findings
+
+
+def test_generate_vex_from_source_uses_provider_neutral_source() -> None:
+    source = FakeVulnerabilitySource(
+        (
+            VulnerabilityFinding(
+                id="CVE-2026-0001",
+                source_name="Unit Test",
+                source_url="https://security.example.test/CVE-2026-0001",
+                component_ref="component:django",
+                purl="pkg:pypi/django@1.2",
+            ),
+        )
+    )
+
+    generated = generate_vex_from_source(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        source=source,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert sorted(component.ref for component in source.components) == [
+        "component:django",
+        "pkg:npm/minimist@0.0.8",
+    ]
+    assert '"name": "Unit Test"' in generated
+    assert DEFAULT_ANALYSIS_DETAIL in generated
+    assert "Detected by OSV" not in generated
+    assert VALIDATOR.validate_str(generated) is None
+
+
+def test_source_errors_share_provider_neutral_base_class() -> None:
+    from vexcalibur.sources.local import LocalFindingsError
+    from vexcalibur.sources.osv import OsvClientError
+
+    assert issubclass(LocalFindingsError, VulnerabilitySourceError)
+    assert issubclass(OsvClientError, VulnerabilitySourceError)
+
+
+def test_generate_vex_from_source_requires_public_osv_opt_in_for_osv_source() -> None:
+    client = FakeOsvClient()
+
+    with pytest.raises(OsvConfigurationError, match="--allow-public-osv"):
+        generate_vex_from_source(
+            input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+            source=OsvSource(client=client),
+            timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+        )
+
+    assert client.queries == []
+
+
+def test_generate_vex_from_source_allows_osv_source_with_public_opt_in() -> None:
+    client = FakeOsvClient()
+
+    generate_vex_from_source(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        source=OsvSource(client=client, allow_public_osv=True),
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert [(query.purl.to_string(), query.version) for query in client.queries] == [
+        ("pkg:npm/minimist@0.0.8", None),
+        ("pkg:pypi/django@1.2", None),
+    ]
 
 
 def test_generate_vex_from_sbom_queries_osv_and_renders_vex() -> None:

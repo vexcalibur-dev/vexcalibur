@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,12 @@ from urllib.parse import urlparse
 from packageurl import PackageURL
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.domain import (
+    ComponentIdentity,
+    VexAnalysisState,
+    VulnerabilityFinding,
+    VulnerabilitySourceError,
+)
 
 MAX_LOCAL_FINDINGS_BYTES = 5 * 1024 * 1024
 MAX_LOCAL_FINDINGS = 10_000
@@ -21,8 +27,22 @@ LOCAL_SOURCE_URL = "https://vexcalibur.dev/sources/local"
 LOCAL_ANALYSIS_DETAIL = "Provided by local findings file; manual exploitability analysis required."
 
 
-class LocalFindingsError(ValueError):
+class LocalFindingsError(VulnerabilitySourceError, ValueError):
     """Raised when a local findings document cannot be converted into VEX findings."""
+
+
+@dataclass(frozen=True)
+class LocalFindingsSource:
+    """Vulnerability source backed by a local findings JSON document."""
+
+    path: Path
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        """Return VEX-ready findings loaded from the local findings document."""
+        return load_local_findings(self.path, components=components)
 
 
 class _LocalFindingModel(BaseModel):
