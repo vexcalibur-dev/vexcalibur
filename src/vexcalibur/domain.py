@@ -9,7 +9,9 @@ from typing import Protocol
 
 from packageurl import PackageURL
 
-DEFAULT_ANALYSIS_DETAIL = "Detected by OSV; manual exploitability analysis required."
+DEFAULT_ANALYSIS_DETAIL = (
+    "Detected by vulnerability source; manual exploitability analysis required."
+)
 
 
 class VexAnalysisState(str, Enum):

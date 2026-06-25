@@ -10,13 +10,19 @@ from urllib.parse import quote, urlparse
 import httpx
 from packageurl import PackageURL
 
-from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding, VulnerabilitySourceInputError
+from vexcalibur.domain import (
+    ComponentIdentity,
+    VulnerabilityFinding,
+    VulnerabilitySourceError,
+    VulnerabilitySourceInputError,
+)
 
 DEFAULT_OSV_API_URL = "https://api.osv.dev"
 DEFAULT_MAX_OSV_PAGES = 100
 PUBLIC_OSV_API_HOST = "api.osv.dev"
 OSV_SOURCE_NAME = "OSV"
 OSV_SOURCE_URL = "https://osv.dev/"
+OSV_ANALYSIS_DETAIL = "Detected by OSV; manual exploitability analysis required."
 
 
 @dataclass(frozen=True)
@@ -56,7 +62,7 @@ class OsvPackageQuery:
     version: str | None = None
 
 
-class OsvClientError(RuntimeError):
+class OsvClientError(VulnerabilitySourceError):
     """Base error raised for OSV client failures."""
 
 
@@ -248,7 +254,9 @@ class OsvClient:
 class OsvSource:
     """Vulnerability source backed by an OSV-compatible API client."""
 
-    client: OsvClient
+    client: OsvClient | None = None
+    osv_base_url: str = DEFAULT_OSV_API_URL
+    allow_public_osv: bool = False
 
     def findings_for_components(
         self,
@@ -259,10 +267,24 @@ class OsvSource:
         if not queries:
             msg = "no components with versioned package URLs were found"
             raise VulnerabilitySourceInputError(msg)
+        client = self._client()
         return findings_from_osv_results(
             components=components,
-            results=self.client.query_batch_packages(queries),
+            results=client.query_batch_packages(queries),
         )
+
+    def _client(self) -> OsvClient:
+        if self.client is None:
+            return osv_client_for_url(
+                osv_base_url=self.osv_base_url,
+                allow_public_osv=self.allow_public_osv,
+            )
+        ensure_osv_client_allowed(
+            osv_client=self.client,
+            osv_base_url=self.osv_base_url,
+            allow_public_osv=self.allow_public_osv,
+        )
+        return self.client
 
 
 def osv_client_for_url(*, osv_base_url: str, allow_public_osv: bool) -> OsvClient:
@@ -344,6 +366,7 @@ def findings_from_osv_results(
                         component_ref=component.ref,
                         purl=result.purl,
                         modified=vulnerability.modified,
+                        analysis_detail=OSV_ANALYSIS_DETAIL,
                     )
                 )
 

@@ -6,7 +6,12 @@ from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
 
 import vexcalibur.sources.osv as osv_module
-from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+from vexcalibur.domain import (
+    DEFAULT_ANALYSIS_DETAIL,
+    ComponentIdentity,
+    VulnerabilityFinding,
+    VulnerabilitySourceError,
+)
 from vexcalibur.generate import (
     generate_vex_from_local_findings,
     generate_vex_from_sbom,
@@ -18,6 +23,7 @@ from vexcalibur.sources.osv import (
     OsvConfigurationError,
     OsvPackageQuery,
     OsvQueryResult,
+    OsvSource,
     OsvVulnerabilitySummary,
 )
 from vexcalibur.vex import parse_timestamp
@@ -75,7 +81,45 @@ def test_generate_vex_from_source_uses_provider_neutral_source() -> None:
         "pkg:npm/minimist@0.0.8",
     ]
     assert '"name": "Unit Test"' in generated
+    assert DEFAULT_ANALYSIS_DETAIL in generated
+    assert "Detected by OSV" not in generated
     assert VALIDATOR.validate_str(generated) is None
+
+
+def test_source_errors_share_provider_neutral_base_class() -> None:
+    from vexcalibur.sources.local import LocalFindingsError
+    from vexcalibur.sources.osv import OsvClientError
+
+    assert issubclass(LocalFindingsError, VulnerabilitySourceError)
+    assert issubclass(OsvClientError, VulnerabilitySourceError)
+
+
+def test_generate_vex_from_source_requires_public_osv_opt_in_for_osv_source() -> None:
+    client = FakeOsvClient()
+
+    with pytest.raises(OsvConfigurationError, match="--allow-public-osv"):
+        generate_vex_from_source(
+            input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+            source=OsvSource(client=client),
+            timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+        )
+
+    assert client.queries == []
+
+
+def test_generate_vex_from_source_allows_osv_source_with_public_opt_in() -> None:
+    client = FakeOsvClient()
+
+    generate_vex_from_source(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        source=OsvSource(client=client, allow_public_osv=True),
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert [(query.purl.to_string(), query.version) for query in client.queries] == [
+        ("pkg:npm/minimist@0.0.8", None),
+        ("pkg:pypi/django@1.2", None),
+    ]
 
 
 def test_generate_vex_from_sbom_queries_osv_and_renders_vex() -> None:
@@ -341,7 +385,6 @@ def test_generate_vex_from_sbom_rejects_sboms_without_versioned_purls(
             input_file=sbom_path,
             timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
             osv_client=client,
-            allow_public_osv=True,
         )
 
     assert client.queries == []

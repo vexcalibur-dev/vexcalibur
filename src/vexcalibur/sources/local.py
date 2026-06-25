@@ -13,7 +13,12 @@ from urllib.parse import urlparse
 from packageurl import PackageURL
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.domain import (
+    ComponentIdentity,
+    VexAnalysisState,
+    VulnerabilityFinding,
+    VulnerabilitySourceError,
+)
 
 MAX_LOCAL_FINDINGS_BYTES = 5 * 1024 * 1024
 MAX_LOCAL_FINDINGS = 10_000
@@ -22,7 +27,7 @@ LOCAL_SOURCE_URL = "https://vexcalibur.dev/sources/local"
 LOCAL_ANALYSIS_DETAIL = "Provided by local findings file; manual exploitability analysis required."
 
 
-class LocalFindingsError(ValueError):
+class LocalFindingsError(VulnerabilitySourceError, ValueError):
     """Raised when a local findings document cannot be converted into VEX findings."""
 
 

@@ -32,9 +32,10 @@ OSV Provider
 ------------
 
 The OSV client can contact the public OSV API by default. Library callers should prefer
-``osv_client_for_url`` or ``ensure_osv_url_allowed`` so public OSV access still requires
-an explicit opt-in before package URLs or SBOM-derived inventories leave the local
-environment.
+``OsvSource``, ``osv_client_for_url``, or ``ensure_osv_url_allowed`` so public OSV access
+still requires an explicit opt-in before package URLs or SBOM-derived inventories leave
+the local environment. ``generate_vex_from_source`` delegates policy to the supplied
+source adapter; custom network sources must enforce their own trust boundary.
 
 .. automodule:: vexcalibur.sources.osv
    :members:

@@ -12,8 +12,6 @@ from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
     OsvClient,
     OsvSource,
-    ensure_osv_client_allowed,
-    osv_client_for_url,
 )
 from vexcalibur.vex import render_cyclonedx_vex_json
 
@@ -69,22 +67,13 @@ def generate_vex_from_sbom(
         msg = "no components with package URLs were found"
         raise SbomError(msg)
 
-    if osv_client is None:
-        client = osv_client_for_url(
-            osv_base_url=osv_base_url,
-            allow_public_osv=allow_public_osv,
-        )
-    else:
-        ensure_osv_client_allowed(
-            osv_client=osv_client,
-            osv_base_url=osv_base_url,
-            allow_public_osv=allow_public_osv,
-        )
-        client = osv_client
-
     return _render_vex_from_components(
         components=components,
-        source=OsvSource(client=client),
+        source=OsvSource(
+            client=osv_client,
+            osv_base_url=osv_base_url,
+            allow_public_osv=allow_public_osv,
+        ),
         timestamp=timestamp,
     )
 

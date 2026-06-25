@@ -17,11 +17,13 @@ SBOMs can disclose internal package names, versions, ecosystem choices, and depe
 
 Commands that would send package URLs or SBOM-derived inventories to `https://api.osv.dev` fail unless the caller passes `--allow-public-osv`. Private mirrors use `--osv-url`. Offline workflows use `--findings-file` and do not construct an OSV client.
 
-The same policy applies to library callers that inject an `OsvClient`: Vexcalibur checks the client's effective base URL when it is knowable and rejects public OSV unless the caller opted in.
+The same policy applies to library callers that use `OsvSource` or inject an `OsvClient`: Vexcalibur checks the client's effective base URL when it is knowable and rejects public OSV unless the caller opted in.
 
 ## Source Providers
 
 Provider-specific code belongs under `vexcalibur.sources`. Provider clients should handle source-specific request formats, response validation, pagination, and policy checks. Source adapters implement the provider-neutral `VulnerabilitySource` protocol from `vexcalibur.domain` and return shared `VulnerabilityFinding` objects. Workflow modules should orchestrate providers through that protocol rather than duplicating provider parsing or source policy.
+
+Sources use `VulnerabilitySourceInputError` for component-shape problems that prevent a query from being built; generation surfaces those as SBOM input errors. Provider-specific configuration, network, parsing, and local-file failures should subclass `VulnerabilitySourceError` while keeping their more specific exception types so CLI and action callers can report accurate categories.
 
 OSV is the first network provider because it has a maintained public API and can also be mirrored internally. Local findings are the first offline provider. The architecture should leave room for additional sources without making Vexcalibur Python-specific or OSV-specific.
 
