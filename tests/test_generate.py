@@ -6,7 +6,12 @@ from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
 
 import vexcalibur.sources.osv as osv_module
-from vexcalibur.generate import generate_vex_from_local_findings, generate_vex_from_sbom
+from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+from vexcalibur.generate import (
+    generate_vex_from_local_findings,
+    generate_vex_from_sbom,
+    generate_vex_from_source,
+)
 from vexcalibur.sbom import SbomError
 from vexcalibur.sources.osv import (
     OsvClient,
@@ -31,6 +36,46 @@ class FakeOsvClient:
     def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
         self.queries.extend(queries)
         return self._results
+
+
+class FakeVulnerabilitySource:
+    def __init__(self, findings: tuple[VulnerabilityFinding, ...]) -> None:
+        self.components: tuple[ComponentIdentity, ...] = ()
+        self._findings = findings
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        self.components = components
+        return self._findings
+
+
+def test_generate_vex_from_source_uses_provider_neutral_source() -> None:
+    source = FakeVulnerabilitySource(
+        (
+            VulnerabilityFinding(
+                id="CVE-2026-0001",
+                source_name="Unit Test",
+                source_url="https://security.example.test/CVE-2026-0001",
+                component_ref="component:django",
+                purl="pkg:pypi/django@1.2",
+            ),
+        )
+    )
+
+    generated = generate_vex_from_source(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        source=source,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert sorted(component.ref for component in source.components) == [
+        "component:django",
+        "pkg:npm/minimist@0.0.8",
+    ]
+    assert '"name": "Unit Test"' in generated
+    assert VALIDATOR.validate_str(generated) is None
 
 
 def test_generate_vex_from_sbom_queries_osv_and_renders_vex() -> None:
@@ -296,6 +341,7 @@ def test_generate_vex_from_sbom_rejects_sboms_without_versioned_purls(
             input_file=sbom_path,
             timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
             osv_client=client,
+            allow_public_osv=True,
         )
 
     assert client.queries == []

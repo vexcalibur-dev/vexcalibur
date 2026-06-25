@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,20 @@ LOCAL_ANALYSIS_DETAIL = "Provided by local findings file; manual exploitability 
 
 class LocalFindingsError(ValueError):
     """Raised when a local findings document cannot be converted into VEX findings."""
+
+
+@dataclass(frozen=True)
+class LocalFindingsSource:
+    """Vulnerability source backed by a local findings JSON document."""
+
+    path: Path
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        """Return VEX-ready findings loaded from the local findings document."""
+        return load_local_findings(self.path, components=components)
 
 
 class _LocalFindingModel(BaseModel):

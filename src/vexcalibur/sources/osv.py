@@ -10,7 +10,7 @@ from urllib.parse import quote, urlparse
 import httpx
 from packageurl import PackageURL
 
-from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding, VulnerabilitySourceInputError
 
 DEFAULT_OSV_API_URL = "https://api.osv.dev"
 DEFAULT_MAX_OSV_PAGES = 100
@@ -242,6 +242,27 @@ class OsvClient:
             raise OsvResponseError(msg)
 
         return response_body
+
+
+@dataclass(frozen=True)
+class OsvSource:
+    """Vulnerability source backed by an OSV-compatible API client."""
+
+    client: OsvClient
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        """Return VEX-ready findings discovered from OSV query results."""
+        queries = osv_queries_for_components(components)
+        if not queries:
+            msg = "no components with versioned package URLs were found"
+            raise VulnerabilitySourceInputError(msg)
+        return findings_from_osv_results(
+            components=components,
+            results=self.client.query_batch_packages(queries),
+        )
 
 
 def osv_client_for_url(*, osv_base_url: str, allow_public_osv: bool) -> OsvClient:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Protocol
 
 from packageurl import PackageURL
 
@@ -44,3 +45,21 @@ class VulnerabilityFinding:
     modified: datetime | None = None
     analysis_state: VexAnalysisState = VexAnalysisState.IN_TRIAGE
     analysis_detail: str = DEFAULT_ANALYSIS_DETAIL
+
+
+class VulnerabilitySourceError(RuntimeError):
+    """Base error raised by provider-neutral vulnerability sources."""
+
+
+class VulnerabilitySourceInputError(VulnerabilitySourceError, ValueError):
+    """Raised when source-specific findings cannot be produced from the input components."""
+
+
+class VulnerabilitySource(Protocol):
+    """Provider-neutral contract for vulnerability finding sources."""
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        """Return VEX-ready vulnerability findings for SBOM components."""

@@ -6,9 +6,9 @@ Vexcalibur separates package inventory parsing, vulnerability source access, pro
 
 1. `vexcalibur generate` accepts a CycloneDX JSON SBOM path.
 2. `vexcalibur.sbom` validates the raw JSON shape, parses it with `cyclonedx-python-lib`, and extracts component identities with package URLs.
-3. The selected source produces provider-neutral `VulnerabilityFinding` objects:
-   - `vexcalibur.sources.osv` converts versioned component identities into OSV package queries, then maps OSV responses into findings.
-   - `vexcalibur.sources.local` reads local findings JSON and maps each finding to a component by `bom-ref` or unique package URL.
+3. The selected `VulnerabilitySource` produces provider-neutral `VulnerabilityFinding` objects:
+   - `vexcalibur.sources.osv.OsvSource` converts versioned component identities into OSV package queries, then maps OSV responses into findings.
+   - `vexcalibur.sources.local.LocalFindingsSource` reads local findings JSON and maps each finding to a component by `bom-ref` or unique package URL.
 4. `vexcalibur.vex` renders deterministic CycloneDX 1.6 VEX JSON.
 
 ## Trust Boundary
@@ -21,7 +21,7 @@ The same policy applies to library callers that inject an `OsvClient`: Vexcalibu
 
 ## Source Providers
 
-Provider-specific code belongs under `vexcalibur.sources`. Provider clients should handle source-specific request formats, response validation, pagination, and policy checks. Workflow modules should orchestrate providers and convert results into shared domain objects rather than duplicating provider parsing or source policy.
+Provider-specific code belongs under `vexcalibur.sources`. Provider clients should handle source-specific request formats, response validation, pagination, and policy checks. Source adapters implement the provider-neutral `VulnerabilitySource` protocol from `vexcalibur.domain` and return shared `VulnerabilityFinding` objects. Workflow modules should orchestrate providers through that protocol rather than duplicating provider parsing or source policy.
 
 OSV is the first network provider because it has a maintained public API and can also be mirrored internally. Local findings are the first offline provider. The architecture should leave room for additional sources without making Vexcalibur Python-specific or OSV-specific.
 
