@@ -317,7 +317,7 @@ def test_load_local_findings_rejects_too_many_findings(tmp_path: Path) -> None:
     )
     findings_path.write_text(f'{{"findings":[{findings}]}}', encoding="utf-8")
 
-    with pytest.raises(LocalFindingsError, match="at most"):
+    with pytest.raises(LocalFindingsError, match="invalid at findings"):
         load_local_findings(
             findings_path,
             components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
