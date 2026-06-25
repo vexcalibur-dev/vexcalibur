@@ -288,6 +288,29 @@ def test_generate_rejects_public_osv_url_variants_without_traceback(
     assert "Traceback" not in result.output
 
 
+def test_generate_rejects_empty_osv_url_without_traceback(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV client should not be constructed for an empty URL")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--osv-url",
+            "",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--osv-url must not be empty" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_generate_allows_private_osv_url_without_public_opt_in(monkeypatch) -> None:
     captured_base_urls: list[str] = []
 

@@ -52,7 +52,18 @@ class _LocalFindingModel(BaseModel):
     @classmethod
     def _validate_source_url(cls, value: str) -> str:
         parsed = urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        try:
+            hostname = parsed.hostname
+            port_is_valid = parsed.port is None or parsed.port >= 0
+        except ValueError as exc:
+            msg = "source_url must be an HTTP(S) URL with a host"
+            raise ValueError(msg) from exc
+        if (
+            _contains_url_forbidden_characters(value)
+            or parsed.scheme not in {"http", "https"}
+            or hostname is None
+            or not port_is_valid
+        ):
             msg = "source_url must be an HTTP(S) URL with a host"
             raise ValueError(msg)
         return value
@@ -152,8 +163,20 @@ def _validate_local_findings_document(
     try:
         return _LocalFindingsDocument.model_validate(raw_document)
     except ValidationError as exc:
-        msg = f"Local findings {path} is invalid: {exc.errors()[0]['msg']}"
+        error = exc.errors()[0]
+        location = _format_validation_location(error.get("loc", ()))
+        msg = f"Local findings {path} is invalid at {location}: {error['msg']}"
         raise LocalFindingsError(msg) from exc
+
+
+def _contains_url_forbidden_characters(value: str) -> bool:
+    return any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _format_validation_location(location: object) -> str:
+    if not isinstance(location, tuple) or not location:
+        return "document"
+    return ".".join(str(part) for part in location)
 
 
 def _finding_from_model(

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -208,24 +209,35 @@ def test_load_local_findings_rejects_invalid_purl(tmp_path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize("source_url", ("internal/vulns/CVE-2026-0001", "javascript:alert(1)"))
+@pytest.mark.parametrize(
+    "source_url",
+    (
+        "internal/vulns/CVE-2026-0001",
+        "javascript:alert(1)",
+        "https://@",
+        "https://:443",
+        "https://example.com:bad/vuln",
+        "https://example.com:99999/vuln",
+        "https://exa mple.test/vuln",
+    ),
+)
 def test_load_local_findings_rejects_unsafe_source_url(
     tmp_path: Path,
     source_url: str,
 ) -> None:
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(
-        f"""
-        {{
-          "findings": [
-            {{
-              "id": "CVE-2026-0001",
-              "component_ref": "component:django",
-              "source_url": "{source_url}"
-            }}
-          ]
-        }}
-        """,
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "CVE-2026-0001",
+                        "component_ref": "component:django",
+                        "source_url": source_url,
+                    }
+                ]
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -251,31 +263,34 @@ def test_load_local_findings_rejects_malformed_json(tmp_path: Path) -> None:
     ("document", "message"),
     (
         ("[]", "must be a JSON object"),
-        ("{}", "Field required"),
+        ("{}", r"invalid at findings"),
         (
             '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", "x": 1}]}',
-            "Extra",
+            r"invalid at findings\.0\.x",
         ),
-        ('{"findings": [{"id": "", "component_ref": "component:django"}]}', "at least 1"),
+        (
+            '{"findings": [{"id": "", "component_ref": "component:django"}]}',
+            r"invalid at findings\.0\.id",
+        ),
         (
             '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
             '"analysis_state": "needs_review"}]}',
-            "Input should be",
+            r"invalid at findings\.0\.analysis_state",
         ),
         (
             '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
             '"modified": "not-a-date"}]}',
-            "ISO-8601 timestamp string",
+            r"invalid at findings\.0\.modified",
         ),
         (
             '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
             '"modified": 1700000000}]}',
-            "ISO-8601 timestamp string",
+            r"invalid at findings\.0\.modified",
         ),
         (
             '{"findings": [{"id": "CVE-2026-0001", "component_ref": "component:django", '
             '"modified": "1700000000"}]}',
-            "ISO-8601 timestamp string",
+            r"invalid at findings\.0\.modified",
         ),
     ),
 )

@@ -147,7 +147,7 @@ def generate(
             vex_json = generate_vex_from_sbom(
                 input_file=input_file,
                 timestamp=parsed_timestamp,
-                osv_base_url=osv_url or DEFAULT_OSV_API_URL,
+                osv_base_url=DEFAULT_OSV_API_URL if osv_url is None else osv_url,
                 allow_public_osv=allow_public_osv,
             )
         else:
@@ -203,6 +203,9 @@ def _validate_generate_source_options(
 ) -> None:
     if offline and findings_file is None:
         msg = "--offline requires --findings-file in this release"
+        raise _GenerateSourceOptionError(msg)
+    if osv_url is not None and not osv_url.strip():
+        msg = "--osv-url must not be empty"
         raise _GenerateSourceOptionError(msg)
     if findings_file is None:
         return
