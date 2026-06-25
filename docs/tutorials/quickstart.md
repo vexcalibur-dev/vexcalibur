@@ -56,7 +56,7 @@ print("generated CycloneDX VEX")
 PY
 ```
 
-The output is a CycloneDX 1.6 document with VEX vulnerability entries for OSV matches. Findings are currently marked `in_triage` because Vexcalibur has not yet implemented user-authored exploitability analysis or policy-driven VEX states.
+The output is a CycloneDX 1.6 document with VEX vulnerability entries for OSV matches. OSV-derived findings are currently marked `in_triage` because Vexcalibur has not yet implemented policy-driven VEX state selection for OSV results.
 
 ## Use A Private OSV Mirror
 

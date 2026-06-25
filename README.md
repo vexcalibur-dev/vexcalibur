@@ -12,13 +12,14 @@ Implemented now:
 
 - Query OSV for one or more package URLs with `vexcalibur query-osv`.
 - Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON SBOM input with `vexcalibur generate`.
+- Generate VEX from local findings without contacting OSV.
 - Use the same installed package through the legacy `vexy` executable name.
 - Run offline tests, live OSV compatibility tests, linting, formatting checks, type checks, build checks, secret scanning, CodeQL, dependency review, and OpenSSF Scorecard.
 
 Not implemented yet:
 
 - CycloneDX XML SBOM input.
-- User-authored exploitability analysis details and policy-driven VEX states.
+- Policy-driven VEX state selection for OSV-derived findings.
 - Compatibility with existing `vexy` flags and output.
 - A stable `vexcalibur-action` release.
 
@@ -91,6 +92,12 @@ Illustrative private-mirror command, replacing the URL with your internal OSV en
 poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --osv-url https://osv.internal.example --output /tmp/vexcalibur-vex.json
 ```
 
+Offline command using local findings, replacing the file paths with your SBOM and findings JSON:
+
+```bash
+poetry run vexcalibur generate path/to/sbom.json --offline --findings-file path/to/findings.json --output /tmp/vexcalibur-vex.json
+```
+
 For a deterministic document timestamp, provide `--timestamp`. Live OSV data can change over time, so identical inputs can still produce different vulnerability findings unless OSV responses are controlled.
 
 ```bash
@@ -107,16 +114,21 @@ print(f"validated {len(vex.get('vulnerabilities', []))} generated VEX findings")
 PY
 ```
 
-The initial generator queries OSV for versioned components with package URLs, emits CycloneDX vulnerability entries for OSV matches, and marks findings `in_triage` by default.
+The OSV-backed generator queries OSV for versioned components with package URLs, emits CycloneDX vulnerability entries for OSV matches, and marks findings `in_triage` by default. Local findings can provide explicit VEX analysis states and details.
 
-Supported input for `generate`:
+Supported input for all `generate` source modes:
 
 - CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is not implemented yet.
 - SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
-- Components with package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
 - Unique `bom-ref` values for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
-- A non-zero query set. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
-- Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`.
+- Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`; offline local findings use `--findings-file`.
+
+Additional OSV-backed requirements:
+
+- Components need package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
+- The OSV query set must be non-empty. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
+
+Local findings mode can produce an empty VEX document when the findings file explicitly contains `"findings": []`.
 
 ## Project Links
 

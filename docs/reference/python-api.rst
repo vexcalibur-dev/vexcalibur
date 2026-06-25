@@ -26,7 +26,7 @@ Generation Workflow
 -------------------
 
 .. automodule:: vexcalibur.generate
-   :members: generate_vex_from_sbom
+   :members: generate_vex_from_sbom, generate_vex_from_local_findings
 
 OSV Provider
 ------------
@@ -37,5 +37,12 @@ an explicit opt-in before package URLs or SBOM-derived inventories leave the loc
 environment.
 
 .. automodule:: vexcalibur.sources.osv
+   :members:
+   :show-inheritance:
+
+Local Findings Provider
+-----------------------
+
+.. automodule:: vexcalibur.sources.local
    :members:
    :show-inheritance:

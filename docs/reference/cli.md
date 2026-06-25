@@ -40,7 +40,7 @@ poetry run vexcalibur query-osv \
 
 ## `vexcalibur generate`
 
-Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and OSV-compatible findings.
+Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and vulnerability findings.
 
 ```bash
 poetry run vexcalibur generate INPUT_FILE [OPTIONS]
@@ -54,6 +54,8 @@ Options:
 
 - `--output PATH`, `-o PATH`: write VEX JSON to a file instead of standard output.
 - `--timestamp TEXT`: ISO-8601 timestamp for deterministic output metadata.
+- `--findings-file PATH`: local Vexcalibur findings JSON file. When set, no OSV API request is sent.
+- `--offline`: disable network vulnerability sources. Currently requires `--findings-file`.
 - `--osv-url TEXT`: OSV API base URL. Use this for private OSV mirrors. Defaults to `https://api.osv.dev`.
 - `--allow-public-osv`: allow sending SBOM package URLs and versions to the public OSV API.
 
@@ -80,6 +82,18 @@ poetry run vexcalibur generate \
   --osv-url https://osv.internal.example \
   --output /tmp/vexcalibur-vex.json
 ```
+
+For offline workflows, use local findings:
+
+```bash
+poetry run vexcalibur generate \
+  path/to/sbom.json \
+  --offline \
+  --findings-file path/to/findings.json \
+  --output /tmp/vexcalibur-vex.json
+```
+
+`--findings-file` cannot be combined with `--allow-public-osv` or `--osv-url`.
 
 ## `vexy`
 
