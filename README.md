@@ -18,7 +18,7 @@ Implemented now:
 
 Not implemented yet:
 
-- CycloneDX XML SBOM input.
+- CycloneDX XML SBOM input ([tracked in issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43)).
 - Policy-driven VEX state selection for OSV-derived findings.
 - Compatibility with existing `vexy` flags and output.
 - A stable `vexcalibur-action` release.
@@ -118,7 +118,7 @@ The OSV-backed generator queries OSV for versioned components with package URLs,
 
 Supported input for all `generate` source modes:
 
-- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is not implemented yet.
+- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is intentionally deferred to [issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43).
 - SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
 - Unique `bom-ref` values for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
 - Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`; offline local findings use `--findings-file`.

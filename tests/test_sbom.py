@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from vexcalibur.sbom import SbomError, load_cyclonedx_json
+from vexcalibur.sbom import CYCLONEDX_XML_TRACKING_URL, SbomError, load_cyclonedx_json
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
 
@@ -151,6 +151,39 @@ def test_load_cyclonedx_json_rejects_invalid_json(tmp_path: Path) -> None:
 
     with pytest.raises(SbomError, match="not valid JSON"):
         load_cyclonedx_json(sbom_path)
+
+
+def test_load_cyclonedx_json_rejects_xml_with_tracking_issue() -> None:
+    with pytest.raises(SbomError) as exc_info:
+        load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-xml-simple.xml")
+
+    message = str(exc_info.value)
+    assert "CycloneDX XML" in message
+    assert "not supported yet" in message
+    assert CYCLONEDX_XML_TRACKING_URL in message
+
+
+@pytest.mark.parametrize(
+    "xml_content",
+    (
+        '<cdx:bom xmlns:cdx="http://cyclonedx.org/schema/bom/1.6" version="1" />',
+        '\ufeff<?xml version="1.0" encoding="UTF-8"?><bom version="1" />',
+        "<!---->" * 1_000 + '<bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1" />',
+    ),
+)
+def test_load_cyclonedx_json_rejects_xml_variants_with_tracking_issue(
+    tmp_path: Path,
+    xml_content: str,
+) -> None:
+    sbom_path = tmp_path / "cyclonedx.xml"
+    sbom_path.write_text(xml_content, encoding="utf-8")
+
+    with pytest.raises(SbomError) as exc_info:
+        load_cyclonedx_json(sbom_path)
+
+    message = str(exc_info.value)
+    assert "CycloneDX XML" in message
+    assert CYCLONEDX_XML_TRACKING_URL in message
 
 
 def test_load_cyclonedx_json_rejects_non_object_json(tmp_path: Path) -> None:
