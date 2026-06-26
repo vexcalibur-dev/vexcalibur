@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1">
+  <components>
+    <component type="library" bom-ref="pkg:npm/minimist@0.0.8">
+      <name>minimist</name>
+      <version>0.0.8</version>
+      <purl>pkg:npm/minimist@0.0.8</purl>
+    </component>
+    <component type="library" bom-ref="component:django">
+      <name>django</name>
+      <version>1.2</version>
+      <purl>pkg:pypi/django@1.2</purl>
+    </component>
+  </components>
+</bom>

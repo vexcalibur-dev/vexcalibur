@@ -13,8 +13,40 @@ Domain Objects
 SBOM Ingest
 -----------
 
+Use ``load_cyclonedx_sbom`` for untrusted CycloneDX input. It applies Vexcalibur's
+size limits, XML parser hardening, component limits, and duplicate-reference checks
+before returning component identities. ``load_cyclonedx_json`` is the JSON-only
+compatibility helper.
+
+.. list-table:: SBOM loader contract
+   :header-rows: 1
+
+   * - Loader
+     - Accepted formats
+     - Encodings
+     - Limits and filtering
+   * - ``load_cyclonedx_sbom``
+     - CycloneDX JSON ``1.4``, ``1.5``, or ``1.6``; CycloneDX XML rooted at
+       ``bom`` in the ``http://cyclonedx.org/schema/bom/1.4``, ``/1.5``, or
+       ``/1.6`` namespace.
+     - JSON must be UTF-8. XML may use parser-detected XML encodings such as
+       UTF-8 or UTF-16.
+     - Files over 10 MiB, more than 10,000 components, nesting deeper than 50
+       component levels, malformed package URLs, and duplicate returned
+       ``bom-ref`` values raise ``SbomError``. Components without package URLs
+       are ignored.
+   * - ``load_cyclonedx_json``
+     - CycloneDX JSON ``1.4``, ``1.5``, or ``1.6`` only.
+     - UTF-8 JSON.
+     - Applies the same file size, component count, nesting, package URL, and
+       duplicate returned ``bom-ref`` checks as ``load_cyclonedx_sbom``.
+
+Both loaders return a tuple of ``ComponentIdentity`` values sorted by package URL
+and component reference. XML input also rejects DTD, entity, and
+external-reference declarations before component extraction.
+
 .. automodule:: vexcalibur.sbom
-   :members: SbomError, load_cyclonedx_json
+   :members: SbomError, load_cyclonedx_sbom, load_cyclonedx_json
 
 VEX Rendering
 -------------

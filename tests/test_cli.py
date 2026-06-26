@@ -421,6 +421,51 @@ def test_generate_offline_uses_local_findings_without_osv_client(
     assert "Traceback" not in result.output
 
 
+def test_generate_offline_accepts_xml_input_file(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("offline generation should not construct an OSV client")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        """
+        {
+          "findings": [
+            {
+              "id": "CVE-2026-0001",
+              "component_ref": "component:django",
+              "analysis_state": "not_affected",
+              "analysis_detail": "Reviewed and not affected."
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-xml-simple.xml"),
+            "--offline",
+            "--findings-file",
+            str(findings_path),
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"id": "CVE-2026-0001"' in result.output
+    assert '"state": "not_affected"' in result.output
+    assert "Traceback" not in result.output
+
+
 def test_generate_findings_file_uses_local_findings_without_osv_client(
     monkeypatch,
     tmp_path: Path,
@@ -564,6 +609,30 @@ def test_generate_writes_output_file(monkeypatch, tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert result.output == ""
     assert output_path.read_text(encoding="utf-8") == "{}\n"
+
+
+def test_generate_accepts_xml_input_file(monkeypatch) -> None:
+    captured_input_files: list[Path] = []
+
+    def fake_generate_vex_from_sbom(**kwargs) -> str:
+        captured_input_files.append(kwargs["input_file"])
+        return "{}\n"
+
+    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-xml-simple.xml"),
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == "{}\n"
+    assert captured_input_files == [FIXTURE_ROOT / "cyclonedx-xml-simple.xml"]
 
 
 def test_generate_reports_invalid_timestamp_without_traceback() -> None:

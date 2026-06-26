@@ -2,50 +2,117 @@
 
 from __future__ import annotations
 
+import codecs
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cyclonedx.exception import CycloneDxException
 from cyclonedx.model.bom import Bom
 from cyclonedx.model.component import Component
+from defusedxml import ElementTree as DefusedElementTree  # type: ignore[import-untyped]
+from defusedxml.common import DefusedXmlException  # type: ignore[import-untyped]
 
 from vexcalibur.domain import ComponentIdentity
 
-SUPPORTED_CYCLONEDX_JSON_VERSIONS = {"1.4", "1.5", "1.6"}
-CYCLONEDX_XML_TRACKING_URL = "https://github.com/vexcalibur-dev/vexcalibur/issues/43"
+SUPPORTED_CYCLONEDX_VERSIONS = frozenset(("1.4", "1.5", "1.6"))
+SUPPORTED_CYCLONEDX_JSON_VERSIONS = SUPPORTED_CYCLONEDX_VERSIONS
+SUPPORTED_CYCLONEDX_XML_VERSIONS = SUPPORTED_CYCLONEDX_VERSIONS
 MAX_SBOM_BYTES = 10 * 1024 * 1024
 MAX_COMPONENTS = 10_000
 MAX_COMPONENT_DEPTH = 50
+CYCLONEDX_XML_NAMESPACE_PREFIX = "http://cyclonedx.org/schema/bom/"
+# cyclonedx-python-lib models the latest component enum; XML preflight keeps older
+# schema namespaces strict before handing the tree to the canonical deserializer.
+CYCLONEDX_COMPONENT_TYPES_BY_VERSION = {
+    "1.4": frozenset(
+        (
+            "application",
+            "container",
+            "device",
+            "file",
+            "firmware",
+            "framework",
+            "library",
+            "operating-system",
+        )
+    ),
+    "1.5": frozenset(
+        (
+            "application",
+            "container",
+            "data",
+            "device",
+            "device-driver",
+            "file",
+            "firmware",
+            "framework",
+            "library",
+            "machine-learning-model",
+            "operating-system",
+            "platform",
+        )
+    ),
+    "1.6": frozenset(
+        (
+            "application",
+            "container",
+            "cryptographic-asset",
+            "data",
+            "device",
+            "device-driver",
+            "file",
+            "firmware",
+            "framework",
+            "library",
+            "machine-learning-model",
+            "operating-system",
+            "platform",
+        )
+    ),
+}
 
 
 class SbomError(ValueError):
     """Raised when an SBOM cannot be parsed into supported component data."""
 
 
+def load_cyclonedx_sbom(path: Path) -> tuple[ComponentIdentity, ...]:
+    """Load supported component identities from a CycloneDX JSON or XML SBOM."""
+    raw_content = _read_sbom_bytes(path)
+    if _looks_like_xml(raw_content):
+        return _component_identities_from_bom(_parse_cyclonedx_xml(raw_content, path=path))
+
+    return _component_identities_from_bom(_parse_cyclonedx_json(raw_content, path=path))
+
+
 def load_cyclonedx_json(path: Path) -> tuple[ComponentIdentity, ...]:
     """Load supported component identities from a CycloneDX JSON SBOM."""
+    raw_content = _read_sbom_bytes(path)
+    if _looks_like_xml(raw_content):
+        msg = f"SBOM {path} appears to be XML; use load_cyclonedx_sbom for XML input"
+        raise SbomError(msg)
+
+    return _component_identities_from_bom(_parse_cyclonedx_json(raw_content, path=path))
+
+
+def _read_sbom_bytes(path: Path) -> bytes:
     try:
         if path.stat().st_size > MAX_SBOM_BYTES:
             msg = f"SBOM {path} exceeds the {MAX_SBOM_BYTES} byte limit"
             raise SbomError(msg)
-        raw_content = path.read_text(encoding="utf-8")
+        return path.read_bytes()
     except OSError as exc:
         msg = f"Could not read SBOM {path}: {exc}"
         raise SbomError(msg) from exc
+
+
+def _parse_cyclonedx_json(raw_content: bytes, *, path: Path) -> Bom:
+    try:
+        raw_bom = json.loads(raw_content.decode("utf-8"))
     except UnicodeDecodeError as exc:
         msg = f"SBOM {path} is not valid UTF-8 JSON"
         raise SbomError(msg) from exc
-
-    if _looks_like_xml(raw_content):
-        msg = (
-            f"SBOM {path} appears to be CycloneDX XML, which is not supported yet; "
-            f"track XML support at {CYCLONEDX_XML_TRACKING_URL}"
-        )
-        raise SbomError(msg)
-
-    try:
-        raw_bom = json.loads(raw_content)
     except json.JSONDecodeError as exc:
         msg = f"SBOM {path} is not valid JSON: {exc.msg}"
         raise SbomError(msg) from exc
@@ -57,7 +124,37 @@ def load_cyclonedx_json(path: Path) -> tuple[ComponentIdentity, ...]:
     except (CycloneDxException, KeyError, RecursionError, TypeError, ValueError) as exc:
         msg = f"SBOM {path} is not a supported CycloneDX JSON document: {exc}"
         raise SbomError(msg) from exc
+    return cast(Bom, bom)
 
+
+def _parse_cyclonedx_xml(raw_content: bytes, *, path: Path) -> Bom:
+    root, namespace, spec_version = _validate_cyclonedx_xml_shape(raw_content, path=path)
+    _validate_cyclonedx_xml_components(
+        root,
+        namespace=namespace,
+        spec_version=spec_version,
+        path=path,
+    )
+    _prune_foreign_xml_elements(root, namespace=namespace)
+
+    try:
+        bom = Bom.from_xml(data=root, default_namespace=namespace)  # type: ignore[attr-defined]
+    except (
+        AttributeError,
+        CycloneDxException,
+        KeyError,
+        RecursionError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        msg = f"SBOM {path} is not a supported CycloneDX XML document: {exc}"
+        raise SbomError(msg) from exc
+    if bom is None:
+        return Bom()
+    return cast(Bom, bom)
+
+
+def _component_identities_from_bom(bom: Bom) -> tuple[ComponentIdentity, ...]:
     components = _component_tree(bom)
     identities = tuple(_component_identity(component) for component in components if component.purl)
     _validate_unique_component_refs(identities)
@@ -131,8 +228,204 @@ def _validate_raw_component(component: Any, *, path: Path) -> None:
         raise SbomError(msg)
 
 
-def _looks_like_xml(raw_content: str) -> bool:
-    return raw_content.lstrip("\ufeff \t\r\n").startswith("<")
+def _validate_cyclonedx_xml_shape(raw_content: bytes, *, path: Path) -> tuple[Any, str, str]:
+    try:
+        root = DefusedElementTree.fromstring(
+            raw_content,
+            forbid_dtd=True,
+            forbid_entities=True,
+            forbid_external=True,
+        )
+    except DefusedXmlException as exc:
+        msg = f"SBOM {path} XML must not contain DTD, entity, or external reference declarations"
+        raise SbomError(msg) from exc
+    except DefusedElementTree.ParseError as exc:
+        msg = f"SBOM {path} is not valid XML: {exc}"
+        raise SbomError(msg) from exc
+    except (LookupError, UnicodeError) as exc:
+        msg = f"SBOM {path} uses an unsupported or invalid XML encoding"
+        raise SbomError(msg) from exc
+
+    namespace, spec_version = _cyclonedx_xml_namespace_and_version(root.tag, path=path)
+    if spec_version not in SUPPORTED_CYCLONEDX_XML_VERSIONS:
+        supported_versions = ", ".join(sorted(SUPPORTED_CYCLONEDX_XML_VERSIONS))
+        msg = (
+            f"SBOM {path} has unsupported CycloneDX XML schema version {spec_version!r}; "
+            f"supported: {supported_versions}"
+        )
+        raise SbomError(msg)
+    bom_version = root.get("version")
+    if bom_version is not None and not _is_positive_integer_text(bom_version):
+        msg = f"SBOM {path} XML attribute 'version' must be a positive integer when present"
+        raise SbomError(msg)
+    return root, namespace, spec_version
+
+
+def _is_positive_integer_text(value: str) -> bool:
+    return value.isdecimal() and any(character != "0" for character in value)
+
+
+def _validate_cyclonedx_xml_components(
+    root: Any,
+    *,
+    namespace: str,
+    spec_version: str,
+    path: Path,
+) -> None:
+    component_count = 0
+    seen_refs: set[str] = set()
+    stack: list[tuple[Any, int]] = [
+        (component, 0) for component in _cyclonedx_xml_component_roots(root, namespace=namespace)
+    ]
+    while stack:
+        component, depth = stack.pop()
+        component_count += 1
+        if depth > MAX_COMPONENT_DEPTH:
+            msg = f"SBOM {path} exceeds the component nesting limit of {MAX_COMPONENT_DEPTH}"
+            raise SbomError(msg)
+        if component_count > MAX_COMPONENTS:
+            msg = f"SBOM {path} contains more than {MAX_COMPONENTS} components"
+            raise SbomError(msg)
+        _validate_unique_xml_component_ref(component, seen_refs=seen_refs, path=path)
+        _validate_xml_component_type(component.get("type"), spec_version=spec_version, path=path)
+        stack.extend(
+            (child_component, depth + 1)
+            for child_component in _cyclonedx_xml_child_components(
+                component,
+                namespace=namespace,
+            )
+        )
+
+
+def _validate_unique_xml_component_ref(component: Any, *, seen_refs: set[str], path: Path) -> None:
+    component_ref = component.get("bom-ref")
+    if not isinstance(component_ref, str) or component_ref.strip() == "":
+        return
+    if component_ref in seen_refs:
+        msg = f"SBOM {path} contains duplicate component bom-ref values: {component_ref}"
+        raise SbomError(msg)
+    seen_refs.add(component_ref)
+
+
+def _validate_xml_component_type(component_type: Any, *, spec_version: str, path: Path) -> None:
+    if not isinstance(component_type, str) or component_type.strip() == "":
+        msg = f"SBOM {path} XML components must include a type"
+        raise SbomError(msg)
+    component_type = component_type.strip()
+    supported_types = CYCLONEDX_COMPONENT_TYPES_BY_VERSION[spec_version]
+    if component_type not in supported_types:
+        supported_type_list = ", ".join(sorted(supported_types))
+        msg = (
+            f"SBOM {path} XML component type {component_type!r} is not supported "
+            f"for CycloneDX {spec_version}; supported: {supported_type_list}"
+        )
+        raise SbomError(msg)
+
+
+def _cyclonedx_xml_component_roots(root: Any, *, namespace: str) -> tuple[Any, ...]:
+    components: list[Any] = []
+    for child in root:
+        if _is_cyclonedx_xml_element(child, namespace=namespace, local_name="metadata"):
+            components.extend(
+                metadata_child
+                for metadata_child in child
+                if _is_cyclonedx_xml_element(
+                    metadata_child,
+                    namespace=namespace,
+                    local_name="component",
+                )
+            )
+        elif _is_cyclonedx_xml_element(child, namespace=namespace, local_name="components"):
+            components.extend(
+                component_child
+                for component_child in child
+                if _is_cyclonedx_xml_element(
+                    component_child,
+                    namespace=namespace,
+                    local_name="component",
+                )
+            )
+    return tuple(components)
+
+
+def _prune_foreign_xml_elements(element: Any, *, namespace: str) -> None:
+    stack = [element]
+    while stack:
+        current = stack.pop()
+        for child in tuple(current):
+            if _is_cyclonedx_xml_namespace(child, namespace=namespace):
+                stack.append(child)
+                continue
+            current.remove(child)
+
+
+def _cyclonedx_xml_child_components(component: Any, *, namespace: str) -> tuple[Any, ...]:
+    components: list[Any] = []
+    for child in component:
+        if not _is_cyclonedx_xml_element(child, namespace=namespace, local_name="components"):
+            continue
+        components.extend(
+            component_child
+            for component_child in child
+            if _is_cyclonedx_xml_element(
+                component_child, namespace=namespace, local_name="component"
+            )
+        )
+    return tuple(components)
+
+
+def _cyclonedx_xml_namespace_and_version(tag: str, *, path: Path) -> tuple[str, str]:
+    namespace, local_name = _split_xml_tag(tag)
+    if local_name != "bom" or namespace is None:
+        msg = f"SBOM {path} must be a CycloneDX XML document"
+        raise SbomError(msg)
+    if not namespace.startswith(CYCLONEDX_XML_NAMESPACE_PREFIX):
+        msg = f"SBOM {path} must use a CycloneDX XML namespace"
+        raise SbomError(msg)
+    return namespace, namespace.removeprefix(CYCLONEDX_XML_NAMESPACE_PREFIX)
+
+
+def _is_cyclonedx_xml_element(element: Any, *, namespace: str, local_name: str) -> bool:
+    element_namespace, element_local_name = _split_xml_tag(element.tag)
+    return element_namespace == namespace and element_local_name == local_name
+
+
+def _is_cyclonedx_xml_namespace(element: Any, *, namespace: str) -> bool:
+    element_namespace, _ = _split_xml_tag(element.tag)
+    return element_namespace == namespace
+
+
+def _split_xml_tag(tag: str) -> tuple[str | None, str]:
+    if tag.startswith("{") and "}" in tag:
+        namespace, local_name = tag[1:].split("}", maxsplit=1)
+        return namespace, local_name
+    return None, tag
+
+
+def _looks_like_xml(raw_content: bytes) -> bool:
+    if _looks_like_ascii_compatible_xml(raw_content):
+        return True
+    for encoding in _candidate_xml_encodings(raw_content):
+        try:
+            if raw_content.decode(encoding).lstrip("\ufeff \t\r\n").startswith("<"):
+                return True
+        except UnicodeDecodeError:
+            continue
+    return False
+
+
+def _looks_like_ascii_compatible_xml(raw_content: bytes) -> bool:
+    if raw_content.startswith(codecs.BOM_UTF8):
+        raw_content = raw_content[len(codecs.BOM_UTF8) :]
+    return raw_content.lstrip(b" \t\r\n").startswith(b"<")
+
+
+def _candidate_xml_encodings(raw_content: bytes) -> tuple[str, ...]:
+    if raw_content.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return ("utf-32",)
+    if raw_content.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return ("utf-16",)
+    return ("utf-32-le", "utf-32-be", "utf-16-le", "utf-16-be")
 
 
 def _component_tree(bom: Bom) -> tuple[Component, ...]:

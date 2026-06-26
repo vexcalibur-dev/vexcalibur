@@ -2,7 +2,7 @@
 
 Vexcalibur is a pre-alpha toolkit for producing and transforming Vulnerability Exploitability eXchange documents from SBOMs and vulnerability data sources.
 
-The project is intentionally general-purpose. The current implementation focuses on CycloneDX JSON SBOM ingest, OSV-backed finding discovery, and CycloneDX 1.6 VEX output. Public OSV access is fail-closed: commands must opt in with `--allow-public-osv` before package URLs, versions, or SBOM-derived inventories are sent to `https://api.osv.dev`.
+The project is intentionally general-purpose. The current implementation focuses on CycloneDX JSON and XML SBOM ingest, OSV-backed finding discovery, and CycloneDX 1.6 VEX output. Public OSV access is fail-closed: commands must opt in with `--allow-public-osv` before package URLs, versions, or SBOM-derived inventories are sent to `https://api.osv.dev`.
 
 ## Start Here
 

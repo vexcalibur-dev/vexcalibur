@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from vexcalibur.domain import ComponentIdentity, VulnerabilitySource, VulnerabilitySourceInputError
-from vexcalibur.sbom import SbomError, load_cyclonedx_json
+from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
 from vexcalibur.sources.local import LocalFindingsSource
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
@@ -22,8 +22,8 @@ def generate_vex_from_source(
     source: VulnerabilitySource,
     timestamp: datetime | None = None,
 ) -> str:
-    """Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and source provider."""
-    components = load_cyclonedx_json(input_file)
+    """Generate CycloneDX VEX JSON from a CycloneDX SBOM and source provider."""
+    components = load_cyclonedx_sbom(input_file)
     if not components:
         msg = "no components with package URLs were found"
         raise SbomError(msg)
@@ -61,8 +61,8 @@ def generate_vex_from_sbom(
     osv_base_url: str = DEFAULT_OSV_API_URL,
     allow_public_osv: bool = False,
 ) -> str:
-    """Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM."""
-    components = load_cyclonedx_json(input_file)
+    """Generate CycloneDX VEX JSON from a CycloneDX SBOM."""
+    components = load_cyclonedx_sbom(input_file)
     if not components:
         msg = "no components with package URLs were found"
         raise SbomError(msg)
@@ -84,7 +84,7 @@ def generate_vex_from_local_findings(
     findings_file: Path,
     timestamp: datetime | None = None,
 ) -> str:
-    """Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and local findings."""
+    """Generate CycloneDX VEX JSON from a CycloneDX SBOM and local findings."""
     return generate_vex_from_source(
         input_file=input_file,
         source=LocalFindingsSource(path=findings_file),

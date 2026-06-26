@@ -2699,4 +2699,4 @@ docs = ["myst-parser", "sphinx", "sphinx-autodoc-typehints"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "19f10f52b6983087475661464f3aaff159108860a1f8d1c74dc868074edcb6fc"
+content-hash = "bcce052b8888e39951748436f9cd9bcf75d763bf758190eb6463965ec85be9fa"

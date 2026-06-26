@@ -4,8 +4,8 @@ Vexcalibur separates package inventory parsing, vulnerability source access, pro
 
 ## Current Flow
 
-1. `vexcalibur generate` accepts a CycloneDX JSON SBOM path.
-2. `vexcalibur.sbom` validates the raw JSON shape, parses it with `cyclonedx-python-lib`, and extracts component identities with package URLs.
+1. `vexcalibur generate` accepts a CycloneDX JSON or XML SBOM path.
+2. `vexcalibur.sbom` validates the raw document shape, parses CycloneDX JSON with `cyclonedx-python-lib`, parses CycloneDX XML with `defusedxml`, and extracts component identities with package URLs.
 3. The selected `VulnerabilitySource` produces provider-neutral `VulnerabilityFinding` objects:
    - `vexcalibur.sources.osv.OsvSource` converts versioned component identities into OSV package queries, then maps OSV responses into findings.
    - `vexcalibur.sources.local.LocalFindingsSource` reads local findings JSON and maps each finding to a component by `bom-ref` or unique package URL.

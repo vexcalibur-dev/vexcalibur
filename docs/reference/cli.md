@@ -102,7 +102,7 @@ for `--allow-public-osv`.
 
 ## `vexcalibur generate`
 
-Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM and vulnerability findings.
+Generate CycloneDX VEX JSON from a CycloneDX JSON or XML SBOM and vulnerability findings.
 
 ```bash
 poetry run vexcalibur generate INPUT_FILE [OPTIONS]
@@ -110,9 +110,12 @@ poetry run vexcalibur generate INPUT_FILE [OPTIONS]
 
 Arguments:
 
-- `INPUT_FILE`: readable CycloneDX JSON SBOM file.
+- `INPUT_FILE`: readable CycloneDX JSON or XML SBOM file.
 
-CycloneDX XML SBOM input is intentionally deferred to [issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43). XML files fail with an unsupported-format error instead of being treated as malformed JSON.
+JSON input must be UTF-8. XML input must be rooted at `bom` in the
+`http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace. XML may use
+parser-detected XML encodings such as UTF-8 or UTF-16. DTD, entity, and
+external-reference declarations are rejected.
 
 Options:
 
