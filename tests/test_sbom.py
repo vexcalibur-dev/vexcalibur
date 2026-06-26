@@ -427,10 +427,32 @@ def test_load_cyclonedx_sbom_ignores_foreign_namespace_component_elements(
     assert load_cyclonedx_sbom(sbom_path) == ()
 
 
-def test_load_cyclonedx_sbom_ignores_foreign_namespace_component_fields(
+def test_load_cyclonedx_sbom_ignores_foreign_namespace_components_inside_cdx_container(
     tmp_path: Path,
 ) -> None:
-    sbom_path = tmp_path / "foreign-fields.xml"
+    sbom_path = tmp_path / "foreign-component-child.xml"
+    sbom_path.write_text(
+        f"""\
+        <bom xmlns="{XML_NAMESPACE}" xmlns:ext="{EXTENSION_NAMESPACE}" version="1">
+          <components>
+            <ext:component type="library" bom-ref="component:foreign">
+              <name>foreign</name>
+              <version>1.0.0</version>
+              <purl>pkg:pypi/foreign@1.0.0</purl>
+            </ext:component>
+          </components>
+        </bom>
+        """,
+        encoding="utf-8",
+    )
+
+    assert load_cyclonedx_sbom(sbom_path) == ()
+
+
+def test_load_cyclonedx_sbom_rejects_components_without_cyclonedx_required_fields(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "missing-cyclonedx-fields.xml"
     sbom_path.write_text(
         f"""\
         <bom xmlns="{XML_NAMESPACE}" xmlns:ext="{EXTENSION_NAMESPACE}" version="1">
@@ -446,7 +468,8 @@ def test_load_cyclonedx_sbom_ignores_foreign_namespace_component_fields(
         encoding="utf-8",
     )
 
-    assert load_cyclonedx_sbom(sbom_path) == ()
+    with pytest.raises(SbomError, match="not a supported CycloneDX XML document"):
+        load_cyclonedx_sbom(sbom_path)
 
 
 def test_load_cyclonedx_sbom_rejects_xml_dtd_declarations(tmp_path: Path) -> None:
@@ -541,6 +564,21 @@ def test_load_cyclonedx_sbom_accepts_sparse_xml_bom(tmp_path: Path) -> None:
     assert load_cyclonedx_sbom(sbom_path) == ()
 
 
+def test_load_cyclonedx_sbom_accepts_deep_same_namespace_non_component_xml(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "deep-extension.xml"
+    sbom_path.write_text(
+        f'<bom xmlns="{XML_NAMESPACE}" version="1">'
+        + "<extension>" * 1200
+        + "</extension>" * 1200
+        + "</bom>",
+        encoding="utf-8",
+    )
+
+    assert load_cyclonedx_sbom(sbom_path) == ()
+
+
 def test_load_cyclonedx_sbom_accepts_utf16_xml(tmp_path: Path) -> None:
     sbom_path = tmp_path / "utf16.xml"
     sbom_path.write_bytes(
@@ -563,8 +601,7 @@ def test_load_cyclonedx_sbom_accepts_utf16be_xml_without_bom(tmp_path: Path) -> 
         (
             " \n\t"
             + _xml_bom("<components>" + _xml_component(ref="component:demo") + "</components>")
-        )
-        .encode("utf-16-be")
+        ).encode("utf-16-be")
     )
 
     components = load_cyclonedx_sbom(sbom_path)
@@ -582,8 +619,7 @@ def test_load_cyclonedx_sbom_accepts_utf16le_xml_without_bom_and_leading_whitesp
         (
             " \n\t"
             + _xml_bom("<components>" + _xml_component(ref="component:demo") + "</components>")
-        )
-        .encode("utf-16-le")
+        ).encode("utf-16-le")
     )
 
     components = load_cyclonedx_sbom(sbom_path)
@@ -613,9 +649,7 @@ def test_load_cyclonedx_sbom_accepts_xml_declared_iso_8859_1(tmp_path: Path) -> 
 
     assert [
         (component.ref, component.name, component.purl.to_string()) for component in components
-    ] == [
-        ("component:cafe", "café", "pkg:pypi/cafe@1.0.0")
-    ]
+    ] == [("component:cafe", "café", "pkg:pypi/cafe@1.0.0")]
 
 
 def test_load_cyclonedx_sbom_rejects_unsupported_xml_encoding(tmp_path: Path) -> None:
@@ -650,9 +684,7 @@ def test_load_cyclonedx_sbom_rejects_missing_xml_component_type(tmp_path: Path) 
     sbom_path = tmp_path / "missing-type.xml"
     sbom_path.write_text(
         _xml_bom(
-            "<components>"
-            + _xml_component_without_type(ref="component:demo")
-            + "</components>"
+            "<components>" + _xml_component_without_type(ref="component:demo") + "</components>"
         ),
         encoding="utf-8",
     )
@@ -689,7 +721,38 @@ def test_load_cyclonedx_sbom_rejects_xml_component_type_unsupported_by_version(
         encoding="utf-8",
     )
 
-    with pytest.raises(SbomError, match="not supported for CycloneDX 1.5"):
+    with pytest.raises(SbomError, match=r"not supported for CycloneDX 1\.5"):
+        load_cyclonedx_sbom(sbom_path)
+
+
+def test_load_cyclonedx_sbom_rejects_nested_xml_component_type_unsupported_by_version(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "unsupported-nested-type.xml"
+    sbom_path.write_text(
+        '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1">'
+        "<components>"
+        '<component type="library" bom-ref="component:parent">'
+        "<name>parent</name>"
+        "<version>1.0.0</version>"
+        "<purl>pkg:pypi/parent@1.0.0</purl>"
+        "<components>"
+        + _xml_component(ref="component:child", purl="pkg:pypi/child@1.0.0")
+        + "</components>"
+        "<components>"
+        + _xml_component(
+            ref="component:crypto",
+            component_type="cryptographic-asset",
+            purl="pkg:pypi/crypto@1.0.0",
+        )
+        + "</components>"
+        "</component>"
+        "</components>"
+        "</bom>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match=r"not supported for CycloneDX 1\.5"):
         load_cyclonedx_sbom(sbom_path)
 
 
@@ -698,6 +761,36 @@ def test_load_cyclonedx_sbom_rejects_non_integer_xml_bom_version(tmp_path: Path)
     sbom_path.write_text(f'<bom xmlns="{XML_NAMESPACE}" version="1.0" />', encoding="utf-8")
 
     with pytest.raises(SbomError, match=r"version.*integer"):
+        load_cyclonedx_sbom(sbom_path)
+
+
+def test_load_cyclonedx_sbom_rejects_non_positive_xml_bom_version(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "zero-version.xml"
+    sbom_path.write_text(f'<bom xmlns="{XML_NAMESPACE}" version="0" />', encoding="utf-8")
+
+    with pytest.raises(SbomError, match=r"version.*positive integer"):
+        load_cyclonedx_sbom(sbom_path)
+
+
+def test_load_cyclonedx_sbom_rejects_huge_zero_xml_bom_version(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "huge-zero-version.xml"
+    sbom_path.write_text(
+        f'<bom xmlns="{XML_NAMESPACE}" version="{"0" * 5000}" />', encoding="utf-8"
+    )
+
+    with pytest.raises(SbomError, match=r"version.*positive integer"):
+        load_cyclonedx_sbom(sbom_path)
+
+
+def test_load_cyclonedx_sbom_wraps_huge_xml_bom_version_conversion_errors(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "huge-version.xml"
+    sbom_path.write_text(
+        f'<bom xmlns="{XML_NAMESPACE}" version="{"1" * 5000}" />', encoding="utf-8"
+    )
+
+    with pytest.raises(SbomError, match="not a supported CycloneDX XML document"):
         load_cyclonedx_sbom(sbom_path)
 
 
@@ -710,6 +803,20 @@ def test_load_cyclonedx_sbom_rejects_duplicate_xml_component_refs(tmp_path: Path
             + _xml_component(ref="component:dup", name="flask", purl="pkg:pypi/flask@2.0.0")
             + "</components>"
         ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match="duplicate component bom-ref"):
+        load_cyclonedx_sbom(sbom_path)
+
+
+def test_load_cyclonedx_sbom_rejects_identical_duplicate_xml_component_refs(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "identical-duplicate-refs.xml"
+    component = _xml_component(ref="component:dup", name="django", purl="pkg:pypi/django@1.2")
+    sbom_path.write_text(
+        _xml_bom("<components>" + component + component + "</components>"),
         encoding="utf-8",
     )
 
