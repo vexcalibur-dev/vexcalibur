@@ -20,7 +20,7 @@ Implemented now:
 - Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON or XML SBOM input with `vexcalibur generate`.
 - Generate VEX from local findings without contacting OSV.
 - Use the same installed package through the legacy `vexy` executable name.
-- Run offline tests, live OSV compatibility tests, linting, formatting checks, type checks, build checks, secret scanning, CodeQL, dependency review, and OpenSSF Scorecard.
+- Run offline tests, live OSV compatibility tests, linting, formatting checks, type checks, build checks, installed CLI checks, secret scanning, CodeQL, dependency review, and OpenSSF Scorecard.
 
 Not implemented yet:
 

@@ -1,4 +1,4 @@
-.PHONY: help install install-docs test test-live lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live installed-cli-check lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 POETRY := poetry
 PACKAGE := vexcalibur
@@ -18,6 +18,9 @@ test: ## Run offline tests
 
 test-live: ## Run live compatibility tests against external services
 	$(POETRY) run pytest -m live
+
+installed-cli-check: ## Build, install, and test console scripts from the wheel
+	scripts/check-installed-cli.sh
 
 lint: ## Run ruff checks
 	$(POETRY) run ruff check src tests docs/conf.py
@@ -57,6 +60,6 @@ secrets-baseline: ## Refresh detect-secrets baseline
 	$(POETRY) run detect-secrets scan --baseline .secrets.baseline
 
 clean: ## Remove generated local artifacts
-	rm -rf build dist *.egg-info .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
+	rm -rf build dist *.egg-info .coverage .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
 	rm -rf docs/_build
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
