@@ -1,7 +1,8 @@
-.PHONY: help install install-docs test test-live lint format typecheck audit check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 POETRY := poetry
 PACKAGE := vexcalibur
+SECRETS_BASELINE_REF ?= origin/main
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -31,7 +32,14 @@ typecheck: ## Run mypy
 audit: ## Audit installed Python dependencies
 	XDG_CACHE_HOME=$${XDG_CACHE_HOME:-/tmp/vexcalibur-cache} $(POETRY) run pip-audit --cache-dir $${PIP_AUDIT_CACHE_DIR:-/tmp/vexcalibur-pip-audit-cache}
 
-check: lint typecheck audit test ## Run local quality gate
+secrets: ## Check tracked files for newly introduced secrets
+	git ls-files -z | xargs -0 $(POETRY) run -- detect-secrets-hook --baseline .secrets.baseline --
+
+secrets-pr: ## Check tracked files against the base branch secret baseline
+	git show $(SECRETS_BASELINE_REF):.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
+	git ls-files -z | xargs -0 $(POETRY) run -- detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
+
+check: lint typecheck audit secrets test ## Run local quality gate
 
 docs: ## Build Sphinx documentation
 	$(POETRY) run sphinx-build -W --keep-going -b html docs docs/_build/html
