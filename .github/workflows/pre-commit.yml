@@ -11,6 +11,7 @@ permissions:
 
 env:
   POETRY_CACHE_DIR: /tmp/poetry-cache
+  POETRY_VERSION: "2.4.1"
   PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
 
 jobs:
@@ -21,7 +22,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Install Poetry
-        run: pipx install poetry
+        run: pipx install "poetry==${POETRY_VERSION}"
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
