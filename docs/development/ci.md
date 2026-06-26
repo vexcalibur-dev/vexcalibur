@@ -13,11 +13,12 @@ The main CI workflow runs these repository gates on pull requests and pushes to 
 - secret enforcement with `detect-secrets-hook`
 - offline pytest matrix across supported Python versions
 - package build
+- installed wheel console-script checks for `vexcalibur` and `vexy`
 - documentation build
 
 Manual runs execute the same repository gates. The live OSV compatibility job runs manually when `run_live_osv` is selected.
 
-Use `run_scheduled_profile` when you need to validate the scheduled job shape before a scheduled run occurs. That profile runs repository security and live OSV compatibility while skipping the normal pull request package, test, build, and docs jobs.
+Use `run_scheduled_profile` when you need to validate the scheduled job shape before a scheduled run occurs. That profile runs repository security and live OSV compatibility while skipping the normal pull request gates: quality, test, package build, installed CLI, documentation build, and CI result.
 
 ## Scheduled Runs
 
@@ -71,3 +72,9 @@ For recurring live OSV failures:
 - Check whether `https://api.osv.dev` changed behavior or is unavailable.
 - Reproduce with `poetry run pytest -m live -q` only when public OSV access is acceptable.
 - Keep fixes isolated from repository security-gate changes.
+
+For recurring installed CLI failures:
+
+- Reproduce with `make installed-cli-check`.
+- Check that `[project.scripts]` in `pyproject.toml` still exposes `vexcalibur` and `vexy`.
+- Keep packaging, console-entrypoint, and dependency fixes separate from unrelated behavior changes.
