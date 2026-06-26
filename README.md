@@ -1,8 +1,14 @@
 # Vexcalibur
 
+[![CI](docs/assets/badges/ci.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/ci.yml)
+[![CodeQL](docs/assets/badges/codeql.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](docs/assets/badges/scorecard.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
+[![Dependency Review](docs/assets/badges/dependency-review.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
+![](docs/assets/vexcalibur-banner.png)
+
 Vexcalibur is an early VEX toolkit for vulnerability exploitability workflows across SBOM, package URL, and vulnerability data ecosystems.
 
-The project is intended to replace legacy `vexy` usage while staying general-purpose instead of becoming Python-specific. The current scaffold includes an OSV-backed package URL query command, CycloneDX JSON SBOM ingest, CycloneDX 1.6 VEX generation, a placeholder `vexy` compatibility command, and CI for Python package and documentation quality gates.
+The project is intended to replace legacy `vexy` usage while staying general-purpose instead of becoming Python-specific. The current scaffold includes an OSV-backed package URL query command, CycloneDX JSON and XML SBOM ingest, CycloneDX 1.6 VEX generation, a placeholder `vexy` compatibility command, and CI for Python package and documentation quality gates.
 
 ## Status
 
@@ -11,14 +17,13 @@ Pre-alpha. The public CLI and output formats are not stable yet.
 Implemented now:
 
 - Query OSV for one or more package URLs with `vexcalibur query-osv`.
-- Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON SBOM input with `vexcalibur generate`.
+- Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON or XML SBOM input with `vexcalibur generate`.
 - Generate VEX from local findings without contacting OSV.
 - Use the same installed package through the legacy `vexy` executable name.
 - Run offline tests, live OSV compatibility tests, linting, formatting checks, type checks, build checks, secret scanning, CodeQL, dependency review, and OpenSSF Scorecard.
 
 Not implemented yet:
 
-- CycloneDX XML SBOM input ([tracked in issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43)).
 - Policy-driven VEX state selection for OSV-derived findings.
 - Compatibility with existing `vexy` flags and output.
 - A stable `vexcalibur-action` release.
@@ -78,7 +83,7 @@ Expected result: the command prints the submitted package URL and any OSV vulner
 
 Like `generate`, `query-osv` requires `--allow-public-osv` for the public OSV API and accepts `--osv-url` for private mirrors.
 
-Generate CycloneDX VEX JSON from a CycloneDX JSON SBOM:
+Generate CycloneDX VEX JSON from a CycloneDX SBOM:
 
 `generate` refuses to send package URLs or component versions to the public OSV API unless you pass `--allow-public-osv`. Do not use that flag with private SBOMs or sensitive package inventories. Use `--osv-url` for a private OSV mirror. Library callers that inject an OSV client must also provide the matching `osv_base_url`; the same public-OSV opt-in check is enforced before the client is used.
 
@@ -118,7 +123,8 @@ The OSV-backed generator queries OSV for versioned components with package URLs,
 
 Supported input for all `generate` source modes:
 
-- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; CycloneDX XML is intentionally deferred to [issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43).
+- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; JSON input must be UTF-8.
+- CycloneDX XML SBOMs rooted at `bom` in the `http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace; XML may use parser-detected XML encodings such as UTF-8 or UTF-16, and DTD, entity, and external-reference declarations are rejected.
 - SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
 - Unique `bom-ref` values for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
 - Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`; offline local findings use `--findings-file`.

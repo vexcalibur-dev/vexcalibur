@@ -1,6 +1,6 @@
 # Generate CycloneDX VEX
 
-Use `vexcalibur generate` when you have a supported CycloneDX JSON SBOM and want CycloneDX 1.6 VEX JSON based on OSV-compatible vulnerability findings.
+Use `vexcalibur generate` when you have a supported CycloneDX JSON or XML SBOM and want CycloneDX 1.6 VEX JSON based on OSV-compatible vulnerability findings.
 
 ## Generate From A Public Fixture
 
@@ -70,11 +70,23 @@ poetry run vexcalibur generate \
   --allow-public-osv
 ```
 
+## Generate From XML Input
+
+Use the same command for CycloneDX XML SBOM input:
+
+```bash
+poetry run vexcalibur generate \
+  tests/fixtures/sbom/cyclonedx-xml-simple.xml \
+  --allow-public-osv \
+  --output /tmp/vexcalibur-vex.json
+```
+
 ## Supported Input
 
 All `generate` source modes currently support:
 
-- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`.
+- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; JSON input must be UTF-8.
+- CycloneDX XML SBOMs rooted at `bom` in the `http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace; XML may use parser-detected XML encodings such as UTF-8 or UTF-16, and DTD, entity, and external-reference declarations are rejected.
 - Files up to 10 MiB.
 - Up to 10,000 components.
 - Component nesting up to 50 levels.
@@ -88,6 +100,5 @@ Local findings mode can produce an empty VEX document when the findings file exp
 
 The first generator does not yet support:
 
-- CycloneDX XML SBOM input. XML support is intentionally deferred to [issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43).
 - Policy-driven VEX state selection for OSV-derived findings.
 - Existing `vexy` flags or output compatibility.

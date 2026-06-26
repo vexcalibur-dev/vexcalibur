@@ -87,6 +87,21 @@ def test_generate_vex_from_source_uses_provider_neutral_source() -> None:
     assert VALIDATOR.validate_str(generated) is None
 
 
+def test_generate_vex_from_source_accepts_cyclonedx_xml_sbom() -> None:
+    source = FakeVulnerabilitySource(())
+
+    generated = generate_vex_from_source(
+        input_file=FIXTURE_ROOT / "cyclonedx-xml-simple.xml",
+        source=source,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert [(component.ref, component.purl.to_string()) for component in source.components] == [
+        ("component:django", "pkg:pypi/django@1.2")
+    ]
+    assert VALIDATOR.validate_str(generated) is None
+
+
 def test_source_errors_share_provider_neutral_base_class() -> None:
     from vexcalibur.sources.local import LocalFindingsError
     from vexcalibur.sources.osv import OsvClientError
@@ -272,6 +287,68 @@ def test_generate_vex_from_sbom_uses_component_version_for_unversioned_purl(
     assert [(query.purl.to_string(), query.version) for query in client.queries] == [
         ("pkg:pypi/django", "1.2")
     ]
+
+
+def test_generate_vex_from_xml_sbom_uses_component_version_for_unversioned_purl(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "sbom.xml"
+    sbom_path.write_text(
+        """
+        <bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1">
+          <components>
+            <component type="library" bom-ref="component:django">
+              <name>django</name>
+              <version>1.2</version>
+              <purl>pkg:pypi/django</purl>
+            </component>
+          </components>
+        </bom>
+        """,
+        encoding="utf-8",
+    )
+    client = FakeOsvClient()
+
+    generate_vex_from_sbom(
+        input_file=sbom_path,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+        osv_client=client,
+        allow_public_osv=True,
+    )
+
+    assert [(query.purl.to_string(), query.version) for query in client.queries] == [
+        ("pkg:pypi/django", "1.2")
+    ]
+
+
+def test_generate_vex_from_xml_sbom_with_local_findings(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        """
+        {
+          "findings": [
+            {
+              "id": "CVE-2026-0001",
+              "component_ref": "component:django",
+              "source_name": "Internal Review",
+              "source_url": "https://security.example.test/vulns/CVE-2026-0001",
+              "analysis_state": "not_affected",
+              "analysis_detail": "Reviewed and not affected."
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    generated = generate_vex_from_local_findings(
+        input_file=FIXTURE_ROOT / "cyclonedx-xml-simple.xml",
+        findings_file=findings_path,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert '"id": "CVE-2026-0001"' in generated
+    assert VALIDATOR.validate_str(generated) is None
 
 
 def test_generate_vex_from_sbom_requires_public_osv_opt_in() -> None:

@@ -86,7 +86,7 @@ def generate(
             file_okay=True,
             dir_okay=False,
             readable=True,
-            help="CycloneDX JSON SBOM to convert into VEX.",
+            help="CycloneDX JSON or XML SBOM to convert into VEX.",
         ),
     ],
     output_file: Annotated[
