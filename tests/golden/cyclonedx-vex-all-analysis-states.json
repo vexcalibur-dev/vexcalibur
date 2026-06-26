@@ -1,0 +1,171 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "component:django",
+      "name": "django",
+      "purl": "pkg:pypi/django@1.2",
+      "type": "library",
+      "version": "1.2"
+    },
+    {
+      "bom-ref": "pkg:npm/minimist@0.0.8",
+      "name": "minimist",
+      "purl": "pkg:npm/minimist@0.0.8",
+      "type": "library",
+      "version": "0.0.8"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "component:django"
+    },
+    {
+      "ref": "pkg:npm/minimist@0.0.8"
+    }
+  ],
+  "metadata": {
+    "timestamp": "2026-06-23T00:00:00+00:00"
+  },
+  "serialNumber": "urn:uuid:c4baf506-3018-523a-a18d-a17097fc4093",
+  "specVersion": "1.6",
+  "version": 1,
+  "vulnerabilities": [
+    {
+      "affects": [
+        {
+          "ref": "component:django"
+        }
+      ],
+      "analysis": {
+        "detail": "The vulnerable code path was removed.",
+        "state": "resolved"
+      },
+      "bom-ref": "vulnerability:d4af40ad-3493-53c4-85e4-633b091bca6e",
+      "id": "CVE-2026-0001",
+      "references": [
+        {
+          "id": "CVE-2026-0001",
+          "source": {
+            "name": "Contract Test",
+            "url": "https://security.example.test/vulns/CVE-2026-0001"
+          }
+        }
+      ],
+      "source": {
+        "name": "Contract Test",
+        "url": "https://security.example.test/vulns/CVE-2026-0001"
+      },
+      "updated": "2026-01-01T00:00:00+00:00"
+    },
+    {
+      "affects": [
+        {
+          "ref": "pkg:npm/minimist@0.0.8"
+        }
+      ],
+      "analysis": {
+        "detail": "The affected feature is reachable.",
+        "state": "exploitable"
+      },
+      "bom-ref": "vulnerability:bf9b635c-eeff-5d06-87df-c7f8fb852ea6",
+      "id": "CVE-2026-0002",
+      "references": [
+        {
+          "id": "CVE-2026-0002",
+          "source": {
+            "name": "Contract Test",
+            "url": "https://security.example.test/vulns/CVE-2026-0002"
+          }
+        }
+      ],
+      "source": {
+        "name": "Contract Test",
+        "url": "https://security.example.test/vulns/CVE-2026-0002"
+      },
+      "updated": "2026-01-02T00:00:00+00:00"
+    },
+    {
+      "affects": [
+        {
+          "ref": "component:django"
+        }
+      ],
+      "analysis": {
+        "detail": "Impact analysis is still underway.",
+        "state": "in_triage"
+      },
+      "bom-ref": "vulnerability:ba1f9bae-65f8-5ff9-abb4-e67a996748fb",
+      "id": "CVE-2026-0003",
+      "references": [
+        {
+          "id": "CVE-2026-0003",
+          "source": {
+            "name": "Contract Test",
+            "url": "https://security.example.test/vulns/CVE-2026-0003"
+          }
+        }
+      ],
+      "source": {
+        "name": "Contract Test",
+        "url": "https://security.example.test/vulns/CVE-2026-0003"
+      },
+      "updated": "2026-01-03T00:00:00+00:00"
+    },
+    {
+      "affects": [
+        {
+          "ref": "pkg:npm/minimist@0.0.8"
+        }
+      ],
+      "analysis": {
+        "detail": "The source matched a package that is not present at runtime.",
+        "state": "false_positive"
+      },
+      "bom-ref": "vulnerability:72b11fd1-eea0-525e-9558-8dc6d44bd24f",
+      "id": "CVE-2026-0004",
+      "references": [
+        {
+          "id": "CVE-2026-0004",
+          "source": {
+            "name": "Contract Test",
+            "url": "https://security.example.test/vulns/CVE-2026-0004"
+          }
+        }
+      ],
+      "source": {
+        "name": "Contract Test",
+        "url": "https://security.example.test/vulns/CVE-2026-0004"
+      },
+      "updated": "2026-01-04T00:00:00+00:00"
+    },
+    {
+      "affects": [
+        {
+          "ref": "component:django"
+        }
+      ],
+      "analysis": {
+        "detail": "The deployment does not enable the affected configuration.",
+        "state": "not_affected"
+      },
+      "bom-ref": "vulnerability:e0c26438-96fd-5d85-ad5e-52d3e642ef80",
+      "id": "CVE-2026-0005",
+      "references": [
+        {
+          "id": "CVE-2026-0005",
+          "source": {
+            "name": "Contract Test",
+            "url": "https://security.example.test/vulns/CVE-2026-0005"
+          }
+        }
+      ],
+      "source": {
+        "name": "Contract Test",
+        "url": "https://security.example.test/vulns/CVE-2026-0005"
+      },
+      "updated": "2026-01-05T00:00:00+00:00"
+    }
+  ]
+}
