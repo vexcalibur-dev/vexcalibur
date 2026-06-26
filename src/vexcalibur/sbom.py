@@ -13,6 +13,7 @@ from cyclonedx.model.component import Component
 from vexcalibur.domain import ComponentIdentity
 
 SUPPORTED_CYCLONEDX_JSON_VERSIONS = {"1.4", "1.5", "1.6"}
+CYCLONEDX_XML_TRACKING_URL = "https://github.com/vexcalibur-dev/vexcalibur/issues/43"
 MAX_SBOM_BYTES = 10 * 1024 * 1024
 MAX_COMPONENTS = 10_000
 MAX_COMPONENT_DEPTH = 50
@@ -28,14 +29,23 @@ def load_cyclonedx_json(path: Path) -> tuple[ComponentIdentity, ...]:
         if path.stat().st_size > MAX_SBOM_BYTES:
             msg = f"SBOM {path} exceeds the {MAX_SBOM_BYTES} byte limit"
             raise SbomError(msg)
-        with path.open(encoding="utf-8") as stream:
-            raw_bom = json.load(stream)
+        raw_content = path.read_text(encoding="utf-8")
     except OSError as exc:
         msg = f"Could not read SBOM {path}: {exc}"
         raise SbomError(msg) from exc
     except UnicodeDecodeError as exc:
         msg = f"SBOM {path} is not valid UTF-8 JSON"
         raise SbomError(msg) from exc
+
+    if _looks_like_xml(raw_content):
+        msg = (
+            f"SBOM {path} appears to be CycloneDX XML, which is not supported yet; "
+            f"track XML support at {CYCLONEDX_XML_TRACKING_URL}"
+        )
+        raise SbomError(msg)
+
+    try:
+        raw_bom = json.loads(raw_content)
     except json.JSONDecodeError as exc:
         msg = f"SBOM {path} is not valid JSON: {exc.msg}"
         raise SbomError(msg) from exc
@@ -119,6 +129,10 @@ def _validate_raw_component(component: Any, *, path: Path) -> None:
     if "version" in component and not isinstance(component["version"], str):
         msg = f"SBOM {path} component versions must be strings"
         raise SbomError(msg)
+
+
+def _looks_like_xml(raw_content: str) -> bool:
+    return raw_content.lstrip("\ufeff \t\r\n").startswith("<")
 
 
 def _component_tree(bom: Bom) -> tuple[Component, ...]:

@@ -50,6 +50,8 @@ Arguments:
 
 - `INPUT_FILE`: readable CycloneDX JSON SBOM file.
 
+CycloneDX XML SBOM input is intentionally deferred to [issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43). XML files fail with an unsupported-format error instead of being treated as malformed JSON.
+
 Options:
 
 - `--output PATH`, `-o PATH`: write VEX JSON to a file instead of standard output.

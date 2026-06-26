@@ -88,6 +88,6 @@ Local findings mode can produce an empty VEX document when the findings file exp
 
 The first generator does not yet support:
 
-- CycloneDX XML SBOM input.
+- CycloneDX XML SBOM input. XML support is intentionally deferred to [issue #43](https://github.com/vexcalibur-dev/vexcalibur/issues/43).
 - Policy-driven VEX state selection for OSV-derived findings.
 - Existing `vexy` flags or output compatibility.
