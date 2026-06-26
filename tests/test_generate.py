@@ -29,6 +29,7 @@ from vexcalibur.sources.osv import (
 from vexcalibur.vex import parse_timestamp
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
+FINDINGS_ROOT = Path(__file__).parent / "fixtures" / "findings"
 GOLDEN_ROOT = Path(__file__).parent / "golden"
 VALIDATOR = make_schemabased_validator(OutputFormat.JSON, SchemaVersion.V1_6)
 
@@ -198,6 +199,29 @@ def test_generate_vex_from_local_findings_renders_without_osv(tmp_path: Path) ->
         "url": "https://security.example.test/vulns/CVE-2026-0001",
     }
     assert vulnerability["analysis"]["detail"] == "Reviewed and not affected."
+
+
+def test_generate_vex_from_local_findings_matches_all_states_golden_and_schema() -> None:
+    generated = generate_vex_from_local_findings(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        findings_file=FINDINGS_ROOT / "all-analysis-states.json",
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert generated == (GOLDEN_ROOT / "cyclonedx-vex-all-analysis-states.json").read_text(
+        encoding="utf-8"
+    )
+    assert VALIDATOR.validate_str(generated) is None
+    assert [
+        vulnerability["analysis"]["state"]
+        for vulnerability in json.loads(generated)["vulnerabilities"]
+    ] == [
+        "resolved",
+        "exploitable",
+        "in_triage",
+        "false_positive",
+        "not_affected",
+    ]
 
 
 def test_generate_vex_from_empty_local_findings_is_schema_valid(tmp_path: Path) -> None:

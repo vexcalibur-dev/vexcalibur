@@ -16,6 +16,23 @@ def test_load_cyclonedx_json_extracts_components_with_purls() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "fixture_name",
+    (
+        "cyclonedx-json-1.4-simple.json",
+        "cyclonedx-json-1.5-simple.json",
+        "cyclonedx-json-simple.json",
+    ),
+)
+def test_load_cyclonedx_json_accepts_supported_fixture_versions(fixture_name: str) -> None:
+    components = load_cyclonedx_json(FIXTURE_ROOT / fixture_name)
+
+    assert [(component.ref, component.purl.to_string()) for component in components] == [
+        ("pkg:npm/minimist@0.0.8", "pkg:npm/minimist@0.0.8"),
+        ("component:django", "pkg:pypi/django@1.2"),
+    ]
+
+
 def test_load_cyclonedx_json_includes_metadata_component(tmp_path: Path) -> None:
     sbom_path = tmp_path / "metadata-component.json"
     sbom_path.write_text(

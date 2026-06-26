@@ -1,0 +1,49 @@
+{
+  "findings": [
+    {
+      "id": "CVE-2026-0005",
+      "component_ref": "component:django",
+      "source_name": "Contract Test",
+      "source_url": "https://security.example.test/vulns/CVE-2026-0005",
+      "modified": "2026-01-05T00:00:00Z",
+      "analysis_state": "not_affected",
+      "analysis_detail": "The deployment does not enable the affected configuration."
+    },
+    {
+      "id": "CVE-2026-0002",
+      "component_ref": "pkg:npm/minimist@0.0.8",
+      "source_name": "Contract Test",
+      "source_url": "https://security.example.test/vulns/CVE-2026-0002",
+      "modified": "2026-01-02T00:00:00Z",
+      "analysis_state": "exploitable",
+      "analysis_detail": "The affected feature is reachable."
+    },
+    {
+      "id": "CVE-2026-0004",
+      "component_ref": "pkg:npm/minimist@0.0.8",
+      "source_name": "Contract Test",
+      "source_url": "https://security.example.test/vulns/CVE-2026-0004",
+      "modified": "2026-01-04T00:00:00Z",
+      "analysis_state": "false_positive",
+      "analysis_detail": "The source matched a package that is not present at runtime."
+    },
+    {
+      "id": "CVE-2026-0001",
+      "component_ref": "component:django",
+      "source_name": "Contract Test",
+      "source_url": "https://security.example.test/vulns/CVE-2026-0001",
+      "modified": "2026-01-01T00:00:00Z",
+      "analysis_state": "resolved",
+      "analysis_detail": "The vulnerable code path was removed."
+    },
+    {
+      "id": "CVE-2026-0003",
+      "component_ref": "component:django",
+      "source_name": "Contract Test",
+      "source_url": "https://security.example.test/vulns/CVE-2026-0003",
+      "modified": "2026-01-03T00:00:00Z",
+      "analysis_state": "in_triage",
+      "analysis_detail": "Impact analysis is still underway."
+    }
+  ]
+}

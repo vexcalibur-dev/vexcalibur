@@ -1,0 +1,21 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/minimist@0.0.8",
+      "name": "minimist",
+      "version": "0.0.8",
+      "purl": "pkg:npm/minimist@0.0.8"
+    },
+    {
+      "type": "library",
+      "bom-ref": "component:django",
+      "name": "django",
+      "version": "1.2",
+      "purl": "pkg:pypi/django@1.2"
+    }
+  ]
+}
