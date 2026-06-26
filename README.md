@@ -133,6 +133,7 @@ Local findings mode can produce an empty VEX document when the findings file exp
 ## Project Links
 
 - [Documentation](docs/index.md)
+- [CI and recurring checks](docs/development/ci.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Python style policy](docs/development/python-style.md)

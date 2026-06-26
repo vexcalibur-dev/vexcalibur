@@ -12,6 +12,7 @@ The project is intentionally general-purpose. The current implementation focuses
 - [Python API reference](reference/python-api.rst) is generated from source docstrings.
 - [Local findings reference](reference/local-findings.md) defines the offline findings JSON format.
 - [Architecture](explanation/architecture.md) explains the current trust boundary and processing flow.
+- [CI and recurring checks](development/ci.md) describes scheduled security gates and live-service check handling.
 
 ```{toctree}
 :hidden:
@@ -23,6 +24,7 @@ reference/cli
 reference/python-api
 reference/local-findings
 explanation/architecture
+development/ci
 development/python-style
 external/README
 ```

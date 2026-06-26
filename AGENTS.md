@@ -57,6 +57,8 @@ make typecheck
 make test
 make docs
 make audit
+make secrets
+make secrets-pr
 make build
 make pre-commit
 ```
@@ -145,8 +147,14 @@ poetry run pytest -m "not live" --cov-fail-under=75
 make docs
 poetry build
 poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
-poetry run detect-secrets scan --baseline .secrets.baseline
+git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline .secrets.baseline --
+git show origin/main:.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
+git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
 ```
+
+Use `make secrets` for current-branch baseline enforcement, `make secrets-pr` for PR-mode
+base-baseline enforcement, and `make secrets-baseline` only for an intentional, separately
+reviewed baseline refresh.
 
 Run `poetry run pytest -m live -q` only when the change intentionally validates public OSV compatibility.
 
