@@ -4,29 +4,31 @@
 [![CodeQL](docs/assets/badges/codeql.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](docs/assets/badges/scorecard.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
 [![Dependency Review](docs/assets/badges/dependency-review.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
-![](docs/assets/vexcalibur-banner.png)
+![Vexcalibur wordmark and sword logo](docs/assets/vexcalibur-banner.png)
 
-Vexcalibur is an early VEX toolkit for vulnerability exploitability workflows across SBOM, package URL, and vulnerability data ecosystems.
+Vexcalibur is a general-purpose VEX toolkit for vulnerability exploitability workflows across SBOM, package URL, and vulnerability data ecosystems.
 
-The project is intended to replace legacy `vexy` usage while staying general-purpose instead of becoming Python-specific. The current scaffold includes an OSV-backed package URL query command, CycloneDX JSON and XML SBOM ingest, CycloneDX 1.6 VEX generation, a placeholder `vexy` compatibility command, and CI for Python package and documentation quality gates.
+Vexcalibur currently ingests CycloneDX JSON and XML SBOMs, collects findings from OSV-compatible APIs or local findings files, and renders CycloneDX 1.6 VEX JSON. It is intended to replace legacy `vexy` usage over time while staying provider-neutral and ecosystem-neutral.
 
 ## Status
 
-Pre-alpha. The public CLI and output formats are not stable yet.
+Usable for the workflows listed below, with unstable public contracts before the first 1.0 release.
 
-Implemented now:
+| Area | Current status |
+| --- | --- |
+| CycloneDX SBOM ingest | Supports JSON and XML SBOMs for CycloneDX `1.4`, `1.5`, and `1.6`. |
+| Vulnerability sources | Supports public OSV with explicit opt-in, private OSV-compatible endpoints, and no-network local findings files. |
+| VEX output | Emits CycloneDX 1.6 VEX JSON with deterministic output when `--timestamp` is provided. |
+| GitHub Actions | Use [vexcalibur-action](https://github.com/vexcalibur-dev/vexcalibur-action) for CI workflows. |
+| Legacy `vexy` compatibility | Provides the executable name only. Existing `vexy` flags and output compatibility are deferred. |
+| Stability | CLI flags, Python APIs, and output details can change before 1.0. Pin exact versions after releases begin. |
 
-- Query OSV for one or more package URLs with `vexcalibur query-osv`.
+Current workflows:
+
+- Query OSV-compatible APIs for one or more package URLs with `vexcalibur query-osv`.
 - Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON or XML SBOM input with `vexcalibur generate`.
-- Generate VEX from local findings without contacting OSV.
-- Use the same installed package through the legacy `vexy` executable name.
-- Run offline tests, live OSV compatibility tests, linting, formatting checks, type checks, build checks, installed CLI checks, secret scanning, CodeQL, dependency review, and OpenSSF Scorecard.
-
-Not implemented yet:
-
-- Policy-driven VEX state selection for OSV-derived findings.
-- Compatibility with existing `vexy` flags and output.
-- A stable `vexcalibur-action` release.
+- Generate VEX from local findings without contacting a vulnerability service.
+- Run Vexcalibur from GitHub Actions through the companion action.
 
 ## Development
 
@@ -139,7 +141,16 @@ Local findings mode can produce an empty VEX document when the findings file exp
 ## Project Links
 
 - [Documentation](docs/index.md)
+- [Quickstart tutorial](docs/tutorials/quickstart.md)
+- [No-network local findings tutorial](docs/tutorials/offline-local-findings.md)
+- [Generate CycloneDX VEX](docs/how-to/generate-cyclonedx-vex.md)
+- [Use a private OSV mirror](docs/how-to/use-private-osv-mirror.md)
 - [CI and recurring checks](docs/development/ci.md)
+- [Project status](docs/explanation/project-status.md)
+- [CLI reference](docs/reference/cli.md)
+- [CycloneDX VEX output reference](docs/reference/cyclonedx-vex-output.md)
+- [Provider contract reference](docs/reference/provider-contract.md)
+- [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Python style policy](docs/development/python-style.md)
