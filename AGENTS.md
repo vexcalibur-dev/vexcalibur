@@ -4,7 +4,7 @@ This file gives AI agents and automated contributors repo-specific guidance for 
 
 ## Project Overview
 
-Vexcalibur is a pre-alpha VEX toolkit for workflows around SBOMs, package URLs, vulnerability sources, and VEX documents. It is intended to replace legacy `vexy` usage while remaining a general-purpose VEX tool, not a Python-only vulnerability tool.
+Vexcalibur is a usable-but-unstable VEX toolkit for workflows around SBOMs, package URLs, vulnerability sources, and VEX documents. It is intended to replace legacy `vexy` usage over time while remaining a general-purpose VEX tool, not a Python-only vulnerability tool.
 
 The current implementation is Python, but product and domain decisions should stay ecosystem-neutral unless an issue explicitly narrows the scope.
 
@@ -15,7 +15,7 @@ The current implementation is Python, but product and domain decisions should st
 - Offline VEX generation uses `--findings-file` and must not construct or query an OSV client.
 - Keep changes focused. Avoid broad refactors unless the active issue requires them.
 - Preserve public API and output compatibility notes in PR descriptions when behavior changes.
-- Treat documentation as product surface. Keep docs accurate for the current pre-alpha behavior.
+- Treat documentation as product surface. Keep docs accurate for the current supported workflows and pre-1.0 compatibility limits.
 - Do not revert unrelated local changes. Work with them or ask if they block the task.
 
 ## Technology Stack

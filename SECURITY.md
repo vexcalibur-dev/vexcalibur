@@ -18,6 +18,6 @@ request issue form in this repository and include no sensitive details.
 
 ## Supported Versions
 
-Vexcalibur is currently pre-alpha. Security fixes target the default branch
-until versioned releases are published. After releases begin, this policy must
-document which release lines receive security fixes.
+Security fixes target the default branch until versioned releases are published.
+After releases begin, this policy must document which release lines receive
+security fixes.

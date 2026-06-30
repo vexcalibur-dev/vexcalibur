@@ -4,6 +4,42 @@ Vexcalibur separates package inventory parsing, vulnerability source access, pro
 
 ## Current Flow
 
+The generation path separates untrusted SBOM parsing, vulnerability source
+access, provider-neutral findings, and CycloneDX rendering:
+
+```text
+CycloneDX JSON/XML SBOM
+        |
+        v
+vexcalibur.sbom
+        |
+        v
+ComponentIdentity values with package URLs
+        |
+        v
+Selected VulnerabilitySource
+        |                         |
+        | public opt-in or        | no network
+        | private mirror          |
+        v                         v
+OSV-compatible API          Local findings JSON
+        |                         |
+        +------------+------------+
+                     |
+                     v
+          VulnerabilityFinding values
+                     |
+                     v
+              vexcalibur.vex
+                     |
+                     v
+          CycloneDX 1.6 VEX JSON
+```
+
+In text form: Vexcalibur parses a CycloneDX SBOM into component identities,
+collects provider-neutral findings from one selected source, then renders a
+CycloneDX 1.6 VEX JSON document.
+
 1. `vexcalibur generate` accepts a CycloneDX JSON or XML SBOM path.
 2. `vexcalibur.sbom` validates the raw document shape, parses CycloneDX JSON with `cyclonedx-python-lib`, parses CycloneDX XML with `defusedxml`, and extracts component identities with package URLs.
 3. The selected `VulnerabilitySource` produces provider-neutral `VulnerabilityFinding` objects:
@@ -32,6 +68,9 @@ OSV is the first network provider because it has a maintained public API and can
 The current renderer emits CycloneDX 1.6 JSON. It groups findings by vulnerability ID, source, analysis state, and analysis detail, then references affected components by `bom-ref`.
 
 Findings are marked `in_triage` by default. That default means "detected by a source and awaiting manual exploitability analysis"; it does not claim that a component is exploitable.
+
+See [CycloneDX VEX output](../reference/cyclonedx-vex-output.md) for the output
+contract.
 
 ## Compatibility
 

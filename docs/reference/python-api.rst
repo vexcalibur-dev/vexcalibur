@@ -1,7 +1,8 @@
 Python API Reference
 ====================
 
-The Python API is pre-alpha. Public import paths and return shapes can still change before a stable release.
+The Python API is usable by Vexcalibur's CLI and tests, but public import paths
+and return shapes can still change before a stable 1.0 compatibility policy.
 
 Domain Objects
 --------------

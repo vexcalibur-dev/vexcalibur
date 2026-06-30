@@ -1,6 +1,6 @@
 # Contributing
 
-Vexcalibur is pre-alpha, so compatibility decisions are still being made. Keep changes focused, tested, and explicit about user-facing behavior.
+Vexcalibur is usable for documented workflows, but compatibility decisions are still being made before 1.0. Keep changes focused, tested, and explicit about user-facing behavior.
 
 ## Development
 

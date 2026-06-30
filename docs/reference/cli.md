@@ -1,7 +1,8 @@
 # CLI Reference
 
-Vexcalibur is pre-alpha. Command names, flags, output fields, and exit behavior can
-change before the first stable release.
+Vexcalibur is usable for the commands documented here, but public contracts are
+not stable before 1.0. Command names, flags, output fields, and exit behavior can
+change before the first stable compatibility policy.
 
 The installed package exposes two executables:
 
@@ -207,6 +208,10 @@ PY
 
 Expected success signal: the Python verification command prints
 `generated CycloneDX VEX`.
+
+See [CycloneDX VEX output](cyclonedx-vex-output.md) for the generated document
+shape, grouping rules, affected component behavior, and deterministic output
+contract.
 
 ## `vexy`
 

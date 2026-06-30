@@ -98,7 +98,10 @@ Local findings mode can produce an empty VEX document when the findings file exp
 
 ## Current Limitations
 
-The first generator does not yet support:
+The current generator does not yet support:
 
 - Policy-driven VEX state selection for OSV-derived findings.
 - Existing `vexy` flags or output compatibility.
+
+See the [CycloneDX VEX output reference](../reference/cyclonedx-vex-output.md)
+for the generated document contract.
