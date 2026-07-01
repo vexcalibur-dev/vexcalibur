@@ -1,10 +1,11 @@
 # Vexcalibur
 
-[![CI](docs/assets/badges/ci.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/ci.yml)
-[![CodeQL](docs/assets/badges/codeql.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/codeql.yml)
-[![OpenSSF Scorecard](docs/assets/badges/scorecard.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
-[![Dependency Review](docs/assets/badges/dependency-review.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
 ![Vexcalibur wordmark and sword logo](docs/assets/vexcalibur-banner.png)
+
+[![CI](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/ci.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/codeql.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
+[![Dependency Review](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
 
 Vexcalibur is a general-purpose VEX toolkit for vulnerability exploitability workflows across SBOM, package URL, and vulnerability data ecosystems.
 
