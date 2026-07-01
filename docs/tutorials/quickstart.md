@@ -7,18 +7,18 @@ The example intentionally calls the public OSV API. Use it only with the fixture
 ## Prerequisites
 
 - Python 3.10 or newer
-- Poetry 2.x
+- uv 0.11.17
 
 Install the project and development dependencies from the repository root:
 
 ```bash
-poetry install
+uv sync
 ```
 
 Confirm that the CLI starts:
 
 ```bash
-poetry run vexcalibur --help
+uv run --frozen vexcalibur --help
 ```
 
 ## Generate VEX
@@ -28,7 +28,7 @@ Run `generate` against the fixture SBOM. The `--allow-public-osv` flag is requir
 This step requires internet access. OSV data can change, so the number of vulnerability entries can vary over time.
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
   --allow-public-osv \
   --timestamp 2026-06-23T00:00:00Z \
@@ -63,7 +63,7 @@ The output is a CycloneDX 1.6 document with VEX vulnerability entries for OSV ma
 For private SBOMs or sensitive inventories, omit `--allow-public-osv` and point Vexcalibur at an internal OSV-compatible endpoint:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   path/to/private-sbom.json \
   --osv-url https://osv.internal.example \
   --output /tmp/vexcalibur-vex.json

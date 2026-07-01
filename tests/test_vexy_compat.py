@@ -329,8 +329,8 @@ def _read_golden_stdout(case_name: str) -> str:
 def _documented_vexy_args(marker: str) -> list[str]:
     command = _extract_marked_bash_command(ROOT / "docs" / "reference" / "cli.md", marker)
     args = shlex.split(command)
-    assert args[:3] == ["poetry", "run", "vexy"]
-    return args[3:]
+    assert args[:4] == ["uv", "run", "--frozen", "vexy"]
+    return args[4:]
 
 
 def _extract_marked_bash_command(path: Path, marker: str) -> str:

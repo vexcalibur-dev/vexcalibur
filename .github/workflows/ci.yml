@@ -25,9 +25,7 @@ permissions:
 
 env:
   MAX_PYTHON: "3.14"
-  POETRY_CACHE_DIR: /tmp/poetry-cache
-  POETRY_VERSION: "2.4.1"
-  PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+  UV_CACHE_DIR: /tmp/vexcalibur-uv-cache
   XDG_CACHE_HOME: /tmp/vexcalibur-cache
 
 jobs:
@@ -39,34 +37,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Poetry
-        run: pipx install "poetry==${POETRY_VERSION}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version-file: .tool-versions
+          enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
-          cache: poetry
 
       - name: Install dependencies
-        run: poetry install
-
-      - name: Check package metadata
-        run: poetry check
+        run: uv sync --frozen
 
       - name: Check lock file
-        run: poetry check --lock
+        run: uv lock --check
 
       - name: Check formatting
-        run: poetry run ruff format --check src tests docs/conf.py
+        run: uv run --frozen ruff format --check src tests docs/conf.py
 
       - name: Lint
-        run: poetry run ruff check src tests docs/conf.py
+        run: uv run --frozen ruff check src tests docs/conf.py
 
       - name: Type check
-        run: poetry run mypy src
+        run: uv run --frozen mypy src
 
   security:
     name: Repository security
@@ -75,22 +69,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Poetry
-        run: pipx install "poetry==${POETRY_VERSION}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version-file: .tool-versions
+          enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
-          cache: poetry
 
       - name: Install dependencies
-        run: poetry install
+        run: uv sync --frozen
 
       - name: Audit Python dependencies
-        run: poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
+        run: uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
 
       - name: Scan pull request for secrets
         if: github.event_name == 'pull_request'
@@ -100,11 +93,11 @@ jobs:
         run: |
           gh api "/repos/${GITHUB_REPOSITORY}/contents/.secrets.baseline?ref=${BASE_SHA}" --jq .content \
             | base64 --decode > /tmp/base.secrets.baseline
-          git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline /tmp/base.secrets.baseline --
+          git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline /tmp/base.secrets.baseline --
 
       - name: Scan pushed code for secrets
         if: github.event_name != 'pull_request'
-        run: git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline .secrets.baseline --
+        run: git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline .secrets.baseline --
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -118,22 +111,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Poetry
-        run: pipx install "poetry==${POETRY_VERSION}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version-file: .tool-versions
+          enable-cache: true
           python-version: ${{ matrix.python-version }}
-          cache: poetry
 
       - name: Install dependencies
-        run: poetry install
+        run: uv sync --frozen
 
       - name: Run offline tests
-        run: poetry run pytest -m "not live" --cov-fail-under=75
+        run: uv run --frozen pytest -m "not live" --cov-fail-under=75
 
       - name: Upload coverage XML
         if: matrix.python-version == env.MAX_PYTHON
@@ -151,19 +143,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Poetry
-        run: pipx install "poetry==${POETRY_VERSION}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version-file: .tool-versions
+          enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
-          cache: poetry
 
       - name: Build distributions
-        run: poetry build
+        run: uv build --clear --no-create-gitignore --no-sources
 
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -181,16 +172,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Poetry
-        run: pipx install "poetry==${POETRY_VERSION}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version-file: .tool-versions
+          enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
-          cache: poetry
 
       - name: Download distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -221,19 +211,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Poetry
-        run: pipx install "poetry==${POETRY_VERSION}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version-file: .tool-versions
+          enable-cache: true
           python-version: "3.13"
-          cache: poetry
 
       - name: Install dependencies
-        run: poetry install --extras docs
+        run: uv sync --frozen --extra docs
 
       - name: Build documentation
         run: make docs
@@ -246,22 +235,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Poetry
-        run: pipx install "poetry==${POETRY_VERSION}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version-file: .tool-versions
+          enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
-          cache: poetry
 
       - name: Install dependencies
-        run: poetry install
+        run: uv sync --frozen
 
       - name: Run live OSV compatibility tests
-        run: poetry run pytest -m live -q
+        run: uv run --frozen pytest -m live -q
 
   ci:
     name: CI result

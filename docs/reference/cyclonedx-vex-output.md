@@ -25,7 +25,7 @@ Use `--timestamp` when tests, pull request reviews, or repeatable artifacts need
 stable output:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
   --offline \
   --findings-file tests/fixtures/findings/all-analysis-states.json \

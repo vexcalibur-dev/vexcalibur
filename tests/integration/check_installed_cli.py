@@ -10,6 +10,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +30,7 @@ def main() -> None:
     bin_dir = _required_bin_dir()
     vexcalibur = _console_script(bin_dir, "vexcalibur")
     vexy = _console_script(bin_dir, "vexy")
+    _assert_installed_version()
 
     _expect(
         [str(vexcalibur), "--help"],
@@ -153,6 +155,31 @@ def _console_script(bin_dir: Path, name: str) -> Path:
         print(f"Installed console script was not found: {script}", file=sys.stderr)
         raise SystemExit(2)
     return script
+
+
+def _assert_installed_version() -> None:
+    expected_version = os.environ.get("VEXCALIBUR_EXPECTED_VERSION")
+    if expected_version is None:
+        return
+
+    actual_distribution_version = distribution_version("vexcalibur")
+    if actual_distribution_version != expected_version:
+        print(
+            "Installed distribution version "
+            f"{actual_distribution_version!r} did not match {expected_version!r}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    import vexcalibur
+
+    if vexcalibur.__version__ != expected_version:
+        print(
+            f"vexcalibur.__version__ {vexcalibur.__version__!r} "
+            f"did not match {expected_version!r}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def _expect(

@@ -10,14 +10,14 @@ findings.
 ## Prerequisites
 
 - Python 3.10 or newer
-- Poetry 2.x
+- uv 0.11.17
 - Dependency installation access through PyPI, an internal package index, a
-  populated Poetry cache, or a prebuilt environment.
+  populated uv cache, or a prebuilt environment.
 
 Install the project and development dependencies from the repository root:
 
 ```bash
-poetry install
+uv sync
 ```
 
 After dependencies are installed, the generation command in this tutorial does
@@ -26,7 +26,7 @@ not contact OSV or any other vulnerability service.
 Confirm that the CLI starts:
 
 ```bash
-poetry run vexcalibur --help
+uv run --frozen vexcalibur --help
 ```
 
 ## Generate VEX Offline
@@ -34,7 +34,7 @@ poetry run vexcalibur --help
 Run `generate` with the fixture SBOM and fixture findings file:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
   --offline \
   --findings-file tests/fixtures/findings/all-analysis-states.json \

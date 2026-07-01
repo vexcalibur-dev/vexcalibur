@@ -1,6 +1,6 @@
 .PHONY: help install install-docs test test-live installed-cli-check lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
-POETRY := poetry
+UV := uv
 PACKAGE := vexcalibur
 SECRETS_BASELINE_REF ?= origin/main
 
@@ -8,58 +8,59 @@ help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 install: ## Install project dependencies
-	$(POETRY) install
+	$(UV) sync
 
 install-docs: ## Install project and documentation dependencies
-	$(POETRY) install --extras docs
+	$(UV) sync --extra docs
 
 test: ## Run offline tests
-	$(POETRY) run pytest -m "not live"
+	$(UV) run --frozen pytest -m "not live"
 
 test-live: ## Run live compatibility tests against external services
-	$(POETRY) run pytest -m live
+	$(UV) run --frozen pytest -m live
 
 installed-cli-check: ## Build, install, and test console scripts from the wheel
 	scripts/check-installed-cli.sh
 
 lint: ## Run ruff checks
-	$(POETRY) run ruff check src tests docs/conf.py
+	$(UV) run --frozen ruff check src tests docs/conf.py
 
 format: ## Format source and tests
-	$(POETRY) run ruff format src tests docs/conf.py
-	$(POETRY) run ruff check --fix src tests docs/conf.py
+	$(UV) run --frozen ruff format src tests docs/conf.py
+	$(UV) run --frozen ruff check --fix src tests docs/conf.py
 
 typecheck: ## Run mypy
-	$(POETRY) run mypy src
+	$(UV) run --frozen mypy src
 
 audit: ## Audit installed Python dependencies
-	XDG_CACHE_HOME=$${XDG_CACHE_HOME:-/tmp/vexcalibur-cache} $(POETRY) run pip-audit --cache-dir $${PIP_AUDIT_CACHE_DIR:-/tmp/vexcalibur-pip-audit-cache}
+	XDG_CACHE_HOME=$${XDG_CACHE_HOME:-/tmp/vexcalibur-cache} $(UV) run --frozen pip-audit --cache-dir $${PIP_AUDIT_CACHE_DIR:-/tmp/vexcalibur-pip-audit-cache}
 
 secrets: ## Check tracked files for newly introduced secrets
-	git ls-files -z | xargs -0 $(POETRY) run -- detect-secrets-hook --baseline .secrets.baseline --
+	git ls-files -z | xargs -0 $(UV) run --frozen detect-secrets-hook --baseline .secrets.baseline --
 
 secrets-pr: ## Check tracked files against the base branch secret baseline
 	git show $(SECRETS_BASELINE_REF):.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
-	git ls-files -z | xargs -0 $(POETRY) run -- detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
+	git ls-files -z | xargs -0 $(UV) run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
 
 check: lint typecheck audit secrets test ## Run local quality gate
 
 docs: ## Build Sphinx documentation
-	$(POETRY) run sphinx-build -W --keep-going -b html docs docs/_build/html
+	$(UV) run --frozen --extra docs sphinx-build -W --keep-going -b html docs docs/_build/html
 
 build: ## Build source and wheel distributions
-	$(POETRY) build
+	$(UV) build --clear --no-create-gitignore --no-sources
 
 pre-commit: ## Run pre-commit checks
-	$(POETRY) run pre-commit run --all-files
+	$(UV) run --frozen pre-commit run --all-files
 
 pre-commit-install: ## Install pre-commit hooks
-	$(POETRY) run pre-commit install
+	$(UV) run --frozen pre-commit install
 
 secrets-baseline: ## Refresh detect-secrets baseline
-	$(POETRY) run detect-secrets scan --baseline .secrets.baseline
+	$(UV) run --frozen detect-secrets scan --baseline .secrets.baseline
 
 clean: ## Remove generated local artifacts
-	rm -rf build dist *.egg-info .coverage .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
+	rm -rf build dist *.egg-info src/*.egg-info .coverage .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
+	rm -f src/$(PACKAGE)/_version.py
 	rm -rf docs/_build
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

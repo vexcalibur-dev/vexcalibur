@@ -21,18 +21,18 @@ make check
 For a full pre-PR pass, run:
 
 ```bash
-poetry check
-poetry check --lock
-poetry run ruff format --check src tests docs/conf.py
-poetry run ruff check src tests docs/conf.py
-poetry run mypy src
-poetry run pytest -m "not live" --cov-fail-under=75
+uv lock --check
+uv sync --frozen
+uv run --frozen ruff format --check src tests docs/conf.py
+uv run --frozen ruff check src tests docs/conf.py
+uv run --frozen mypy src
+uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs
-poetry build
-poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
-git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline .secrets.baseline --
+uv build --clear --no-create-gitignore --no-sources
+uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
+git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline .secrets.baseline --
 git show origin/main:.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
-git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
+git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
 ```
 
 Use `make secrets` for current-branch baseline enforcement, `make secrets-pr` for PR-mode

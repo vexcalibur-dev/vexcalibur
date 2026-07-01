@@ -7,7 +7,7 @@ Use `vexcalibur generate` when you have a supported CycloneDX JSON or XML SBOM a
 The repository fixture is safe to use in public-service examples. The command must still opt in before contacting the public OSV API:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
   --allow-public-osv \
   --output /tmp/vexcalibur-vex.json
@@ -16,7 +16,7 @@ poetry run vexcalibur generate \
 Live OSV results can change. Add `--timestamp` when tests or review steps need deterministic document metadata:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
   --allow-public-osv \
   --timestamp 2026-06-23T00:00:00Z \
@@ -28,7 +28,7 @@ poetry run vexcalibur generate \
 Use `--osv-url` for private mirrors. Do not pass `--allow-public-osv` for private SBOMs:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   path/to/sbom.json \
   --osv-url https://osv.internal.example \
   --output /tmp/vexcalibur-vex.json
@@ -41,7 +41,7 @@ The configured endpoint must implement the OSV query API shape used by Vexcalibu
 Use `--findings-file` when another trusted process has already produced vulnerability findings or exploitability analysis. This mode never contacts OSV.
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   path/to/sbom.json \
   --offline \
   --findings-file path/to/findings.json \
@@ -65,7 +65,7 @@ Do not pass `--allow-public-osv` for private SBOMs. Do not combine `--findings-f
 Omit `--output` to write the VEX JSON to standard output:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
   --allow-public-osv
 ```
@@ -75,7 +75,7 @@ poetry run vexcalibur generate \
 Use the same command for CycloneDX XML SBOM input:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-xml-simple.xml \
   --allow-public-osv \
   --output /tmp/vexcalibur-vex.json

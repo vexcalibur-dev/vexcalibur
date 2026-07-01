@@ -37,50 +37,50 @@ Current workflows:
 Prerequisites:
 
 - Python 3.10 or newer
-- Poetry 2.x
+- uv 0.11.17
 
 Install dependencies:
 
 ```bash
-poetry install
+uv sync
 ```
 
 Run offline tests:
 
 ```bash
-poetry run pytest -m "not live"
+uv run --frozen pytest -m "not live" --cov-fail-under=75
 ```
 
 Run the live OSV compatibility smoke test only when you intentionally want to call the public OSV service:
 
 ```bash
-poetry run pytest -m live -q
+uv run --frozen pytest -m live -q
 ```
 
 Run static checks:
 
 ```bash
-poetry run ruff check .
-poetry run mypy src
+uv run --frozen ruff check src tests docs/conf.py
+uv run --frozen mypy src
 ```
 
 Build the documentation:
 
 ```bash
-poetry install --extras docs
+uv sync --extra docs
 make docs
 ```
 
 Try the CLI:
 
 ```bash
-poetry run vexcalibur --help
+uv run --frozen vexcalibur --help
 ```
 
 Query OSV for a package URL:
 
 ```bash
-poetry run vexcalibur query-osv pkg:pypi/django@1.2 --allow-public-osv
+uv run --frozen vexcalibur query-osv pkg:pypi/django@1.2 --allow-public-osv
 ```
 
 Expected result: the command prints the submitted package URL and any OSV vulnerability IDs returned by `https://api.osv.dev`.
@@ -92,25 +92,25 @@ Generate CycloneDX VEX JSON from a CycloneDX SBOM:
 `generate` refuses to send package URLs or component versions to the public OSV API unless you pass `--allow-public-osv`. Do not use that flag with private SBOMs or sensitive package inventories. Use `--osv-url` for a private OSV mirror. Library callers that inject an OSV client must also provide the matching `osv_base_url`; the same public-OSV opt-in check is enforced before the client is used.
 
 ```bash
-poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --output /tmp/vexcalibur-vex.json
+uv run --frozen vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --output /tmp/vexcalibur-vex.json
 ```
 
 Illustrative private-mirror command, replacing the URL with your internal OSV endpoint:
 
 ```bash
-poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --osv-url https://osv.internal.example --output /tmp/vexcalibur-vex.json
+uv run --frozen vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --osv-url https://osv.internal.example --output /tmp/vexcalibur-vex.json
 ```
 
 Offline command using local findings, replacing the file paths with your SBOM and findings JSON:
 
 ```bash
-poetry run vexcalibur generate path/to/sbom.json --offline --findings-file path/to/findings.json --output /tmp/vexcalibur-vex.json
+uv run --frozen vexcalibur generate path/to/sbom.json --offline --findings-file path/to/findings.json --output /tmp/vexcalibur-vex.json
 ```
 
 Legacy `vexy` compatibility command using the same no-network findings source:
 
 ```bash
-poetry run vexy -c tests/fixtures/vexy/legacy-config.yml -i tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml --format json --schema-version 1.6 --output - --offline --findings-file tests/fixtures/findings/all-analysis-states.json --timestamp 2026-06-23T00:00:00Z
+uv run --frozen vexy -c tests/fixtures/vexy/legacy-config.yml -i tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml --format json --schema-version 1.6 --output - --offline --findings-file tests/fixtures/findings/all-analysis-states.json --timestamp 2026-06-23T00:00:00Z
 ```
 
 The compatibility command accepts `-c/--config` for argument compatibility but
@@ -120,7 +120,7 @@ with `--findings-file`, `--osv-url`, or `--allow-public-osv`.
 For a deterministic document timestamp, provide `--timestamp`. Live OSV data can change over time, so identical inputs can still produce different vulnerability findings unless OSV responses are controlled.
 
 ```bash
-poetry run vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --timestamp 2026-06-23T00:00:00Z --output /tmp/vexcalibur-vex.json
+uv run --frozen vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --timestamp 2026-06-23T00:00:00Z --output /tmp/vexcalibur-vex.json
 python - <<'PY'
 import json
 from pathlib import Path
