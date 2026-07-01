@@ -104,6 +104,31 @@ def main() -> None:
     )
     _assert_generated_vex_shape(generated.stdout)
 
+    vexy_generated = _expect(
+        [
+            str(vexy),
+            "-c",
+            str(FIXTURE_ROOT / "vexy" / "legacy-config.yml"),
+            "-i",
+            str(FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml"),
+            "--format",
+            "json",
+            "--schema-version",
+            "1.6",
+            "--output",
+            "-",
+            "--findings-file",
+            str(FIXTURE_ROOT / "findings" / "all-analysis-states.json"),
+            "--offline",
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+        returncode=0,
+        stdout_contains=['"bomFormat": "CycloneDX"'],
+        stderr_equals="",
+    )
+    _assert_generated_vex_shape(vexy_generated.stdout)
+
 
 def _required_bin_dir() -> Path:
     try:

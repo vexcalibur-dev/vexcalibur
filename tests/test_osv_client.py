@@ -13,6 +13,12 @@ from vexcalibur.sources.osv import (
 from vexcalibur.vex import parse_timestamp
 
 
+def test_osv_client_normalizes_base_url_whitespace_and_trailing_slash() -> None:
+    client = OsvClient(base_url=" https://osv.example.test/ ")
+
+    assert client.base_url == "https://osv.example.test"
+
+
 def test_query_sends_purl_to_osv_query_endpoint() -> None:
     requests: list[httpx.Request] = []
 

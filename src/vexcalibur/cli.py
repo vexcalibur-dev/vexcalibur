@@ -9,6 +9,10 @@ from rich.console import Console
 
 from vexcalibur.generate import generate_vex_from_local_findings, generate_vex_from_sbom
 from vexcalibur.sbom import SbomError
+from vexcalibur.source_options import (
+    GenerateSourceOptionError,
+    resolve_generate_source_options,
+)
 from vexcalibur.sources.local import LocalFindingsError
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
@@ -17,11 +21,6 @@ from vexcalibur.sources.osv import (
     osv_client_for_url,
 )
 from vexcalibur.vex import parse_timestamp
-
-
-class _GenerateSourceOptionError(Exception):
-    """Raised when generate source options are mutually incompatible."""
-
 
 app = typer.Typer(
     name="vexcalibur",
@@ -137,26 +136,30 @@ def generate(
             raise typer.BadParameter(msg) from exc
 
     try:
-        _validate_generate_source_options(
+        source_options = resolve_generate_source_options(
             findings_file=findings_file,
             offline=offline,
             osv_url=osv_url,
             allow_public_osv=allow_public_osv,
         )
-        if findings_file is None:
+        if source_options.findings_file is None:
             vex_json = generate_vex_from_sbom(
                 input_file=input_file,
                 timestamp=parsed_timestamp,
-                osv_base_url=DEFAULT_OSV_API_URL if osv_url is None else osv_url,
-                allow_public_osv=allow_public_osv,
+                osv_base_url=(
+                    DEFAULT_OSV_API_URL
+                    if source_options.osv_url is None
+                    else source_options.osv_url
+                ),
+                allow_public_osv=source_options.allow_public_osv,
             )
         else:
             vex_json = generate_vex_from_local_findings(
                 input_file=input_file,
-                findings_file=findings_file,
+                findings_file=source_options.findings_file,
                 timestamp=parsed_timestamp,
             )
-    except _GenerateSourceOptionError as exc:
+    except GenerateSourceOptionError as exc:
         typer.echo(f"Invalid generate options: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     except SbomError as exc:
@@ -192,29 +195,6 @@ def _parse_package_urls(values: list[str]) -> list[PackageURL]:
             msg = f"{value!r} is not a valid package URL: {exc}"
             raise typer.BadParameter(msg) from exc
     return parsed
-
-
-def _validate_generate_source_options(
-    *,
-    findings_file: Path | None,
-    offline: bool,
-    osv_url: str | None,
-    allow_public_osv: bool,
-) -> None:
-    if offline and findings_file is None:
-        msg = "--offline requires --findings-file in this release"
-        raise _GenerateSourceOptionError(msg)
-    if osv_url is not None and not osv_url.strip():
-        msg = "--osv-url must not be empty"
-        raise _GenerateSourceOptionError(msg)
-    if findings_file is None:
-        return
-    if allow_public_osv:
-        msg = "--allow-public-osv cannot be combined with --findings-file"
-        raise _GenerateSourceOptionError(msg)
-    if osv_url is not None:
-        msg = "--osv-url cannot be combined with --findings-file"
-        raise _GenerateSourceOptionError(msg)
 
 
 if __name__ == "__main__":

@@ -82,6 +82,8 @@ def test_query_osv_requires_public_osv_opt_in_without_traceback(monkeypatch) -> 
     "osv_url",
     (
         "https://api.osv.dev",
+        " https://api.osv.dev ",
+        "\thttps://api.osv.dev\n",
         "https://api.osv.dev/",
         "https://API.OSV.DEV",
         "https://api.osv.dev.",
@@ -291,6 +293,8 @@ def test_generate_rejects_unversioned_sbom_before_public_osv_policy(
     "osv_url",
     (
         "https://api.osv.dev",
+        " https://api.osv.dev ",
+        "\thttps://api.osv.dev\n",
         "https://api.osv.dev/",
         "https://API.OSV.DEV",
         "https://api.osv.dev.",

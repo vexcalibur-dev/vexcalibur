@@ -94,7 +94,7 @@ class OsvClient:
         if max_pages < 1:
             msg = "max_pages must be at least 1"
             raise ValueError(msg)
-        self._base_url = base_url.rstrip("/")
+        self._base_url = normalize_osv_base_url(base_url)
         self._timeout = timeout
         self._max_pages = max_pages
         self._client = client
@@ -289,11 +289,12 @@ class OsvSource:
 
 def osv_client_for_url(*, osv_base_url: str, allow_public_osv: bool) -> OsvClient:
     """Build an OSV client, requiring explicit opt-in for public OSV."""
+    normalized_base_url = normalize_osv_base_url(osv_base_url)
     ensure_osv_url_allowed(
-        osv_base_url=osv_base_url,
+        osv_base_url=normalized_base_url,
         allow_public_osv=allow_public_osv,
     )
-    return OsvClient(base_url=osv_base_url)
+    return OsvClient(base_url=normalized_base_url)
 
 
 def ensure_osv_url_allowed(*, osv_base_url: str, allow_public_osv: bool) -> None:
@@ -321,11 +322,16 @@ def ensure_osv_client_allowed(
 
 
 def is_public_osv_url(osv_base_url: str) -> bool:
-    parsed = urlparse(osv_base_url)
+    parsed = urlparse(normalize_osv_base_url(osv_base_url))
     hostname = parsed.hostname
     if hostname is None:
         return False
     return _normalized_hostname(hostname) == PUBLIC_OSV_API_HOST
+
+
+def normalize_osv_base_url(osv_base_url: str) -> str:
+    """Normalize OSV base URL whitespace and trailing slashes."""
+    return osv_base_url.strip().rstrip("/")
 
 
 def _client_base_url(osv_client: object) -> str | None:

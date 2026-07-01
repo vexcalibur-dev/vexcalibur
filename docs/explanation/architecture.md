@@ -74,4 +74,14 @@ contract.
 
 ## Compatibility
 
-The package installs a `vexy` executable name for future compatibility work. The current compatibility command is only a placeholder. Existing `vexy` flag and output compatibility should be added after the core SBOM ingest, provider, VEX generation, and GitHub Action interfaces are stronger.
+The package installs a `vexy` executable for selected legacy workflow
+compatibility. That compatibility layer maps supported legacy-style input and
+output flags onto the same generation workflow described above, so source-mode
+validation and the public OSV opt-in boundary stay shared with the primary
+`vexcalibur generate` command.
+
+The supported compatibility subset emits CycloneDX 1.6 JSON VEX. It accepts the
+legacy `-c/--config` flag for command-line compatibility, but it does not parse
+legacy data-source credentials or re-enable OSS Index. Legacy CycloneDX XML VEX
+output and CycloneDX `1.4` VEX output are intentionally outside the current
+compatibility contract.

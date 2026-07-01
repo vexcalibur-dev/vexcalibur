@@ -17,6 +17,8 @@ The current implementation supports:
 - CycloneDX 1.6 VEX JSON output.
 - Deterministic metadata and serial numbers when `--timestamp` and controlled
   finding inputs are used.
+- A narrow `vexy` compatibility executable for CycloneDX JSON VEX generation
+  from supported SBOM inputs and explicit Vexcalibur source modes.
 - CI quality gates for tests, typing, linting, package build, installed CLI
   checks, documentation build, secret scanning, dependency audit, CodeQL,
   dependency review, and OpenSSF Scorecard.
@@ -36,10 +38,9 @@ branches for production workflows.
 
 ## Deferred Work
 
-The package installs a `vexy` executable name so legacy workflow compatibility
-can be built later. Existing `vexy` flag and output compatibility is deferred
-behind core SBOM ingest, provider behavior, VEX generation, and GitHub Action
-workflows.
+The `vexy` compatibility executable does not support legacy CycloneDX XML VEX
+output, CycloneDX `1.4` VEX output, or legacy OSS Index data-source behavior.
+Those paths are intentionally not part of the current compatibility subset.
 
 Policy-driven VEX state selection for OSV-derived findings is also deferred.
 OSV-derived findings currently use `in_triage` with an analysis detail that
