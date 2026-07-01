@@ -1,0 +1,105 @@
+{
+  "help": {
+    "exit_code": 0,
+    "stdout_contains": [
+      "Compatibility command for legacy vexy workflows",
+      "-i",
+      "--format",
+      "--schema-version",
+      "--findings-file",
+      "--allow-public-osv"
+    ],
+    "stderr": ""
+  },
+  "offline_stdout": {
+    "exit_code": 0,
+    "stdout_file": "cyclonedx-vex-all-analysis-states.json",
+    "stderr": ""
+  },
+  "json_stdout": {
+    "exit_code": 0,
+    "stdout_file": "cyclonedx-vex-all-analysis-states.json",
+    "stderr": ""
+  },
+  "debug_stdout": {
+    "exit_code": 0,
+    "stdout_file": "cyclonedx-vex-all-analysis-states.json",
+    "stderr_contains": [
+      "[DEBUG] vexy compatibility",
+      "legacy config accepted without parsing"
+    ]
+  },
+  "unsupported_xml_format": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: only --format json is supported; legacy --format xml is not available\n"
+  },
+  "unsupported_schema_1_4": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: only --schema-version 1.6 is supported; legacy --schema-version 1.4 is not available\n"
+  },
+  "unsupported_stdin": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: reading CycloneDX SBOM input from stdin is not supported; pass a file path\n"
+  },
+  "missing_input": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: missing required legacy input option -i/--in-file\n"
+  },
+  "offline_without_findings": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: --offline requires --findings-file in this release\n"
+  },
+  "empty_osv_url": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: --osv-url must not be empty\n"
+  },
+  "findings_with_public_osv": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: --allow-public-osv cannot be combined with --findings-file\n"
+  },
+  "findings_with_osv_url": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: --osv-url cannot be combined with --findings-file\n"
+  },
+  "invalid_timestamp": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "vexy compatibility failed: 'not a timestamp' is not a valid ISO-8601 timestamp\n"
+  },
+  "requires_public_osv_opt_in": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr_contains": [
+      "VEX generation failed",
+      "--allow-public-osv"
+    ]
+  },
+  "output_exists_without_force": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr_contains": [
+      "vexy compatibility failed",
+      "pass --force to overwrite"
+    ]
+  },
+  "output_with_force": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "",
+    "output_file": "cyclonedx-vex-all-analysis-states.json"
+  },
+  "default_output": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "",
+    "output_file": "cyclonedx-vex-all-analysis-states.json"
+  }
+}

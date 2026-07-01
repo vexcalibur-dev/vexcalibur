@@ -20,7 +20,7 @@ Usable for the workflows listed below, with unstable public contracts before the
 | Vulnerability sources | Supports public OSV with explicit opt-in, private OSV-compatible endpoints, and no-network local findings files. |
 | VEX output | Emits CycloneDX 1.6 VEX JSON with deterministic output when `--timestamp` is provided. |
 | GitHub Actions | Use [vexcalibur-action](https://github.com/vexcalibur-dev/vexcalibur-action) for CI workflows. |
-| Legacy `vexy` compatibility | Provides the executable name only. Existing `vexy` flags and output compatibility are deferred. |
+| Legacy `vexy` compatibility | Supports a narrow `vexy` CLI subset for CycloneDX JSON VEX generation while preserving the public OSV opt-in boundary. |
 | Stability | CLI flags, Python APIs, and output details can change before 1.0. Pin exact versions after releases begin. |
 
 Current workflows:
@@ -28,6 +28,7 @@ Current workflows:
 - Query OSV-compatible APIs for one or more package URLs with `vexcalibur query-osv`.
 - Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON or XML SBOM input with `vexcalibur generate`.
 - Generate VEX from local findings without contacting a vulnerability service.
+- Run selected legacy `vexy` commands through the compatibility executable.
 - Run Vexcalibur from GitHub Actions through the companion action.
 
 ## Development
@@ -104,6 +105,16 @@ Offline command using local findings, replacing the file paths with your SBOM an
 ```bash
 poetry run vexcalibur generate path/to/sbom.json --offline --findings-file path/to/findings.json --output /tmp/vexcalibur-vex.json
 ```
+
+Legacy `vexy` compatibility command using the same no-network findings source:
+
+```bash
+poetry run vexy -c tests/fixtures/vexy/legacy-config.yml -i tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml --format json --schema-version 1.6 --output - --offline --findings-file tests/fixtures/findings/all-analysis-states.json --timestamp 2026-06-23T00:00:00Z
+```
+
+The compatibility command accepts `-c/--config` for argument compatibility but
+does not read legacy data-source credentials. Select a Vexcalibur source mode
+with `--findings-file`, `--osv-url`, or `--allow-public-osv`.
 
 For a deterministic document timestamp, provide `--timestamp`. Live OSV data can change over time, so identical inputs can still produce different vulnerability findings unless OSV responses are controlled.
 
