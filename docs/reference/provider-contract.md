@@ -114,7 +114,7 @@ Provider changes should include focused tests for:
 Run the normal offline test suite before opening a provider pull request:
 
 ```bash
-poetry run python -m pytest -m "not live"
+uv run --frozen python -m pytest -m "not live"
 ```
 
 Run live tests only when the provider's public-service boundary has been

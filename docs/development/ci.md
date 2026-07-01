@@ -6,7 +6,7 @@ Vexcalibur CI separates repository security gates from live-service compatibilit
 
 The main CI workflow runs these repository gates on pull requests and pushes to `main`:
 
-- package metadata and lock-file checks
+- lock-file check with `uv lock --check`
 - Ruff formatting and linting
 - MyPy type checking
 - dependency audit with `pip-audit`
@@ -19,6 +19,45 @@ The main CI workflow runs these repository gates on pull requests and pushes to 
 Manual runs execute the same repository gates. The live OSV compatibility job runs manually when `run_live_osv` is selected.
 
 Use `run_scheduled_profile` when you need to validate the scheduled job shape before a scheduled run occurs. That profile runs repository security and live OSV compatibility while skipping the normal pull request gates: quality, test, package build, installed CLI, documentation build, and CI result.
+
+## PyPI Publishing
+
+PyPI publishing is handled by `.github/workflows/pypi.yml`.
+
+The workflow publishes through PyPI Trusted Publishing, so it does not use a
+password or API token secret. The PyPI publisher configuration must match:
+
+| Field | Value |
+| --- | --- |
+| Project | `vexcalibur` |
+| Repository | `vexcalibur-dev/vexcalibur` |
+| Workflow | `pypi.yml` |
+| Environment | `pypi` |
+
+Release versions come from Git tags through `setuptools-scm`; do not commit a
+literal version number to `pyproject.toml`. The first package release should use
+tag `v0.1.0`.
+Builds may generate `src/vexcalibur/_version.py` from tag metadata so source and
+source distributions remain buildable without a committed release version. That
+generated file is ignored and should not be committed.
+
+Publish by creating a GitHub Release for a matching `v*` tag on `main`. The
+workflow rejects tags that are not reachable from `origin/main`; it does not
+support manual dispatch publishing.
+
+The publishing workflow:
+
+- validates the release tag format and confirms the tag is on `origin/main`;
+- checks out the release tag with full Git history so tags are available;
+- runs quality, security, offline test, and documentation gates against the
+  release tag before publishing;
+- builds source and wheel distributions with `uv build --clear --no-create-gitignore --no-sources`;
+- verifies the source and wheel distribution metadata names and versions match
+  the release tag;
+- runs `twine check`;
+- runs installed CLI smoke tests against the exact wheel artifact on the minimum
+  and maximum supported Python versions; and
+- publishes from the `pypi` environment with `id-token: write`.
 
 ## Scheduled Runs
 
@@ -70,7 +109,7 @@ For recurring `detect-secrets-hook` failures:
 For recurring live OSV failures:
 
 - Check whether `https://api.osv.dev` changed behavior or is unavailable.
-- Reproduce with `poetry run pytest -m live -q` only when public OSV access is acceptable.
+- Reproduce with `uv run --frozen pytest -m live -q` only when public OSV access is acceptable.
 - Keep fixes isolated from repository security-gate changes.
 
 For recurring installed CLI failures:

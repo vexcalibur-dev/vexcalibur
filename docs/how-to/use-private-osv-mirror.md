@@ -15,7 +15,7 @@ service.
 Pass the mirror base URL with `--osv-url`:
 
 ```bash
-poetry run vexcalibur generate \
+uv run --frozen vexcalibur generate \
   path/to/private-sbom.json \
   --osv-url https://osv.internal.example \
   --output /tmp/vexcalibur-vex.json
@@ -33,7 +33,7 @@ CycloneDX 1.6 VEX JSON to `/tmp/vexcalibur-vex.json`.
 Use the same `--osv-url` option for direct package URL checks:
 
 ```bash
-poetry run vexcalibur query-osv \
+uv run --frozen vexcalibur query-osv \
   pkg:pypi/example@1.0.0 \
   --osv-url https://osv.internal.example
 ```

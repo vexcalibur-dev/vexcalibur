@@ -12,6 +12,7 @@ Vexcalibur is usable for those workflows today, but public contracts remain unst
 - [No-network local findings tutorial](tutorials/offline-local-findings.md) walks through generating VEX without contacting a public service.
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md) covers task-oriented generation commands and source configuration.
 - [Use a private OSV mirror](how-to/use-private-osv-mirror.md) shows how to keep private SBOM inventories away from public OSV.
+- [Publish to PyPI](how-to/publish-to-pypi.md) is the release runbook for tag-derived package publishing.
 - [CLI reference](reference/cli.md) lists the current command surface.
 - [CycloneDX VEX output reference](reference/cyclonedx-vex-output.md) describes generated document shape and determinism.
 - [Provider contract reference](reference/provider-contract.md) documents the extension contract for vulnerability sources.
@@ -29,6 +30,7 @@ tutorials/quickstart
 tutorials/offline-local-findings
 how-to/generate-cyclonedx-vex
 how-to/use-private-osv-mirror
+how-to/publish-to-pypi
 reference/cli
 reference/cyclonedx-vex-output
 reference/provider-contract

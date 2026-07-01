@@ -7,12 +7,12 @@ Vexcalibur is usable for documented workflows, but compatibility decisions are s
 Prerequisites:
 
 - Python 3.10 or newer
-- Poetry 2.x
+- uv 0.11.17
 
 Install dependencies from the repository root:
 
 ```bash
-poetry install
+uv sync
 ```
 
 Run the local quality gate:
@@ -30,9 +30,23 @@ make test-live
 Build documentation when changing docs, CLI behavior, package metadata, or public APIs:
 
 ```bash
-poetry install --extras docs
+uv sync --extra docs
 make docs
 ```
+
+## Versioning And Releases
+
+Package versions come from Git tags through `setuptools-scm`; do not commit a
+literal release version to `pyproject.toml` or package source files.
+`setuptools-scm` may generate `src/vexcalibur/_version.py` while building
+distributions; leave it ignored and uncommitted.
+
+Use tags like `v0.1.0` for releases. Publishing to PyPI runs from
+`.github/workflows/pypi.yml` when a GitHub Release is published for a matching
+tag on `main`. The workflow uses the `pypi` GitHub environment and verifies that
+the built distribution metadata matches the release tag.
+Follow the [PyPI publishing runbook](docs/how-to/publish-to-pypi.md) for
+preflight, release, verification, and mitigation steps.
 
 ## Style
 

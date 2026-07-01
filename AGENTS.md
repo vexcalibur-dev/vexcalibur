@@ -21,7 +21,7 @@ The current implementation is Python, but product and domain decisions should st
 ## Technology Stack
 
 - Language: Python 3.10+
-- Packaging: Poetry 2.x, `pyproject.toml`
+- Packaging: uv with `pyproject.toml` and `uv.lock`
 - CLI: Typer
 - HTTP: httpx
 - Data modeling: Pydantic where structured validation is needed
@@ -34,13 +34,13 @@ The current implementation is Python, but product and domain decisions should st
 Install dependencies:
 
 ```bash
-poetry install
+uv sync
 ```
 
 Install documentation dependencies:
 
 ```bash
-poetry install --extras docs
+uv sync --extra docs
 ```
 
 Run the usual local gate:
@@ -69,16 +69,16 @@ Run live OSV compatibility only when the change intentionally exercises the publ
 make test-live
 ```
 
-If a sandboxed agent cannot write Poetry or pip cache files under the home directory, use an in-repo virtualenv and `/tmp` cache:
+If a sandboxed agent cannot write uv or pip cache files under the home directory, use a
+`/tmp` uv cache:
 
 ```bash
-POETRY_VIRTUALENVS_IN_PROJECT=true \
-POETRY_CACHE_DIR=/tmp/vexcalibur-poetry-cache \
-ASDF_PYTHON_VERSION="$(cat .python-version)" \
-poetry install
+UV_CACHE_DIR=/tmp/vexcalibur-uv-cache \
+uv sync
 ```
 
-Use the same environment variables on subsequent `poetry run ...` commands in that session.
+Use the same `UV_CACHE_DIR` value on subsequent `uv run --frozen ...` commands in that
+session.
 
 ## Architecture
 
@@ -131,6 +131,26 @@ The README should stay accurate and concise for the current release state. Avoid
 
 Sphinx documentation lives under `docs/` and builds with `make docs`. Keep conceptual documentation in Diataxis sections, but keep API details close to code through docstrings and `docs/reference/python-api.rst` autodoc pages.
 
+## Versioning And Publishing
+
+Never commit a real package version number. `pyproject.toml` uses
+`dynamic = ["version"]`, and `setuptools-scm` derives package versions from Git
+tags.
+
+- Release tags use `vMAJOR.MINOR.PATCH`, for example `v0.1.0`.
+- The first PyPI release should be tag `v0.1.0`.
+- Do not replace `dynamic = ["version"]` with a committed `[project].version`.
+- `setuptools-scm` may generate `src/vexcalibur/_version.py` while building
+  distributions. It is ignored and must not be committed.
+- Publishing uses `.github/workflows/pypi.yml` and the `pypi` GitHub
+  environment for PyPI trusted publishing. Publish by creating a GitHub Release
+  for a matching tag on `main`; do not add manual publishing paths without a
+  security review.
+- Follow `docs/how-to/publish-to-pypi.md` for release preflight, publishing,
+  verification, and mitigation steps.
+- Release builds must fetch tags with full Git history before building
+  distributions.
+
 ## PR Expectations
 
 Use conventional commit style for branch commits and PR titles. PRs should be ready for review unless the user explicitly asks for a draft.
@@ -138,24 +158,24 @@ Use conventional commit style for branch commits and PR titles. PRs should be re
 Before merging meaningful changes, run or confirm:
 
 ```bash
-poetry check
-poetry check --lock
-poetry run ruff format --check src tests docs/conf.py
-poetry run ruff check src tests docs/conf.py
-poetry run mypy src
-poetry run pytest -m "not live" --cov-fail-under=75
+uv lock --check
+uv sync --frozen
+uv run --frozen ruff format --check src tests docs/conf.py
+uv run --frozen ruff check src tests docs/conf.py
+uv run --frozen mypy src
+uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs
-poetry build
-poetry run pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
-git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline .secrets.baseline --
+uv build --clear --no-create-gitignore --no-sources
+uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
+git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline .secrets.baseline --
 git show origin/main:.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
-git ls-files -z | xargs -0 poetry run -- detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
+git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
 ```
 
 Use `make secrets` for current-branch baseline enforcement, `make secrets-pr` for PR-mode
 base-baseline enforcement, and `make secrets-baseline` only for an intentional, separately
 reviewed baseline refresh.
 
-Run `poetry run pytest -m live -q` only when the change intentionally validates public OSV compatibility.
+Run `uv run --frozen pytest -m live -q` only when the change intentionally validates public OSV compatibility.
 
 For new PRs, run separate review passes for security, code correctness, QA, and code quality when subagent review is available. Run thermonuclear code review for substantive code changes and scorched-earth documentation review for substantive documentation changes.
