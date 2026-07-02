@@ -63,6 +63,35 @@ def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
     assert "pkg:npm/example@2.0.0: no vulnerabilities found" in result.output
 
 
+def test_query_osv_prints_server_controlled_ids_without_interpreting_markup(
+    monkeypatch,
+) -> None:
+    hostile_id = "[bold red]GHSA-evil[/bold red]"
+
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            del base_url
+
+        def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
+            del purls
+            return [
+                OsvQueryResult(
+                    purl="pkg:pypi/example@1.0.0",
+                    vulnerabilities=(OsvVulnerabilitySummary(id=hostile_id),),
+                ),
+            ]
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["query-osv", "pkg:pypi/example@1.0.0", "--allow-public-osv"],
+    )
+
+    assert result.exit_code == 0
+    assert hostile_id in result.output
+
+
 def test_query_osv_requires_public_osv_opt_in_without_traceback(monkeypatch) -> None:
     class FakeOsvClient:
         def __init__(self, **kwargs) -> None:
