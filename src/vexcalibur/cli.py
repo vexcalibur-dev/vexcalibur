@@ -69,11 +69,13 @@ def query_osv(
 
     for result in results:
         if not result.vulnerabilities:
-            console.print(f"{result.purl}: no vulnerabilities found")
+            # Server-derived values are printed verbatim; keep Rich from
+            # interpreting console markup a hostile OSV mirror could inject.
+            console.print(f"{result.purl}: no vulnerabilities found", markup=False, highlight=False)
             continue
 
         ids = ", ".join(vuln.id for vuln in result.vulnerabilities)
-        console.print(f"{result.purl}: {ids}")
+        console.print(f"{result.purl}: {ids}", markup=False, highlight=False)
 
 
 @app.command("generate")
