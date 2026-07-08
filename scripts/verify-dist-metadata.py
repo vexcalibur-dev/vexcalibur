@@ -80,16 +80,22 @@ def _find_artifacts(dist_dir: Path) -> tuple[Path, Path]:
 def _read_wheel_metadata(path: Path) -> email.message.Message:
     with zipfile.ZipFile(path) as wheel:
         metadata_path = next(
-            name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")
+            (name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")),
+            None,
         )
+        if metadata_path is None:
+            raise SystemExit(f"Could not find wheel metadata in {path}.")
         return email.message_from_bytes(wheel.read(metadata_path))
 
 
 def _read_sdist_metadata(path: Path) -> email.message.Message:
     with tarfile.open(path, "r:gz") as sdist:
         metadata_path = next(
-            member for member in sdist.getmembers() if member.name.endswith("/PKG-INFO")
+            (member for member in sdist.getmembers() if member.name.endswith("/PKG-INFO")),
+            None,
         )
+        if metadata_path is None:
+            raise SystemExit(f"Could not find sdist metadata in {path}.")
         metadata_file = sdist.extractfile(metadata_path)
         if metadata_file is None:
             raise SystemExit(f"Could not read {metadata_path.name} from {path}.")

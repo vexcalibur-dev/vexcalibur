@@ -27,7 +27,8 @@ The current implementation is Python, but product and domain decisions should st
 - Data modeling: Pydantic where structured validation is needed
 - SBOM/VEX domain: CycloneDX JSON first, with room for more formats
 - CI: GitHub Actions across Python 3.10 through 3.14
-- Quality: Ruff, MyPy strict mode, pytest, pytest-cov, pip-audit, detect-secrets
+- Quality: Ruff, MyPy strict mode, pytest, pytest-cov, actionlint, shellcheck,
+  pip-audit, detect-secrets
 
 ## Common Commands
 
@@ -53,6 +54,7 @@ Run individual checks:
 
 ```bash
 make lint
+make workflow-lint
 make typecheck
 make test
 make docs
@@ -62,6 +64,10 @@ make secrets-pr
 make build
 make pre-commit
 ```
+
+`make workflow-lint` requires `actionlint` and `shellcheck` on `PATH`. Their
+versions are pinned in `.tool-versions`; install or activate those tools with a
+`.tool-versions`-compatible manager such as `mise` or `asdf`.
 
 Run live OSV compatibility only when the change intentionally exercises the public OSV service:
 
@@ -142,10 +148,15 @@ tags.
 - Do not replace `dynamic = ["version"]` with a committed `[project].version`.
 - `setuptools-scm` may generate `src/vexcalibur/_version.py` while building
   distributions. It is ignored and must not be committed.
+- `.github/workflows/release.yml` creates release tags and GitHub Releases from
+  pushes to `main` using the `vexcalibur-dev` automation GitHub App. It derives
+  automatic bumps from Conventional Commits, runs release gates before creating
+  public release artifacts, and supports manual `workflow_dispatch` with an
+  explicit version.
 - Publishing uses `.github/workflows/pypi.yml` and the `pypi` GitHub
-  environment for PyPI trusted publishing. Publish by creating a GitHub Release
-  for a matching tag on `main`; do not add manual publishing paths without a
-  security review.
+  environment for PyPI trusted publishing. An automation-created GitHub Release
+  for a matching tag on the current `main` tip triggers PyPI publishing; do not
+  add manual publishing paths without a security review.
 - Follow `docs/how-to/publish-to-pypi.md` for release preflight, publishing,
   verification, and mitigation steps.
 - Release builds must fetch tags with full Git history before building
@@ -160,9 +171,11 @@ Before merging meaningful changes, run or confirm:
 ```bash
 uv lock --check
 uv sync --frozen
-uv run --frozen ruff format --check src tests docs/conf.py
-uv run --frozen ruff check src tests docs/conf.py
+uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
+uv run --frozen ruff check src tests scripts/*.py docs/conf.py
 uv run --frozen mypy src
+actionlint -shellcheck shellcheck .github/workflows/*.yml
+shellcheck scripts/*.sh
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs
 uv build --clear --no-create-gitignore --no-sources

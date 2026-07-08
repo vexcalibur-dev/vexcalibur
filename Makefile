@@ -1,8 +1,10 @@
-.PHONY: help install install-docs test test-live installed-cli-check lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live installed-cli-check lint workflow-lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 UV := uv
 PACKAGE := vexcalibur
 SECRETS_BASELINE_REF ?= origin/main
+ACTIONLINT ?= actionlint
+SHELLCHECK ?= shellcheck
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -23,11 +25,16 @@ installed-cli-check: ## Build, install, and test console scripts from the wheel
 	scripts/check-installed-cli.sh
 
 lint: ## Run ruff checks
-	$(UV) run --frozen ruff check src tests docs/conf.py
+	$(UV) run --frozen ruff check src tests scripts/*.py docs/conf.py
+
+workflow-lint: ## Lint GitHub Actions workflows and shell scripts
+	$(SHELLCHECK) --version >/dev/null
+	$(ACTIONLINT) -shellcheck "$(SHELLCHECK)" .github/workflows/*.yml
+	$(SHELLCHECK) scripts/*.sh
 
 format: ## Format source and tests
-	$(UV) run --frozen ruff format src tests docs/conf.py
-	$(UV) run --frozen ruff check --fix src tests docs/conf.py
+	$(UV) run --frozen ruff format src tests scripts/*.py docs/conf.py
+	$(UV) run --frozen ruff check --fix src tests scripts/*.py docs/conf.py
 
 typecheck: ## Run mypy
 	$(UV) run --frozen mypy src
@@ -42,7 +49,7 @@ secrets-pr: ## Check tracked files against the base branch secret baseline
 	git show $(SECRETS_BASELINE_REF):.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
 	git ls-files -z | xargs -0 $(UV) run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
 
-check: lint typecheck audit secrets test ## Run local quality gate
+check: lint workflow-lint typecheck audit secrets test ## Run local quality gate
 
 docs: ## Build Sphinx documentation
 	$(UV) run --frozen --extra docs sphinx-build -W --keep-going -b html docs docs/_build/html
