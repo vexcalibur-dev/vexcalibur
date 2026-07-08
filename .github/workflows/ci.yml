@@ -54,13 +54,38 @@ jobs:
         run: uv lock --check
 
       - name: Check formatting
-        run: uv run --frozen ruff format --check src tests docs/conf.py
+        run: uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
 
       - name: Lint
-        run: uv run --frozen ruff check src tests docs/conf.py
+        run: uv run --frozen ruff check src tests scripts/*.py docs/conf.py
 
       - name: Type check
         run: uv run --frozen mypy src
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install workflow tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: "v2026.6.12"
+          github_token: ""
+          cache: true
+          install_args: "actionlint shellcheck"
+
+      - name: Lint workflows
+        run: actionlint -shellcheck shellcheck .github/workflows/*.yml
+
+      - name: Lint shell scripts
+        run: shellcheck scripts/*.sh
 
   security:
     name: Repository security
@@ -254,12 +279,12 @@ jobs:
   ci:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [quality, security, test, build, installed-cli, docs]
+    needs: [quality, workflow-lint, security, test, build, installed-cli, docs]
     if: always() && github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     steps:
       - name: Check required jobs
         run: |
-          for result in "${{ needs.quality.result }}" "${{ needs.security.result }}" "${{ needs.test.result }}" "${{ needs.build.result }}" "${{ needs.installed-cli.result }}" "${{ needs.docs.result }}"; do
+          for result in "${{ needs.quality.result }}" "${{ needs.workflow-lint.result }}" "${{ needs.security.result }}" "${{ needs.test.result }}" "${{ needs.build.result }}" "${{ needs.installed-cli.result }}" "${{ needs.docs.result }}"; do
             if [ "$result" != "success" ]; then
               echo "Required job failed or was skipped: $result"
               exit 1

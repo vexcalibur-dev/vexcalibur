@@ -9,6 +9,8 @@ The main CI workflow runs these repository gates on pull requests and pushes to 
 - lock-file check with `uv lock --check`
 - Ruff formatting and linting
 - MyPy type checking
+- GitHub Actions workflow linting with `actionlint`
+- shell script linting with `shellcheck`
 - dependency audit with `pip-audit`
 - secret enforcement with `detect-secrets-hook`
 - offline pytest matrix across supported Python versions
@@ -20,6 +22,30 @@ Manual runs execute the same repository gates. The live external-service
 compatibility job runs manually when `run_live_services` is selected.
 
 Use `run_scheduled_profile` when you need to validate the scheduled job shape before a scheduled run occurs. That profile runs repository security and live external-service compatibility while skipping the normal pull request gates: quality, test, package build, installed CLI, documentation build, and CI result.
+
+## Release Automation
+
+`.github/workflows/release.yml` runs on pushes to `main` and can also be started
+with `workflow_dispatch`.
+
+The workflow uses the `vexcalibur-dev` automation GitHub App to create annotated
+`vMAJOR.MINOR.PATCH` tags and GitHub Releases. Release versions are computed
+from Conventional Commit messages by `scripts/next-release-tag.sh`. The first
+automatic release is `v0.1.0`; after that, non-releasable commits such as
+`docs:`, `test:`, `ci:`, and ordinary `chore:` changes do not create a release
+by themselves.
+
+Use the manual `version` input only when you need to force a specific
+`MAJOR.MINOR.PATCH` version. Anyone who can manually dispatch the workflow is a
+trusted release operator because manual runs can publish a GitHub Release and
+trigger PyPI publishing.
+
+The release workflow resolves the candidate tag first with read-only
+permissions. It then runs quality, workflow lint, security, offline tests,
+documentation, package build, and installed-wheel smoke checks against the exact
+release commit before it mints the write-capable GitHub App token. Before
+publishing, it generates release notes, scans the generated notes with
+`detect-secrets`, and then publishes the GitHub Release with the scanned notes.
 
 ## PyPI Publishing
 
@@ -42,16 +68,21 @@ Builds may generate `src/vexcalibur/_version.py` from tag metadata so source and
 source distributions remain buildable without a committed release version. That
 generated file is ignored and should not be committed.
 
-Publish by creating a GitHub Release for a matching `v*` tag on `main`. The
-workflow rejects tags that are not reachable from `origin/main`; it does not
-support manual dispatch publishing.
+PyPI publishing starts when the release workflow publishes a GitHub Release for a
+matching `v*` tag on the current `main` tip. The workflow rejects releases not
+created by the `vexcalibur-dev-automation` GitHub App and rejects tags that do
+not point at the current `origin/main`. It also refuses GitHub Releases marked
+as prereleases. It does not support manual dispatch or manually created GitHub
+Release publishing.
 
 The publishing workflow:
 
-- validates the release tag format and confirms the tag is on `origin/main`;
+- validates the release author, non-prerelease status, release tag format, and
+  current `origin/main` tag target;
 - checks out the release tag with full Git history so tags are available;
 - runs quality, security, offline test, and documentation gates against the
   release tag before publishing;
+- runs GitHub Actions workflow linting and shell script linting;
 - builds source and wheel distributions with `uv build --clear --no-create-gitignore --no-sources`;
 - verifies the source and wheel distribution metadata names and versions match
   the release tag;

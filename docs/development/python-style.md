@@ -23,8 +23,8 @@ For a full pre-PR pass, run:
 ```bash
 uv lock --check
 uv sync --frozen
-uv run --frozen ruff format --check src tests docs/conf.py
-uv run --frozen ruff check src tests docs/conf.py
+uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
+uv run --frozen ruff check src tests scripts/*.py docs/conf.py
 uv run --frozen mypy src
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs

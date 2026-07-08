@@ -1,8 +1,19 @@
-name: PyPI
+name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional explicit MAJOR.MINOR.PATCH version. Empty computes the next version.
+        required: false
+        type: string
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -14,65 +25,58 @@ env:
 
 jobs:
   resolve:
-    name: Resolve release tag
+    name: Resolve release candidate
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      sha: ${{ steps.tag.outputs.sha }}
-      version: ${{ steps.tag.outputs.version }}
+      skip: ${{ steps.release.outputs.skip }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      previous_tag: ${{ steps.release.outputs.previous_tag }}
+      bump: ${{ steps.release.outputs.bump }}
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
-      - name: Refuse prerelease publishing
-        if: github.event.release.prerelease
-        run: |
-          echo "::error::PyPI publishing requires a non-prerelease GitHub Release."
-          exit 1
-
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: main
 
-      - name: Require automation release author
+      - name: Require current main tip
         env:
-          AUTOMATION_BOT_LOGIN: vexcalibur-dev-automation[bot]
-          RELEASE_AUTHOR: ${{ github.event.release.author.login }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "$RELEASE_AUTHOR" != "$AUTOMATION_BOT_LOGIN" ]]; then
-            echo "::error::PyPI publishes must come from ${AUTOMATION_BOT_LOGIN}, not ${RELEASE_AUTHOR}."
+          set -euo pipefail
+
+          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${current_main_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "Refusing to release from a stale main workflow run." >&2
+            echo "Current main: ${current_main_sha}" >&2
+            echo "Workflow SHA: ${GITHUB_SHA}" >&2
             exit 1
           fi
 
-      - name: Resolve tag
-        id: tag
+      - name: Determine release version
+        id: release
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          tag="$RELEASE_TAG"
+          MANUAL_VERSION: ${{ github.event.inputs.version || '' }}
+        run: scripts/next-release-tag.sh "${MANUAL_VERSION}"
 
-          if ! printf '%s\n' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'; then
-            echo "::error::Release tag must look like v0.1.0 without leading zeros: $tag"
-            exit 1
-          fi
+      - name: Record release SHA
+        id: sha
+        run: printf 'sha=%s\n' "${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
-          sha="$(git rev-parse --verify "refs/tags/$tag^{commit}")"
-          current_main_sha="$(git rev-parse --verify origin/main)"
-          if [[ "$sha" != "$current_main_sha" ]]; then
-            echo "::error::Release tag $tag points at $sha, not current main $current_main_sha."
-            exit 1
-          fi
-
-          {
-            printf 'tag=%s\n' "$tag"
-            printf 'sha=%s\n' "$sha"
-            printf 'version=%s\n' "${tag#v}"
-          } >> "$GITHUB_OUTPUT"
+      - name: Stop on skipped release
+        if: steps.release.outputs.skip == 'true'
+        run: echo "Release skipped by commit messages."
 
   quality:
     name: Quality
     runs-on: ubuntu-latest
     needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -107,6 +111,7 @@ jobs:
     name: Workflow lint
     runs-on: ubuntu-latest
     needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -133,6 +138,7 @@ jobs:
     name: Repository security
     runs-on: ubuntu-latest
     needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -161,6 +167,7 @@ jobs:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -190,6 +197,7 @@ jobs:
     name: Build docs
     runs-on: ubuntu-latest
     needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -215,6 +223,7 @@ jobs:
     name: Build distributions
     runs-on: ubuntu-latest
     needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
     outputs:
       tag: ${{ needs.resolve.outputs.tag }}
       sha: ${{ needs.resolve.outputs.sha }}
@@ -226,6 +235,23 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Prepare local release tag
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            tag_sha="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+            if [[ "${tag_sha}" != "${RELEASE_SHA}" ]]; then
+              echo "Release tag ${RELEASE_TAG} already exists on ${tag_sha}, not ${RELEASE_SHA}." >&2
+              exit 1
+            fi
+          else
+            git tag "${RELEASE_TAG}" "${RELEASE_SHA}"
+          fi
 
       - name: Set up uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -261,6 +287,7 @@ jobs:
     name: Installed CLI (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: build
+    if: needs.build.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -302,10 +329,11 @@ jobs:
           VEXCALIBUR_WHEEL: ${{ steps.dist.outputs.wheel }}
         run: make installed-cli-check
 
-  publish:
-    name: Publish to PyPI
+  publish-release:
+    name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs:
+      - resolve
       - quality
       - workflow-lint
       - security
@@ -313,18 +341,122 @@ jobs:
       - docs
       - build
       - installed-cli
-    environment:
-      name: pypi
-      url: https://pypi.org/p/vexcalibur
+    if: needs.resolve.outputs.skip != 'true'
     permissions:
       contents: read
-      id-token: write
     steps:
-      - name: Download distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          name: dist
-          path: dist/
+          app-id: ${{ vars.AUTOMATION_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
 
-      - name: Publish distributions
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Require current main tip
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${current_main_sha}" != "${RELEASE_SHA}" ]]; then
+            echo "Refusing to publish a stale release." >&2
+            echo "Current main: ${current_main_sha}" >&2
+            echo "Release SHA: ${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version-file: .tool-versions
+          enable-cache: true
+          python-version: ${{ env.MAX_PYTHON }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Generate and scan release notes
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          PREVIOUS_TAG: ${{ needs.resolve.outputs.previous_tag }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes"
+            -f "tag_name=${RELEASE_TAG}"
+            -f "target_commitish=${RELEASE_SHA}"
+          )
+          if [[ -n "${PREVIOUS_TAG}" ]]; then
+            args+=(-f "previous_tag_name=${PREVIOUS_TAG}")
+          fi
+
+          gh api "${args[@]}" --jq .body > /tmp/vexcalibur-release-notes.md
+          uv run --frozen detect-secrets-hook \
+            --baseline .secrets.baseline \
+            -- /tmp/vexcalibur-release-notes.md
+
+      - name: Create release tag
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          bot_user_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            tag_sha="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+            if [[ "${tag_sha}" != "${RELEASE_SHA}" ]]; then
+              echo "Release tag ${RELEASE_TAG} already exists on ${tag_sha}, not ${RELEASE_SHA}." >&2
+              exit 1
+            fi
+            echo "Release tag ${RELEASE_TAG} already points at ${RELEASE_SHA}."
+          else
+            git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}" "${RELEASE_SHA}"
+            git push origin "${RELEASE_TAG}"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "GitHub Release ${RELEASE_TAG} already exists."
+            exit 0
+          fi
+
+          args=(
+            release create "${RELEASE_TAG}"
+            --repo "${GITHUB_REPOSITORY}"
+            --verify-tag
+            --target "${RELEASE_SHA}"
+            --title "${RELEASE_TAG}"
+            --notes-file /tmp/vexcalibur-release-notes.md
+          )
+
+          gh "${args[@]}"
