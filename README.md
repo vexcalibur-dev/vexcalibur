@@ -72,6 +72,9 @@ uv sync --extra docs
 make docs
 ```
 
+The repository is structured for generated Sphinx HTML documentation. The GitHub
+Pages workflow publishes `docs/_build/html` after it lands on `main`.
+
 Try the CLI:
 
 ```bash
@@ -160,7 +163,7 @@ Local findings mode can produce an empty VEX document when the findings file exp
 
 ## Project Links
 
-- [Documentation](docs/index.md)
+- [Documentation source](docs/index.md)
 - [Quickstart tutorial](docs/tutorials/quickstart.md)
 - [No-network local findings tutorial](docs/tutorials/offline-local-findings.md)
 - [Generate CycloneDX VEX](docs/how-to/generate-cyclonedx-vex.md)
