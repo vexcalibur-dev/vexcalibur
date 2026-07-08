@@ -26,7 +26,7 @@ component includes:
 
 - `ref`: Vexcalibur component reference. Local CycloneDX input uses the
   CycloneDX `bom-ref`; GitHub Dependency Graph SBOM input uses the SPDX package
-  `SPDXID`.
+  `SPDXID` when present, otherwise the package URL.
 - `name`: component name.
 - `version`: component version, or `None`.
 - `purl`: parsed `packageurl.PackageURL`.

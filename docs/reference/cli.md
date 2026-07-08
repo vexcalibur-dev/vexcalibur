@@ -126,10 +126,10 @@ JSON input must be UTF-8. XML input must be rooted at `bom` in the
 parser-detected XML encodings such as UTF-8 or UTF-16. DTD, entity, and
 external-reference declarations are rejected.
 
-GitHub Dependency Graph input is fetched from GitHub's SBOM REST API as SPDX
-2.3 JSON. Vexcalibur extracts package URL references from that document and
-passes them through the same provider-neutral VEX generation path used for local
-CycloneDX files.
+GitHub Dependency Graph input uses GitHub's asynchronous SBOM REST API to
+request and download an SPDX 2.3 JSON report. Vexcalibur extracts package URL
+references from that document and passes them through the same provider-neutral
+VEX generation path used for local CycloneDX files.
 
 Options:
 
@@ -141,7 +141,8 @@ Options:
 - `--allow-public-osv`: allow sending SBOM package URLs and versions to the public OSV API.
 - `--github-repo TEXT`: fetch the GitHub Dependency Graph SBOM for `OWNER/REPO` instead of reading a local SBOM file.
 - `--github-api-url TEXT`: GitHub API base URL for `--github-repo`. Defaults to `https://api.github.com`.
-- `--github-token-env TEXT`: environment variable containing a GitHub token.
+- `--github-token-env TEXT`: environment variable containing a GitHub token. Use
+  this explicitly for non-default GitHub API hosts.
 - `--gh-auth / --no-gh-auth`: allow or disable fallback to `gh auth token` when no GitHub token environment variable is set. Enabled by default.
 
 The command fails closed for public OSV:
@@ -196,8 +197,6 @@ this order:
 
 - the environment variable named by `--github-token-env`;
 - `GH_TOKEN` or `GITHUB_TOKEN` for `https://api.github.com`;
-- `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` for non-default GitHub API
-  hosts;
 - `gh auth token --hostname HOST`, unless `--no-gh-auth` is set.
 
 Use `--github-api-url` with GitHub Enterprise API hosts:

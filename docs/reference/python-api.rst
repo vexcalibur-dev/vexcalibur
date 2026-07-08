@@ -45,7 +45,7 @@ the SPDX JSON shape returned by GitHub's Dependency Graph SBOM API and lives in
      - Applies the same file size, component count, nesting, package URL, and
        duplicate returned ``bom-ref`` checks as ``load_cyclonedx_sbom``.
    * - ``component_identities_from_github_spdx_sbom``
-     - GitHub Dependency Graph SBOM API response containing SPDX ``2.3`` JSON.
+     - GitHub Dependency Graph SBOM report containing SPDX ``2.3`` JSON.
      - Already-decoded Python mapping from a trusted JSON decoder.
      - Applies the same component count, package URL, and duplicate returned
        reference checks. Packages without package URL references are ignored,

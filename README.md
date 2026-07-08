@@ -146,14 +146,14 @@ Supported input for all `generate` source modes:
 
 - CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; JSON input must be UTF-8.
 - CycloneDX XML SBOMs rooted at `bom` in the `http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace; XML may use parser-detected XML encodings such as UTF-8 or UTF-16, and DTD, entity, and external-reference declarations are rejected.
-- GitHub Dependency Graph SBOM input with `--github-repo OWNER/REPO`; Vexcalibur fetches SPDX JSON from GitHub and extracts package URL references.
-- SBOM files up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
+- GitHub Dependency Graph SBOM input with `--github-repo OWNER/REPO`; Vexcalibur requests an SPDX JSON report from GitHub's asynchronous SBOM API and extracts package URL references.
+- Local SBOM files and GitHub SBOM report downloads up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
 - Unique component refs for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
 - Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`; offline local findings use `--findings-file`.
 
 Additional OSV-backed requirements:
 
-- Components need package URLs and either a PURL version or a CycloneDX component `version`; unversioned components are not queried.
+- Components need package URLs and either a PURL version, a CycloneDX component `version`, or GitHub SPDX `versionInfo`; unversioned components are not queried.
 - The OSV query set must be non-empty. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
 
 Local findings mode can produce an empty VEX document when the findings file explicitly contains `"findings": []`.

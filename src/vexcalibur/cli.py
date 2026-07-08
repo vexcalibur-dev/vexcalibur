@@ -159,8 +159,8 @@ def generate(
         typer.Option(
             "--github-token-env",
             help=(
-                "Environment variable containing a GitHub token. By default Vexcalibur uses "
-                "standard GitHub environment variables for the selected API host."
+                "Environment variable containing a GitHub token. By default Vexcalibur only "
+                "uses GH_TOKEN or GITHUB_TOKEN for api.github.com."
             ),
         ),
     ] = None,

@@ -46,9 +46,10 @@ renders a CycloneDX 1.6 VEX JSON document.
 1. `vexcalibur generate` accepts either a CycloneDX JSON/XML SBOM path or
    `--github-repo OWNER/REPO`.
 2. `vexcalibur.sbom` validates the raw document shape, parses CycloneDX JSON with `cyclonedx-python-lib`, parses CycloneDX XML with `defusedxml`, and extracts component identities with package URLs.
-3. `vexcalibur.github_sbom` fetches GitHub Dependency Graph SPDX JSON when
-   `--github-repo` is selected, then extracts package URL references from that
-   response into the same component identity shape.
+3. `vexcalibur.github_sbom` requests, polls, and downloads a GitHub Dependency
+   Graph SPDX JSON report when `--github-repo` is selected, then extracts
+   package URL references from that response into the same component identity
+   shape.
 4. The selected `VulnerabilitySource` produces provider-neutral `VulnerabilityFinding` objects:
    - `vexcalibur.sources.osv.OsvSource` converts versioned component identities into OSV package queries, then maps OSV responses into findings.
    - `vexcalibur.sources.local.LocalFindingsSource` reads local findings JSON and maps each finding to a normalized component reference or unique package URL.

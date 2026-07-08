@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Mapping
+import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import ParseResult, quote, urlparse
 
 import httpx
 from packageurl import PackageURL
@@ -19,6 +21,9 @@ from vexcalibur.sbom import MAX_COMPONENTS, MAX_SBOM_BYTES, SbomError
 DEFAULT_GITHUB_API_URL = "https://api.github.com"
 GITHUB_API_VERSION = "2026-03-10"
 DEFAULT_GITHUB_TIMEOUT = 30.0
+DEFAULT_GITHUB_REPORT_POLL_ATTEMPTS = 30
+DEFAULT_GITHUB_REPORT_POLL_INTERVAL = 1.0
+MAX_GITHUB_REPORT_POLL_INTERVAL = 10.0
 GITHUB_RESPONSE_CHUNK_SIZE = 64 * 1024
 SUPPORTED_GITHUB_SPDX_VERSION = "SPDX-2.3"
 
@@ -57,11 +62,21 @@ class GithubSbomClient:
         api_url: str = DEFAULT_GITHUB_API_URL,
         token: str | None = None,
         timeout: float = DEFAULT_GITHUB_TIMEOUT,
+        report_poll_attempts: int = DEFAULT_GITHUB_REPORT_POLL_ATTEMPTS,
+        report_poll_interval: float = DEFAULT_GITHUB_REPORT_POLL_INTERVAL,
         client: httpx.Client | None = None,
     ) -> None:
         self._api_url = normalize_github_api_url(api_url)
         self._token = token
         self._timeout = timeout
+        if report_poll_attempts < 1:
+            msg = "GitHub SBOM report_poll_attempts must be at least 1"
+            raise GithubSbomConfigurationError(msg)
+        if report_poll_interval < 0:
+            msg = "GitHub SBOM report_poll_interval must not be negative"
+            raise GithubSbomConfigurationError(msg)
+        self._report_poll_attempts = report_poll_attempts
+        self._report_poll_interval = report_poll_interval
         self._client = client
 
     @property
@@ -72,21 +87,59 @@ class GithubSbomClient:
     def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
         """Fetch and parse repository Dependency Graph SBOM components."""
         parsed_repository = parse_github_repository(repository)
-        response_body = self._get_json(_repository_sbom_path(parsed_repository))
+        response_body = self._get_sbom_report(parsed_repository)
         return component_identities_from_github_spdx_sbom(
             response_body,
             source=parsed_repository.full_name,
         )
 
-    def _get_json(self, path: str) -> dict[str, Any]:
+    def _get_sbom_report(self, repository: GithubRepository) -> dict[str, Any]:
         client = self._client
         if client is not None:
-            return self._send_json_request(client, path)
+            return self._send_sbom_report_requests(client, repository)
 
         with httpx.Client() as owned_client:
-            return self._send_json_request(owned_client, path)
+            return self._send_sbom_report_requests(owned_client, repository)
 
-    def _send_json_request(self, client: httpx.Client, path: str) -> dict[str, Any]:
+    def _send_sbom_report_requests(
+        self,
+        client: httpx.Client,
+        repository: GithubRepository,
+    ) -> dict[str, Any]:
+        generation_response = self._send_json_request(
+            client,
+            _repository_sbom_generate_report_path(repository),
+            expected_status=201,
+        )
+        fetch_path = self._fetch_report_path_from_generation_response(
+            generation_response,
+            repository=repository,
+        )
+        return self._poll_fetch_report(client, fetch_path)
+
+    def _send_json_request(
+        self,
+        client: httpx.Client,
+        path: str,
+        *,
+        expected_status: int,
+    ) -> dict[str, Any]:
+        with self._stream_api_request(client, path) as response:
+            if response.status_code != expected_status:
+                self._raise_unexpected_status(
+                    response=response,
+                    path=path,
+                    expected_status=expected_status,
+                )
+            raw_content = _read_limited_response_content(response)
+        return _json_object_from_response(raw_content, description="GitHub SBOM response body")
+
+    @contextmanager
+    def _stream_api_request(
+        self,
+        client: httpx.Client,
+        path: str,
+    ) -> Iterator[httpx.Response]:
         url = f"{self._api_url}{path}"
         headers = {
             "Accept": "application/vnd.github+json",
@@ -97,29 +150,112 @@ class GithubSbomClient:
 
         try:
             with client.stream("GET", url, headers=headers, timeout=self._timeout) as response:
-                response.raise_for_status()
-                raw_content = _read_limited_response_content(response)
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            msg = f"GitHub SBOM API GET {path} failed with HTTP {status_code}"
-            raise GithubSbomClientError(msg) from exc
+                yield response
         except httpx.HTTPError as exc:
             msg = f"GitHub SBOM API GET {path} request failed"
             raise GithubSbomClientError(msg) from exc
 
+    def _raise_for_status(self, *, response: httpx.Response, path: str) -> None:
         try:
-            response_body = json.loads(raw_content.decode("utf-8"))
-        except UnicodeDecodeError as exc:
-            msg = "GitHub SBOM response body must be UTF-8 JSON"
-            raise GithubSbomClientError(msg) from exc
-        except json.JSONDecodeError as exc:
-            msg = "GitHub SBOM response body must be JSON"
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            msg = f"GitHub SBOM API GET {path} failed with HTTP {status_code}"
             raise GithubSbomClientError(msg) from exc
 
-        if not isinstance(response_body, dict):
-            msg = "GitHub SBOM response body must be a JSON object"
+    def _raise_unexpected_status(
+        self,
+        *,
+        response: httpx.Response,
+        path: str,
+        expected_status: int,
+    ) -> None:
+        if response.is_error:
+            self._raise_for_status(response=response, path=path)
+        msg = (
+            f"GitHub SBOM API GET {path} returned unexpected HTTP "
+            f"{response.status_code}; expected HTTP {expected_status}"
+        )
+        raise GithubSbomClientError(msg)
+
+    def _fetch_report_path_from_generation_response(
+        self,
+        response_body: dict[str, Any],
+        *,
+        repository: GithubRepository,
+    ) -> str:
+        sbom_url = response_body.get("sbom_url")
+        if not isinstance(sbom_url, str) or sbom_url.strip() == "":
+            msg = "GitHub SBOM report generation response must include sbom_url"
             raise GithubSbomClientError(msg)
-        return response_body
+        path = _api_path_from_url(sbom_url, api_url=self._api_url)
+        expected_prefix = _repository_sbom_fetch_report_prefix(repository)
+        if not path.casefold().startswith(expected_prefix.casefold()):
+            msg = "GitHub SBOM report generation returned an unexpected fetch URL"
+            raise GithubSbomClientError(msg)
+        return path
+
+    def _poll_fetch_report(self, client: httpx.Client, fetch_path: str) -> dict[str, Any]:
+        for attempt in range(1, self._report_poll_attempts + 1):
+            with self._stream_api_request(client, fetch_path) as response:
+                if response.status_code == 202:
+                    delay = _report_poll_delay(
+                        response=response,
+                        default_interval=self._report_poll_interval,
+                    )
+                elif response.status_code == 302:
+                    location = response.headers.get("location")
+                    return self._download_report(client, location)
+                elif response.status_code == 200:
+                    raw_content = _read_limited_response_content(response)
+                    return {
+                        "sbom": _json_object_from_response(
+                            raw_content,
+                            description="GitHub SBOM report body",
+                        )
+                    }
+                else:
+                    if response.is_error:
+                        self._raise_for_status(response=response, path=fetch_path)
+                    msg = (
+                        f"GitHub SBOM API GET {fetch_path} returned unexpected "
+                        f"HTTP {response.status_code}"
+                    )
+                    raise GithubSbomClientError(msg)
+
+            if attempt < self._report_poll_attempts:
+                time.sleep(delay)
+
+        msg = (
+            f"GitHub SBOM report was not ready after {self._report_poll_attempts} polling attempts"
+        )
+        raise GithubSbomClientError(msg)
+
+    def _download_report(self, client: httpx.Client, location: str | None) -> dict[str, Any]:
+        download_url = _normalize_download_url(location)
+        try:
+            with client.stream(
+                "GET",
+                download_url,
+                headers={"Accept": "application/json"},
+                timeout=self._timeout,
+            ) as response:
+                response.raise_for_status()
+                raw_content = _read_limited_response_content(response)
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            msg = f"GitHub SBOM report download failed with HTTP {status_code}"
+            raise GithubSbomClientError(msg) from exc
+        except httpx.HTTPError as exc:
+            msg = "GitHub SBOM report download request failed"
+            raise GithubSbomClientError(msg) from exc
+
+        return {
+            "sbom": _json_object_from_response(
+                raw_content,
+                description="GitHub SBOM report body",
+            )
+        }
 
 
 def component_identities_from_github_spdx_sbom(
@@ -165,13 +301,13 @@ def parse_github_repository(value: str) -> GithubRepository:
     if not separator or not owner or not repo or "/" in repo:
         msg = "--github-repo must use OWNER/REPO format"
         raise GithubSbomConfigurationError(msg)
-    if owner in {".", ".."} or repo in {".", ".."}:
-        msg = "--github-repo owner and repository must not be path traversal segments"
-        raise GithubSbomConfigurationError(msg)
     if repo.endswith(".git"):
         repo = repo.removesuffix(".git")
     if not repo:
         msg = "--github-repo repository name must not be empty"
+        raise GithubSbomConfigurationError(msg)
+    if owner in {".", ".."} or repo in {".", ".."}:
+        msg = "--github-repo owner and repository must not be path traversal segments"
         raise GithubSbomConfigurationError(msg)
     return GithubRepository(owner=owner, repo=repo)
 
@@ -183,6 +319,11 @@ def normalize_github_api_url(value: str) -> str:
     if parsed.scheme != "https" or parsed.hostname is None:
         msg = "--github-api-url must be an HTTPS URL"
         raise GithubSbomConfigurationError(msg)
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        msg = "--github-api-url port is invalid"
+        raise GithubSbomConfigurationError(msg) from exc
     if parsed.username is not None or parsed.password is not None:
         msg = "--github-api-url must not include userinfo"
         raise GithubSbomConfigurationError(msg)
@@ -226,13 +367,76 @@ def resolve_github_token(
 def _default_token_env_names(api_url: str) -> tuple[str, ...]:
     if _github_cli_hostname(api_url) == "github.com":
         return ("GH_TOKEN", "GITHUB_TOKEN")
-    return ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+    return ()
 
 
-def _repository_sbom_path(repository: GithubRepository) -> str:
+def _repository_sbom_generate_report_path(repository: GithubRepository) -> str:
     owner = quote(repository.owner, safe="")
     repo = quote(repository.repo, safe="")
-    return f"/repos/{owner}/{repo}/dependency-graph/sbom"
+    return f"/repos/{owner}/{repo}/dependency-graph/sbom/generate-report"
+
+
+def _repository_sbom_fetch_report_prefix(repository: GithubRepository) -> str:
+    owner = quote(repository.owner, safe="")
+    repo = quote(repository.repo, safe="")
+    return f"/repos/{owner}/{repo}/dependency-graph/sbom/fetch-report/"
+
+
+def _api_path_from_url(value: str, *, api_url: str) -> str:
+    parsed_value = urlparse(value)
+    parsed_api = urlparse(normalize_github_api_url(api_url))
+    if (
+        parsed_value.scheme != parsed_api.scheme
+        or parsed_value.hostname != parsed_api.hostname
+        or _effective_url_port(parsed_value, description="GitHub SBOM report URL")
+        != _effective_url_port(parsed_api, description="GitHub API URL")
+    ):
+        msg = "GitHub SBOM report URL must use the configured GitHub API host"
+        raise GithubSbomClientError(msg)
+    if parsed_value.username is not None or parsed_value.password is not None:
+        msg = "GitHub SBOM report URL must not include userinfo"
+        raise GithubSbomClientError(msg)
+    if parsed_value.query or parsed_value.fragment or parsed_value.params:
+        msg = "GitHub SBOM report URL must not include params, query, or fragment"
+        raise GithubSbomClientError(msg)
+
+    api_path = parsed_api.path.rstrip("/")
+    value_path = parsed_value.path
+    if api_path:
+        expected_prefix = f"{api_path}/"
+        if not value_path.startswith(expected_prefix):
+            msg = "GitHub SBOM report URL must use the configured GitHub API path"
+            raise GithubSbomClientError(msg)
+        return value_path.removeprefix(api_path)
+    return value_path
+
+
+def _effective_url_port(parsed: ParseResult, *, description: str) -> int | None:
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        msg = f"{description} port is invalid"
+        raise GithubSbomClientError(msg) from exc
+    if port is not None:
+        return port
+    if parsed.scheme == "https":
+        return 443
+    return None
+
+
+def _normalize_download_url(value: str | None) -> str:
+    if value is None or value.strip() == "":
+        msg = "GitHub SBOM fetch response must include a download location"
+        raise GithubSbomClientError(msg)
+    normalized = value.strip()
+    parsed = urlparse(normalized)
+    if parsed.scheme != "https" or parsed.hostname is None:
+        msg = "GitHub SBOM download URL must be HTTPS"
+        raise GithubSbomClientError(msg)
+    if parsed.username is not None or parsed.password is not None:
+        msg = "GitHub SBOM download URL must not include userinfo"
+        raise GithubSbomClientError(msg)
+    return normalized
 
 
 def _read_limited_response_content(response: httpx.Response) -> bytes:
@@ -245,14 +449,46 @@ def _read_limited_response_content(response: httpx.Response) -> bytes:
     return bytes(content)
 
 
+def _json_object_from_response(raw_content: bytes, *, description: str) -> dict[str, Any]:
+    try:
+        response_body = json.loads(raw_content.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        msg = f"{description} must be UTF-8 JSON"
+        raise GithubSbomClientError(msg) from exc
+    except json.JSONDecodeError as exc:
+        msg = f"{description} must be JSON"
+        raise GithubSbomClientError(msg) from exc
+
+    if not isinstance(response_body, dict):
+        msg = f"{description} must be a JSON object"
+        raise GithubSbomClientError(msg)
+    return response_body
+
+
+def _report_poll_delay(*, response: httpx.Response, default_interval: float) -> float:
+    retry_after = response.headers.get("retry-after")
+    if retry_after is None:
+        return default_interval
+    try:
+        parsed = float(retry_after)
+    except ValueError:
+        return default_interval
+    if parsed < 0:
+        return default_interval
+    return min(parsed, MAX_GITHUB_REPORT_POLL_INTERVAL)
+
+
 def _github_spdx_sbom_document(raw_response: Any, *, source: str) -> dict[str, Any]:
     if not isinstance(raw_response, dict):
         msg = f"GitHub SBOM {source} response must be a JSON object"
         raise GithubSbomClientError(msg)
-    raw_sbom = raw_response.get("sbom")
-    if not isinstance(raw_sbom, dict):
-        msg = f"GitHub SBOM {source} response field 'sbom' must be an object"
-        raise GithubSbomClientError(msg)
+    if "sbom" in raw_response:
+        raw_sbom = raw_response.get("sbom")
+        if not isinstance(raw_sbom, dict):
+            msg = f"GitHub SBOM {source} response field 'sbom' must be an object"
+            raise GithubSbomClientError(msg)
+    else:
+        raw_sbom = raw_response
     spdx_version = raw_sbom.get("spdxVersion")
     if spdx_version != SUPPORTED_GITHUB_SPDX_VERSION:
         msg = (

@@ -50,9 +50,10 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- github-repo-public-example:end -->
 
-GitHub exports this SBOM as SPDX JSON. Vexcalibur extracts package URL
-references from that SPDX document, then uses the same vulnerability source and
-CycloneDX VEX rendering pipeline as local CycloneDX input.
+Vexcalibur requests an SPDX JSON report from GitHub's asynchronous SBOM API,
+polls until the report is ready, downloads it, and extracts package URL
+references from that SPDX document. It then uses the same vulnerability source
+and CycloneDX VEX rendering pipeline as local CycloneDX input.
 
 Token resolution for `--github-repo` is designed to work in local shells and CI:
 
@@ -61,8 +62,8 @@ Token resolution for `--github-repo` is designed to work in local shells and CI:
 - `--github-token-env NAME` reads a token from the named environment variable.
 - Without `--github-token-env`, Vexcalibur checks `GH_TOKEN` and
   `GITHUB_TOKEN` for `https://api.github.com`.
-- For non-default GitHub API hosts, Vexcalibur checks `GH_ENTERPRISE_TOKEN` and
-  `GITHUB_ENTERPRISE_TOKEN`.
+- For non-default GitHub API hosts, pass `--github-token-env NAME` explicitly
+  or rely on the `gh auth token` fallback for that host.
 - If no token environment variable is set, Vexcalibur tries `gh auth token`.
   Pass `--no-gh-auth` to disable that fallback.
 
@@ -104,10 +105,9 @@ permissions:
   contents: read
 
 steps:
-  - uses: vexcalibur-dev/vexcalibur-action@main
+  - uses: vexcalibur-dev/vexcalibur-action@d9967565ac550fd5a22feb8f64ca966e51444cc5
     with:
-      package-spec: git+https://github.com/vexcalibur-dev/vexcalibur.git@main
-      allow-development-package-spec: "true"
+      package-spec: vexcalibur==0.1.0
       args: |
         generate
         --github-repo
@@ -181,20 +181,20 @@ All `generate` source modes currently support:
 - CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; JSON input must be UTF-8.
 - CycloneDX XML SBOMs rooted at `bom` in the `http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace; XML may use parser-detected XML encodings such as UTF-8 or UTF-16, and DTD, entity, and external-reference declarations are rejected.
 - GitHub Dependency Graph SBOM input from `--github-repo OWNER/REPO`; GitHub
-  returns SPDX JSON and Vexcalibur extracts package URL references from package
-  `externalRefs`.
+  generates an SPDX JSON report and Vexcalibur extracts package URL references
+  from package `externalRefs`.
 - GitHub API URLs must use HTTPS and must not include userinfo, query strings,
   or fragments. For GitHub Enterprise Server, use the API base URL such as
   `https://github.example.test/api/v3`.
 - Token-backed GitHub SBOM requests need repository `Contents: read`
   permission. Public repositories can be requested without a token, subject to
   GitHub API rate limits.
-- Files up to 10 MiB.
+- Local SBOM files and GitHub SBOM report downloads up to 10 MiB.
 - Up to 10,000 components.
 - Component nesting up to 50 levels.
 - Unique component refs for components with package URLs.
 
-OSV-backed generation also requires components with package URLs and versions from either the PURL or CycloneDX `version` field. It intentionally fails when no precise query set can be built. That is safer than producing an empty VEX document that could look authoritative.
+OSV-backed generation also requires components with package URLs and versions from either the PURL, CycloneDX `version` field, or GitHub SPDX `versionInfo`. It intentionally fails when no precise query set can be built. That is safer than producing an empty VEX document that could look authoritative.
 
 Local findings mode can produce an empty VEX document when the findings file explicitly contains no findings.
 

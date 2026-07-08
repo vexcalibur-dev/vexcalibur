@@ -3,7 +3,6 @@ import subprocess
 import httpx
 import pytest
 
-import vexcalibur.github_sbom as github_sbom_module
 from vexcalibur.github_sbom import (
     GITHUB_API_VERSION,
     GithubSbomClient,
@@ -25,7 +24,10 @@ def test_parse_github_repository_accepts_owner_repo() -> None:
     assert repository.full_name == "vexcalibur-dev/vexcalibur"
 
 
-@pytest.mark.parametrize("value", ("", "owner", "/repo", "owner/", "owner/repo/extra", "../repo"))
+@pytest.mark.parametrize(
+    "value",
+    ("", "owner", "/repo", "owner/", "owner/repo/extra", "../repo", "owner/..git"),
+)
 def test_parse_github_repository_rejects_invalid_values(value: str) -> None:
     with pytest.raises(GithubSbomConfigurationError, match="--github-repo"):
         parse_github_repository(value)
@@ -39,6 +41,11 @@ def test_normalize_github_api_url_rejects_cleartext_urls() -> None:
 def test_normalize_github_api_url_rejects_userinfo() -> None:
     with pytest.raises(GithubSbomConfigurationError, match="userinfo"):
         normalize_github_api_url("https://api.github.com@collector.example/api/v3")
+
+
+def test_normalize_github_api_url_rejects_invalid_port() -> None:
+    with pytest.raises(GithubSbomConfigurationError, match="port"):
+        normalize_github_api_url("https://api.github.com:invalid")
 
 
 def test_resolve_github_token_prefers_explicit_env() -> None:
@@ -70,10 +77,11 @@ def test_resolve_github_token_uses_standard_env() -> None:
     )
 
 
-def test_resolve_github_token_uses_enterprise_env_for_enterprise_api() -> None:
+def test_resolve_github_token_uses_explicit_enterprise_env_for_enterprise_api() -> None:
     assert (
         resolve_github_token(
             api_url="https://github.example.test/api/v3",
+            token_env="GH_ENTERPRISE_TOKEN",  # noqa: S106
             allow_gh_cli=False,
             environ={"GH_ENTERPRISE_TOKEN": "enterprise-token", "GH_TOKEN": "gh-token"},
         )
@@ -86,7 +94,11 @@ def test_resolve_github_token_does_not_send_generic_token_to_enterprise_api() ->
         resolve_github_token(
             api_url="https://github.example.test/api/v3",
             allow_gh_cli=False,
-            environ={"GH_TOKEN": "gh-token", "GITHUB_TOKEN": "github-token"},
+            environ={
+                "GH_TOKEN": "gh-token",
+                "GITHUB_TOKEN": "github-token",
+                "GH_ENTERPRISE_TOKEN": "enterprise-token",
+            },
         )
         is None
     )
@@ -110,7 +122,7 @@ def test_resolve_github_token_falls_back_to_gh_auth_token(monkeypatch: pytest.Mo
         captured_args.append(args)
         return subprocess.CompletedProcess(args=args, returncode=0, stdout=" gh-token\n")
 
-    monkeypatch.setattr(github_sbom_module.subprocess, "run", fake_run)
+    monkeypatch.setattr("vexcalibur.github_sbom.subprocess.run", fake_run)
 
     token = resolve_github_token(allow_gh_cli=True, environ={})
 
@@ -124,7 +136,7 @@ def test_resolve_github_token_returns_none_without_credentials(
     def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=args, returncode=1, stdout="")
 
-    monkeypatch.setattr(github_sbom_module.subprocess, "run", fake_run)
+    monkeypatch.setattr("vexcalibur.github_sbom.subprocess.run", fake_run)
 
     assert resolve_github_token(allow_gh_cli=True, environ={}) is None
 
@@ -188,6 +200,17 @@ def test_component_identities_from_github_spdx_sbom_extracts_package_purls() -> 
             "pkg:npm/minimist@0.0.8",
         ),
         ("SPDXRef-pypi-django-1.2", "django", "1.2", "pkg:pypi/django@1.2"),
+    ]
+
+
+def test_component_identities_from_github_spdx_sbom_accepts_raw_spdx_document() -> None:
+    components = component_identities_from_github_spdx_sbom(
+        _github_spdx_document(),
+        source="vexcalibur-dev/vexcalibur",
+    )
+
+    assert [(component.ref, component.purl.to_string()) for component in components] == [
+        ("SPDXRef-pypi-django-1.2", "pkg:pypi/django@1.2")
     ]
 
 
@@ -325,7 +348,7 @@ def test_component_identities_from_github_spdx_sbom_rejects_duplicate_refs() -> 
 
 def test_component_identities_from_github_spdx_sbom_rejects_malformed_shape() -> None:
     with pytest.raises(GithubSbomClientError, match="field 'sbom'"):
-        component_identities_from_github_spdx_sbom({}, source="owner/repo")
+        component_identities_from_github_spdx_sbom({"sbom": None}, source="owner/repo")
 
 
 def test_component_identities_from_github_spdx_sbom_rejects_unsupported_spdx_version() -> None:
@@ -361,32 +384,30 @@ def test_component_identities_from_github_spdx_sbom_rejects_invalid_purl() -> No
 
 
 def test_github_sbom_client_fetches_components_with_auth_header() -> None:
-    captured_request: httpx.Request | None = None
+    captured_requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal captured_request
-        captured_request = request
+        captured_requests.append(request)
+        if request.url.path.endswith("/dependency-graph/sbom/generate-report"):
+            return httpx.Response(
+                201,
+                json={
+                    "sbom_url": (
+                        "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+                        "dependency-graph/sbom/fetch-report/report-id"
+                    )
+                },
+            )
+        if request.url.path.endswith("/dependency-graph/sbom/fetch-report/report-id"):
+            return httpx.Response(
+                302,
+                headers={"Location": "https://download.example/sbom.json?sig=opaque"},
+            )
+        assert str(request.url) == "https://download.example/sbom.json?sig=opaque"
+        assert "authorization" not in request.headers
         return httpx.Response(
             200,
-            json={
-                "sbom": {
-                    "spdxVersion": "SPDX-2.3",
-                    "packages": [
-                        {
-                            "SPDXID": "SPDXRef-pypi-django-1.2",
-                            "name": "django",
-                            "versionInfo": "1.2",
-                            "externalRefs": [
-                                {
-                                    "referenceCategory": "PACKAGE-MANAGER",
-                                    "referenceType": "purl",
-                                    "referenceLocator": "pkg:pypi/django@1.2",
-                                }
-                            ],
-                        }
-                    ],
-                }
-            },
+            json=_github_spdx_document(),
         )
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
@@ -399,22 +420,42 @@ def test_github_sbom_client_fetches_components_with_auth_header() -> None:
     assert [(component.ref, component.purl.to_string()) for component in components] == [
         ("SPDXRef-pypi-django-1.2", "pkg:pypi/django@1.2")
     ]
-    assert captured_request is not None
-    assert (
-        str(captured_request.url)
-        == "https://api.github.com/repos/vexcalibur-dev/vexcalibur/dependency-graph/sbom"
-    )
-    assert captured_request.headers["authorization"] == "Bearer secret-token"
-    assert captured_request.headers["x-github-api-version"] == GITHUB_API_VERSION
+    assert [str(request.url) for request in captured_requests] == [
+        (
+            "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+            "dependency-graph/sbom/generate-report"
+        ),
+        (
+            "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+            "dependency-graph/sbom/fetch-report/report-id"
+        ),
+        "https://download.example/sbom.json?sig=opaque",
+    ]
+    assert captured_requests[0].headers["authorization"] == "Bearer secret-token"
+    assert captured_requests[1].headers["authorization"] == "Bearer secret-token"
+    assert "authorization" not in captured_requests[2].headers
+    assert captured_requests[0].headers["x-github-api-version"] == GITHUB_API_VERSION
 
 
 def test_github_sbom_client_allows_anonymous_public_requests() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert "authorization" not in request.headers
-        return httpx.Response(
-            200,
-            json={"sbom": {"spdxVersion": "SPDX-2.3", "packages": []}},
-        )
+        if request.url.path.endswith("/dependency-graph/sbom/generate-report"):
+            return httpx.Response(
+                201,
+                json={
+                    "sbom_url": (
+                        "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+                        "dependency-graph/sbom/fetch-report/report-id"
+                    )
+                },
+            )
+        if request.url.path.endswith("/dependency-graph/sbom/fetch-report/report-id"):
+            return httpx.Response(
+                302,
+                headers={"Location": "https://download.example/sbom.json?sig=opaque"},
+            )
+        return httpx.Response(200, json={"spdxVersion": "SPDX-2.3", "packages": []})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
         components = GithubSbomClient(client=http_client).component_identities(
@@ -422,6 +463,111 @@ def test_github_sbom_client_allows_anonymous_public_requests() -> None:
         )
 
     assert components == ()
+
+
+def test_github_sbom_client_polls_pending_report() -> None:
+    fetch_attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal fetch_attempts
+        if request.url.path.endswith("/dependency-graph/sbom/generate-report"):
+            return httpx.Response(
+                201,
+                json={
+                    "sbom_url": (
+                        "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+                        "dependency-graph/sbom/fetch-report/report-id"
+                    )
+                },
+            )
+        if request.url.path.endswith("/dependency-graph/sbom/fetch-report/report-id"):
+            fetch_attempts += 1
+            if fetch_attempts == 1:
+                return httpx.Response(202, headers={"Retry-After": "0"})
+            return httpx.Response(
+                302,
+                headers={"Location": "https://download.example/sbom.json"},
+            )
+        return httpx.Response(200, json=_github_spdx_document())
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        components = GithubSbomClient(
+            client=http_client,
+            report_poll_interval=0.0,
+        ).component_identities("vexcalibur-dev/vexcalibur")
+
+    assert fetch_attempts == 2
+    assert len(components) == 1
+
+
+def test_github_sbom_client_rejects_unexpected_fetch_url() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            201,
+            json={
+                "sbom_url": (
+                    "https://collector.example/repos/vexcalibur-dev/vexcalibur/"
+                    "dependency-graph/sbom/fetch-report/report-id"
+                )
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = GithubSbomClient(client=http_client)
+
+        with pytest.raises(GithubSbomClientError, match="configured GitHub API host"):
+            client.component_identities("vexcalibur-dev/vexcalibur")
+
+    assert len(requests) == 1
+
+
+def test_github_sbom_client_rejects_malformed_fetch_url_port() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            201,
+            json={
+                "sbom_url": (
+                    "https://api.github.com:invalid/repos/vexcalibur-dev/vexcalibur/"
+                    "dependency-graph/sbom/fetch-report/report-id"
+                )
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = GithubSbomClient(client=http_client)
+
+        with pytest.raises(GithubSbomClientError, match="port is invalid"):
+            client.component_identities("vexcalibur-dev/vexcalibur")
+
+
+def test_github_sbom_client_accepts_canonical_case_fetch_url() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/dependency-graph/sbom/generate-report"):
+            return httpx.Response(
+                201,
+                json={
+                    "sbom_url": (
+                        "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+                        "dependency-graph/sbom/fetch-report/report-id"
+                    )
+                },
+            )
+        if request.url.path.endswith("/dependency-graph/sbom/fetch-report/report-id"):
+            return httpx.Response(
+                302,
+                headers={"Location": "https://download.example/sbom.json"},
+            )
+        return httpx.Response(200, json=_github_spdx_document())
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        components = GithubSbomClient(client=http_client).component_identities(
+            "Vexcalibur-Dev/Vexcalibur"
+        )
+
+    assert len(components) == 1
 
 
 def test_github_sbom_client_reports_http_status_without_token() -> None:
@@ -439,6 +585,21 @@ def test_github_sbom_client_reports_http_status_without_token() -> None:
 
 def test_github_sbom_client_rejects_oversized_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/dependency-graph/sbom/generate-report"):
+            return httpx.Response(
+                201,
+                json={
+                    "sbom_url": (
+                        "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+                        "dependency-graph/sbom/fetch-report/report-id"
+                    )
+                },
+            )
+        if request.url.path.endswith("/dependency-graph/sbom/fetch-report/report-id"):
+            return httpx.Response(
+                302,
+                headers={"Location": "https://download.example/sbom.json?sig=opaque"},
+            )
         return httpx.Response(200, content=b"{" + (b" " * MAX_SBOM_BYTES) + b"}")
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
@@ -459,3 +620,23 @@ def test_live_github_sbom_shape_for_public_repo() -> None:
         component.purl.to_string() != "pkg:github/vexcalibur-dev/vexcalibur@main"
         for component in components
     )
+
+
+def _github_spdx_document() -> dict[str, object]:
+    return {
+        "spdxVersion": "SPDX-2.3",
+        "packages": [
+            {
+                "SPDXID": "SPDXRef-pypi-django-1.2",
+                "name": "django",
+                "versionInfo": "1.2",
+                "externalRefs": [
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": "pkg:pypi/django@1.2",
+                    }
+                ],
+            }
+        ],
+    }

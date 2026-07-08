@@ -30,7 +30,7 @@ The file is UTF-8 JSON. The top-level value must be an object, the `findings` ar
 - `component_ref`: non-empty Vexcalibur component reference. Required unless
   `purl` is provided. For local CycloneDX input this is the component
   `bom-ref`. For GitHub Dependency Graph SBOM input this is the package
-  `SPDXID`.
+  `SPDXID` when present, otherwise the package URL.
 - `purl`: non-empty package URL from the SBOM. Required unless `component_ref` is provided. If a package URL matches more than one SBOM component, use `component_ref`.
 - `source_name`: non-empty finding source name. Defaults to `Local`.
 - `source_url`: HTTP(S) source URL with a host. Defaults to `https://vexcalibur.dev/sources/local`.
