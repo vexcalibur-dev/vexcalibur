@@ -1,3 +1,5 @@
+import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -7,6 +9,7 @@ from typer.testing import CliRunner
 import vexcalibur.sources.osv as osv_module
 from vexcalibur import cli
 from vexcalibur.compat import vexy
+from vexcalibur.domain import ComponentIdentity
 from vexcalibur.sources.osv import (
     OsvClientError,
     OsvPackageQuery,
@@ -18,6 +21,7 @@ from vexcalibur.vex import parse_timestamp
 runner = CliRunner()
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
 GOLDEN_ROOT = Path(__file__).parent / "golden"
+DOCS_ROOT = Path(__file__).parent.parent / "docs"
 
 
 def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
@@ -232,6 +236,317 @@ def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
         ("pkg:pypi/django@1.2", None),
     ]
     assert result.output == (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
+
+
+def test_generate_accepts_github_repo_source(monkeypatch) -> None:
+    captured_repositories: list[str] = []
+    captured_github_clients: list[tuple[str, str | None]] = []
+    captured_queries: list[OsvPackageQuery] = []
+
+    class FakeGithubSbomClient:
+        def __init__(self, *, api_url: str, token: str | None) -> None:
+            captured_github_clients.append((api_url, token))
+
+        def component_identities(self, repository: str):
+            captured_repositories.append(repository)
+            return (
+                ComponentIdentity(
+                    ref="SPDXRef-pypi-django-1.2",
+                    name="django",
+                    version="1.2",
+                    purl=PackageURL.from_string("pkg:pypi/django@1.2"),
+                ),
+            )
+
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            assert base_url == "https://api.osv.dev"
+
+        def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
+            captured_queries.extend(queries)
+            return []
+
+    def fake_resolve_github_token(**kwargs) -> str:
+        assert kwargs["token_env"] == "TOKEN"  # noqa: S105
+        return "resolved-token"
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(cli, "resolve_github_token", fake_resolve_github_token)
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--github-token-env",
+            "TOKEN",
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured_github_clients == [("https://api.github.com", "resolved-token")]
+    assert captured_repositories == ["vexcalibur-dev/vexcalibur"]
+    assert [(query.purl.to_string(), query.version) for query in captured_queries] == [
+        ("pkg:pypi/django@1.2", None)
+    ]
+    assert '"bomFormat": "CycloneDX"' in result.output
+
+
+def test_generate_accepts_github_repo_with_local_findings(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, *, api_url: str, token: str | None) -> None:
+            pass
+
+        def component_identities(self, repository: str):
+            return (
+                ComponentIdentity(
+                    ref="SPDXRef-pypi-django-1.2",
+                    name="django",
+                    version="1.2",
+                    purl=PackageURL.from_string("pkg:pypi/django@1.2"),
+                ),
+            )
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        """
+        {
+          "findings": [
+            {
+              "id": "CVE-2026-0001",
+              "component_ref": "SPDXRef-pypi-django-1.2",
+              "analysis_state": "not_affected"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--no-gh-auth",
+            "--findings-file",
+            str(findings_path),
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"id": "CVE-2026-0001"' in result.output
+    assert '"state": "not_affected"' in result.output
+
+
+def test_generate_requires_input_file_or_github_repo() -> None:
+    result = runner.invoke(cli.app, ["generate", "--allow-public-osv"])
+
+    assert result.exit_code == 1
+    assert "either INPUT_FILE or --github-repo is required" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_disallows_input_file_with_github_repo() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "INPUT_FILE cannot be combined with --github-repo" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_disallows_offline_with_github_repo() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--offline",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--offline cannot be combined with --github-repo" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_reports_github_sbom_errors_without_traceback(monkeypatch) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, *, api_url: str, token: str | None) -> None:
+            pass
+
+        def component_identities(self, repository: str):
+            raise cli.GithubSbomError("GitHub SBOM API GET failed")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--allow-public-osv",
+            "--no-gh-auth",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "GitHub SBOM ingest failed" in result.output
+    assert "GitHub SBOM API GET failed" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_requires_public_osv_opt_in_before_fetching_github_sbom(monkeypatch) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, *, api_url: str, token: str | None) -> None:
+            raise AssertionError("GitHub SBOM should not be fetched before OSV policy validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--no-gh-auth",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "VEX generation failed" in result.output
+    assert "--allow-public-osv" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("marker", "expected_repository", "expected_api_url", "expected_token_env", "expected_osv_url"),
+    (
+        (
+            "github-repo-public-example",
+            "vexcalibur-dev/vexcalibur",
+            "https://api.github.com",
+            None,
+            "https://api.osv.dev",
+        ),
+        (
+            "github-repo-enterprise-example",
+            "internal/example",
+            "https://github.example.test/api/v3",
+            "GH_ENTERPRISE_TOKEN",
+            "https://osv.internal.example",
+        ),
+    ),
+)
+def test_documented_github_repo_generate_examples_execute(
+    monkeypatch,
+    tmp_path: Path,
+    marker: str,
+    expected_repository: str,
+    expected_api_url: str,
+    expected_token_env: str | None,
+    expected_osv_url: str,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    captured_base_urls: list[str] = []
+    captured_github_clients: list[tuple[str, str | None]] = []
+    captured_repositories: list[str] = []
+    captured_token_requests: list[dict[str, object]] = []
+
+    class FakeGithubSbomClient:
+        def __init__(self, *, api_url: str, token: str | None) -> None:
+            captured_github_clients.append((api_url, token))
+
+        def component_identities(self, repository: str):
+            captured_repositories.append(repository)
+            return (
+                ComponentIdentity(
+                    ref="SPDXRef-pypi-django-1.2",
+                    name="django",
+                    version="1.2",
+                    purl=PackageURL.from_string("pkg:pypi/django@1.2"),
+                ),
+            )
+
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            captured_base_urls.append(base_url)
+
+        def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
+            return [
+                OsvQueryResult(
+                    purl="pkg:pypi/django@1.2",
+                    vulnerabilities=(
+                        OsvVulnerabilitySummary(
+                            id="GHSA-django-0001",
+                            modified=parse_timestamp("2026-01-01T00:00:00Z"),
+                        ),
+                    ),
+                )
+            ]
+
+    def fake_resolve_github_token(**kwargs) -> str | None:
+        captured_token_requests.append(dict(kwargs))
+        if expected_token_env is None:
+            return None
+        return "resolved-token"
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(cli, "resolve_github_token", fake_resolve_github_token)
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    args = _documented_vexcalibur_generate_args(marker)
+    args = [str(output_path) if arg.endswith("/vexcalibur-vex.json") else arg for arg in args]
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+    assert captured_base_urls == [expected_osv_url]
+    expected_token = None if expected_token_env is None else "resolved-token"
+    assert captured_github_clients == [(expected_api_url, expected_token)]
+    assert captured_repositories == [expected_repository]
+    assert captured_token_requests == [
+        {
+            "api_url": expected_api_url,
+            "token_env": expected_token_env,
+            "allow_gh_cli": True,
+        }
+    ]
+    generated = json.loads(output_path.read_text(encoding="utf-8"))
+    assert generated["bomFormat"] == "CycloneDX"
+    assert generated["components"] == [
+        {
+            "bom-ref": "SPDXRef-pypi-django-1.2",
+            "name": "django",
+            "purl": "pkg:pypi/django@1.2",
+            "type": "library",
+            "version": "1.2",
+        }
+    ]
 
 
 def test_generate_requires_public_osv_opt_in_without_traceback(monkeypatch) -> None:
@@ -728,3 +1043,23 @@ def test_vexy_compat_root_shows_help_without_args() -> None:
 
     assert result.exit_code == 0
     assert "legacy vexy" in result.output
+
+
+def _documented_vexcalibur_generate_args(marker: str) -> list[str]:
+    command = _extract_marked_bash_command(
+        DOCS_ROOT / "how-to" / "generate-cyclonedx-vex.md",
+        marker,
+    )
+    args = shlex.split(command)
+    assert args[:4] == ["uv", "run", "--frozen", "vexcalibur"]
+    assert args[4] == "generate"
+    return args[4:]
+
+
+def _extract_marked_bash_command(path: Path, marker: str) -> str:
+    content = path.read_text(encoding="utf-8")
+    start = f"<!-- {marker}:start -->"
+    end = f"<!-- {marker}:end -->"
+    marked = content.split(start, maxsplit=1)[1].split(end, maxsplit=1)[0]
+    command_block = marked.split("```bash", maxsplit=1)[1].split("```", maxsplit=1)[0]
+    return command_block.strip().replace("\\\n", " ")

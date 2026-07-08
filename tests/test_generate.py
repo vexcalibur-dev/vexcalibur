@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
+from packageurl import PackageURL
 
 import vexcalibur.sources.osv as osv_module
 from vexcalibur.domain import (
@@ -13,6 +14,8 @@ from vexcalibur.domain import (
     VulnerabilitySourceError,
 )
 from vexcalibur.generate import (
+    generate_vex_from_components,
+    generate_vex_from_github_sbom,
     generate_vex_from_local_findings,
     generate_vex_from_sbom,
     generate_vex_from_source,
@@ -102,6 +105,28 @@ def test_generate_vex_from_source_accepts_cyclonedx_xml_sbom() -> None:
     assert VALIDATOR.validate_str(generated) is None
 
 
+def test_generate_vex_from_components_uses_provider_neutral_components() -> None:
+    source = FakeVulnerabilitySource(())
+
+    generated = generate_vex_from_components(
+        components=(
+            ComponentIdentity(
+                ref="SPDXRef-pypi-django-1.2",
+                name="django",
+                version="1.2",
+                purl=PackageURL.from_string("pkg:pypi/django@1.2"),
+            ),
+        ),
+        source=source,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert [(component.ref, component.purl.to_string()) for component in source.components] == [
+        ("SPDXRef-pypi-django-1.2", "pkg:pypi/django@1.2")
+    ]
+    assert VALIDATOR.validate_str(generated) is None
+
+
 def test_source_errors_share_provider_neutral_base_class() -> None:
     from vexcalibur.sources.local import LocalFindingsError
     from vexcalibur.sources.osv import OsvClientError
@@ -174,6 +199,48 @@ def test_generate_vex_from_sbom_queries_osv_and_renders_vex() -> None:
         ("pkg:pypi/django@1.2", None),
     ]
     assert generated == (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
+
+
+def test_generate_vex_from_github_sbom_queries_osv() -> None:
+    class FakeGithubSbomClient:
+        def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
+            assert repository == "vexcalibur-dev/vexcalibur"
+            return (
+                ComponentIdentity(
+                    ref="SPDXRef-pypi-django-1.2",
+                    name="django",
+                    version="1.2",
+                    purl=PackageURL.from_string("pkg:pypi/django@1.2"),
+                ),
+            )
+
+    osv_client = FakeOsvClient()
+
+    generated = generate_vex_from_github_sbom(
+        repository="vexcalibur-dev/vexcalibur",
+        github_client=FakeGithubSbomClient(),
+        osv_client=osv_client,
+        allow_public_osv=True,
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert [(query.purl.to_string(), query.version) for query in osv_client.queries] == [
+        ("pkg:pypi/django@1.2", None)
+    ]
+    assert VALIDATOR.validate_str(generated) is None
+
+
+def test_generate_vex_from_github_sbom_requires_public_osv_opt_in_before_fetching() -> None:
+    class FakeGithubSbomClient:
+        def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
+            raise AssertionError("GitHub SBOM should not be fetched before OSV policy validation")
+
+    with pytest.raises(OsvConfigurationError, match="--allow-public-osv"):
+        generate_vex_from_github_sbom(
+            repository="vexcalibur-dev/vexcalibur",
+            github_client=FakeGithubSbomClient(),
+            timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+        )
 
 
 def test_generate_vex_from_local_findings_renders_without_osv(tmp_path: Path) -> None:

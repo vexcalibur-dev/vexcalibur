@@ -10,6 +10,7 @@ compatibility policy says otherwise.
 The current implementation supports:
 
 - CycloneDX JSON and XML SBOM ingest for CycloneDX `1.4`, `1.5`, and `1.6`.
+- GitHub Dependency Graph SBOM input with `--github-repo OWNER/REPO`.
 - Public OSV queries when the caller explicitly opts in with
   `--allow-public-osv`.
 - Private OSV-compatible endpoints with `--osv-url`.
@@ -31,6 +32,7 @@ Before 1.0, these surfaces can still change:
 - Python import paths, type shapes, and exception classes.
 - Generated VEX details beyond the documented CycloneDX 1.6 output contract.
 - Provider configuration and extension hooks.
+- GitHub SBOM token resolution and GitHub Enterprise configuration.
 - GitHub Action release tags and package compatibility tables.
 
 Pin exact package and action versions once releases begin. Do not use mutable

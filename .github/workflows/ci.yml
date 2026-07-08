@@ -8,12 +8,12 @@ on:
   workflow_dispatch:
     inputs:
       run_scheduled_profile:
-        description: "Run the scheduled CI profile, including live OSV compatibility"
+        description: "Run the scheduled CI profile, including live external-service compatibility"
         required: false
         default: false
         type: boolean
-      run_live_osv:
-        description: "Run live OSV compatibility checks"
+      run_live_services:
+        description: "Run live external-service compatibility checks"
         required: false
         default: false
         type: boolean
@@ -227,10 +227,10 @@ jobs:
       - name: Build documentation
         run: make docs
 
-  live-osv:
-    name: Live OSV compatibility
+  live-services:
+    name: Live external-service compatibility
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.run_scheduled_profile || inputs.run_live_osv))
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.run_scheduled_profile || inputs.run_live_services))
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -248,7 +248,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Run live OSV compatibility tests
+      - name: Run live external-service compatibility tests
         run: uv run --frozen pytest -m live -q
 
   ci:

@@ -16,9 +16,10 @@ The main CI workflow runs these repository gates on pull requests and pushes to 
 - installed wheel console-script checks for `vexcalibur` and `vexy`
 - documentation build
 
-Manual runs execute the same repository gates. The live OSV compatibility job runs manually when `run_live_osv` is selected.
+Manual runs execute the same repository gates. The live external-service
+compatibility job runs manually when `run_live_services` is selected.
 
-Use `run_scheduled_profile` when you need to validate the scheduled job shape before a scheduled run occurs. That profile runs repository security and live OSV compatibility while skipping the normal pull request gates: quality, test, package build, installed CLI, documentation build, and CI result.
+Use `run_scheduled_profile` when you need to validate the scheduled job shape before a scheduled run occurs. That profile runs repository security and live external-service compatibility while skipping the normal pull request gates: quality, test, package build, installed CLI, documentation build, and CI result.
 
 ## PyPI Publishing
 
@@ -64,9 +65,12 @@ The publishing workflow:
 Scheduled CI intentionally keeps repository security checks visible and separate from public-service compatibility:
 
 - `Repository security` runs `pip-audit` and `detect-secrets-hook`.
-- `Live OSV compatibility` runs only the tests marked `live` and may contact the public OSV service.
+- `Live external-service compatibility` runs only the tests marked `live` and
+  may contact public services such as OSV and GitHub.
 
-Do not treat a live OSV failure as evidence that repository security checks failed. Triage live OSV failures as public-service, network, schema, or compatibility changes.
+Do not treat a live external-service failure as evidence that repository
+security checks failed. Triage live failures as public-service, network, schema,
+or compatibility changes.
 
 ## Secret Baselines
 
@@ -106,10 +110,12 @@ For recurring `detect-secrets-hook` failures:
 - Remove the sensitive value or move it to a secret manager.
 - For a verified false positive, use the narrowest inline allowlist or a dedicated baseline maintenance PR.
 
-For recurring live OSV failures:
+For recurring live external-service failures:
 
-- Check whether `https://api.osv.dev` changed behavior or is unavailable.
-- Reproduce with `uv run --frozen pytest -m live -q` only when public OSV access is acceptable.
+- Check whether `https://api.osv.dev`, `https://api.github.com`, or another
+  covered public service changed behavior or is unavailable.
+- Reproduce with `uv run --frozen pytest -m live -q` only when contacting the
+  covered public services is acceptable.
 - Keep fixes isolated from repository security-gate changes.
 
 For recurring installed CLI failures:

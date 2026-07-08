@@ -6,7 +6,9 @@ service.
 
 ## Prerequisites
 
-- A CycloneDX JSON or XML SBOM supported by Vexcalibur.
+- A local CycloneDX JSON/XML SBOM supported by Vexcalibur, or a GitHub
+  repository whose Dependency Graph SBOM should be used as the package
+  inventory.
 - An internal endpoint that implements the OSV `/v1/querybatch` response shape.
 - Network access from the runner to that endpoint.
 
@@ -27,6 +29,21 @@ explicitly approved.
 
 Expected success signal: the command exits with status `0` and writes
 CycloneDX 1.6 VEX JSON to `/tmp/vexcalibur-vex.json`.
+
+Use the same mirror when the package inventory comes from GitHub Dependency
+Graph:
+
+```bash
+uv run --frozen vexcalibur generate \
+  --github-repo internal/example \
+  --github-token-env GH_ENTERPRISE_TOKEN \
+  --github-api-url https://github.example.test/api/v3 \
+  --osv-url https://osv.internal.example \
+  --output /tmp/vexcalibur-vex.json
+```
+
+Fetching the SBOM from GitHub is separate from querying OSV. Keep using
+`--osv-url` to avoid sending the GitHub-derived package inventory to public OSV.
 
 ## Query A Package URL With The Mirror
 

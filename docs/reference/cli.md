@@ -104,29 +104,45 @@ for `--allow-public-osv`.
 
 ## `vexcalibur generate`
 
-Generate CycloneDX VEX JSON from a CycloneDX JSON or XML SBOM and vulnerability findings.
+Generate CycloneDX VEX JSON from a local CycloneDX SBOM file or from a GitHub
+Dependency Graph SBOM.
 
 ```bash
-uv run --frozen vexcalibur generate INPUT_FILE [OPTIONS]
+uv run --frozen vexcalibur generate [INPUT_FILE] [OPTIONS]
 ```
 
 Arguments:
 
-- `INPUT_FILE`: readable CycloneDX JSON or XML SBOM file.
+- `INPUT_FILE`: readable CycloneDX JSON or XML SBOM file. Omit this argument
+  when using `--github-repo`.
+
+Exactly one package inventory source is required:
+
+- `INPUT_FILE` for a local CycloneDX JSON or XML SBOM.
+- `--github-repo OWNER/REPO` for the repository's GitHub Dependency Graph SBOM.
 
 JSON input must be UTF-8. XML input must be rooted at `bom` in the
 `http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace. XML may use
 parser-detected XML encodings such as UTF-8 or UTF-16. DTD, entity, and
 external-reference declarations are rejected.
 
+GitHub Dependency Graph input is fetched from GitHub's SBOM REST API as SPDX
+2.3 JSON. Vexcalibur extracts package URL references from that document and
+passes them through the same provider-neutral VEX generation path used for local
+CycloneDX files.
+
 Options:
 
 - `--output PATH`, `-o PATH`: write VEX JSON to a file instead of standard output.
 - `--timestamp TEXT`: ISO-8601 timestamp for deterministic output metadata.
 - `--findings-file PATH`: local Vexcalibur findings JSON file. When set, no OSV API request is sent.
-- `--offline`: disable network vulnerability sources. Currently requires `--findings-file`.
+- `--offline`: disable network vulnerability sources. Currently requires `--findings-file` and cannot be combined with `--github-repo`.
 - `--osv-url TEXT`: OSV API base URL. Use this for private OSV mirrors. Defaults to `https://api.osv.dev`.
 - `--allow-public-osv`: allow sending SBOM package URLs and versions to the public OSV API.
+- `--github-repo TEXT`: fetch the GitHub Dependency Graph SBOM for `OWNER/REPO` instead of reading a local SBOM file.
+- `--github-api-url TEXT`: GitHub API base URL for `--github-repo`. Defaults to `https://api.github.com`.
+- `--github-token-env TEXT`: environment variable containing a GitHub token.
+- `--gh-auth / --no-gh-auth`: allow or disable fallback to `gh auth token` when no GitHub token environment variable is set. Enabled by default.
 
 The command fails closed for public OSV:
 
@@ -164,6 +180,46 @@ uv run --frozen vexcalibur generate \
 
 `--findings-file` cannot be combined with `--allow-public-osv` or `--osv-url`.
 
+To generate from a GitHub repository's Dependency Graph SBOM, omit `INPUT_FILE`
+and pass `--github-repo`:
+
+```bash
+uv run --frozen vexcalibur generate \
+  --github-repo vexcalibur-dev/vexcalibur \
+  --allow-public-osv \
+  --output /tmp/vexcalibur-vex.json
+```
+
+Public GitHub repositories can be requested without a token, subject to GitHub
+API rate limits. For authenticated requests, Vexcalibur resolves a token in
+this order:
+
+- the environment variable named by `--github-token-env`;
+- `GH_TOKEN` or `GITHUB_TOKEN` for `https://api.github.com`;
+- `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` for non-default GitHub API
+  hosts;
+- `gh auth token --hostname HOST`, unless `--no-gh-auth` is set.
+
+Use `--github-api-url` with GitHub Enterprise API hosts:
+
+```bash
+uv run --frozen vexcalibur generate \
+  --github-repo internal/example \
+  --github-api-url https://github.example.test/api/v3 \
+  --github-token-env GH_ENTERPRISE_TOKEN \
+  --osv-url https://osv.internal.example \
+  --output /tmp/vexcalibur-vex.json
+```
+
+`--github-api-url` must use HTTPS and must not include userinfo, query strings,
+or fragments. Token-backed GitHub SBOM requests need repository `Contents: read`
+permission. Public repositories can be requested without a token, subject to
+GitHub API rate limits.
+
+Fetching the SBOM from GitHub is a network operation, so `--github-repo` cannot
+be combined with `--offline`. Sending the resulting package inventory to public
+OSV is a separate network decision and still requires `--allow-public-osv`.
+
 `generate` output behavior:
 
 - Without `--output`, the command writes CycloneDX 1.6 VEX JSON to standard
@@ -179,9 +235,11 @@ uv run --frozen vexcalibur generate \
 | Condition | Exit code | Output stream and message shape |
 | --- | --- | --- |
 | VEX JSON generated successfully | `0` | Standard output contains VEX JSON unless `--output` is set. |
-| Invalid timestamp or missing required argument | nonzero Typer error | Typer prints the parameter or usage error. |
+| Invalid timestamp | nonzero Typer parameter error | Typer prints the parameter error. |
+| Missing package inventory source | `1` | Standard error starts with `Invalid generate options:` and mentions `INPUT_FILE` or `--github-repo`. |
 | Mutually incompatible source flags | `1` | Standard error starts with `Invalid generate options:`. |
 | Unsupported, invalid, unsafe, or unqueryable SBOM | `1` | Standard error starts with `SBOM ingest failed:`. |
+| GitHub SBOM request, authentication, API, or SPDX parsing error | `1` | Standard error starts with `GitHub SBOM ingest failed:`. |
 | Local findings file error | `1` | Standard error starts with `Local findings ingest failed:`. |
 | Public OSV URL without `--allow-public-osv` | `1` | Standard error starts with `VEX generation failed:` and mentions `--allow-public-osv`. |
 | OSV HTTP, network, pagination, or response-shape failure | `1` | Standard error starts with `OSV query failed:`. |
