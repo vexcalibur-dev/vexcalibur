@@ -72,275 +72,24 @@ jobs:
         if: steps.release.outputs.skip == 'true'
         run: echo "Release skipped by commit messages."
 
-  quality:
-    name: Quality
-    runs-on: ubuntu-latest
+  validation:
+    name: Release validation
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version-file: .tool-versions
-          enable-cache: true
-          python-version: ${{ env.MAX_PYTHON }}
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Check lock file
-        run: uv lock --check
-
-      - name: Check formatting
-        run: uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
-
-      - name: Lint
-        run: uv run --frozen ruff check src tests scripts/*.py docs/conf.py
-
-      - name: Type check
-        run: uv run --frozen mypy src
-
-  workflow-lint:
-    name: Workflow lint
-    runs-on: ubuntu-latest
-    needs: resolve
-    if: needs.resolve.outputs.skip != 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Install workflow tools
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
-        with:
-          version: "v2026.6.12"
-          github_token: ""
-          cache: true
-          install_args: "actionlint shellcheck"
-
-      - name: Lint workflows
-        run: actionlint -shellcheck shellcheck .github/workflows/*.yml
-
-      - name: Lint shell scripts
-        run: shellcheck scripts/*.sh
-
-  security:
-    name: Repository security
-    runs-on: ubuntu-latest
-    needs: resolve
-    if: needs.resolve.outputs.skip != 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version-file: .tool-versions
-          enable-cache: true
-          python-version: ${{ env.MAX_PYTHON }}
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Audit Python dependencies
-        run: uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
-
-      - name: Scan code for secrets
-        run: git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline .secrets.baseline --
-
-  test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    needs: resolve
-    if: needs.resolve.outputs.skip != 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version-file: .tool-versions
-          enable-cache: true
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Run offline tests
-        run: uv run --frozen pytest -m "not live" --cov-fail-under=75
-
-  docs:
-    name: Build docs
-    runs-on: ubuntu-latest
-    needs: resolve
-    if: needs.resolve.outputs.skip != 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version-file: .tool-versions
-          enable-cache: true
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --frozen --extra docs
-
-      - name: Build documentation
-        run: make docs
-
-  build:
-    name: Build distributions
-    runs-on: ubuntu-latest
-    needs: resolve
-    if: needs.resolve.outputs.skip != 'true'
-    outputs:
-      tag: ${{ needs.resolve.outputs.tag }}
-      sha: ${{ needs.resolve.outputs.sha }}
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve.outputs.sha }}
-
-      - name: Prepare local release tag
-        env:
-          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
-        run: |
-          set -euo pipefail
-
-          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
-            tag_sha="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
-            if [[ "${tag_sha}" != "${RELEASE_SHA}" ]]; then
-              echo "Release tag ${RELEASE_TAG} already exists on ${tag_sha}, not ${RELEASE_SHA}." >&2
-              exit 1
-            fi
-          else
-            git tag "${RELEASE_TAG}" "${RELEASE_SHA}"
-          fi
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version-file: .tool-versions
-          enable-cache: true
-          python-version: ${{ env.MAX_PYTHON }}
-
-      - name: Build distributions
-        run: uv build --clear --no-create-gitignore --no-sources
-
-      - name: Verify built versions match tag
-        id: version
-        env:
-          EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
-        run: |
-          python scripts/verify-dist-metadata.py dist \
-            --expected-name vexcalibur \
-            --expected-version "$EXPECTED_VERSION" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Check distributions
-        run: uv run --frozen twine check dist/*
-
-      - name: Upload distributions
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: dist
-          path: dist/
-          retention-days: 14
-
-  installed-cli:
-    name: Installed CLI (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    needs: build
-    if: needs.build.result == 'success'
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.14"]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.build.outputs.sha }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version-file: .tool-versions
-          enable-cache: true
-          python-version: ${{ matrix.python-version }}
-
-      - name: Download distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: dist
-          path: dist
-
-      - name: Verify downloaded distributions
-        id: dist
-        env:
-          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
-        run: |
-          python scripts/verify-dist-metadata.py dist \
-            --expected-name vexcalibur \
-            --expected-version "$EXPECTED_VERSION" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Run installed CLI checks
-        env:
-          VEXCALIBUR_EXPECTED_VERSION: ${{ needs.build.outputs.version }}
-          VEXCALIBUR_WHEEL: ${{ steps.dist.outputs.wheel }}
-        run: make installed-cli-check
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-validation.yml
+    with:
+      release-sha: ${{ needs.resolve.outputs.sha }}
+      release-tag: ${{ needs.resolve.outputs.tag }}
+      release-version: ${{ needs.resolve.outputs.version }}
 
   publish-release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs:
       - resolve
-      - quality
-      - workflow-lint
-      - security
-      - test
-      - docs
-      - build
-      - installed-cli
+      - validation
     if: needs.resolve.outputs.skip != 'true'
     permissions:
       contents: read
@@ -360,12 +109,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: ${{ needs.validation.outputs.sha }}
 
       - name: Require current main tip
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
         run: |
           set -euo pipefail
 
@@ -389,9 +138,9 @@ jobs:
 
       - name: Generate and scan release notes
         env:
-          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
           PREVIOUS_TAG: ${{ needs.resolve.outputs.previous_tag }}
-          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
@@ -412,8 +161,8 @@ jobs:
 
       - name: Create release tag
         env:
-          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
           RELEASE_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -439,8 +188,8 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
