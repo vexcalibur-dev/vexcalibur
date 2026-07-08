@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -16,6 +17,7 @@ from vexcalibur.domain import (
     VulnerabilitySourceError,
     VulnerabilitySourceInputError,
 )
+from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
 DEFAULT_OSV_API_URL = "https://api.osv.dev"
 DEFAULT_MAX_OSV_PAGES = 100
@@ -95,6 +97,7 @@ class OsvClient:
             msg = "max_pages must be at least 1"
             raise ValueError(msg)
         self._base_url = normalize_osv_base_url(base_url)
+        validate_osv_base_url(self._base_url)
         self._timeout = timeout
         self._max_pages = max_pages
         self._client = client
@@ -299,6 +302,7 @@ def osv_client_for_url(*, osv_base_url: str, allow_public_osv: bool) -> OsvClien
 
 def ensure_osv_url_allowed(*, osv_base_url: str, allow_public_osv: bool) -> None:
     """Reject public OSV URLs unless the caller explicitly opted in."""
+    validate_osv_base_url(osv_base_url)
     if is_public_osv_url(osv_base_url) and not allow_public_osv:
         msg = (
             "public OSV queries require explicit opt-in; pass --allow-public-osv "
@@ -322,8 +326,11 @@ def ensure_osv_client_allowed(
 
 
 def is_public_osv_url(osv_base_url: str) -> bool:
-    parsed = urlparse(normalize_osv_base_url(osv_base_url))
-    hostname = parsed.hostname
+    try:
+        parsed = urlparse(normalize_osv_base_url(osv_base_url))
+        hostname = parsed.hostname
+    except ValueError:
+        return False
     if hostname is None:
         return False
     return _normalized_hostname(hostname) == PUBLIC_OSV_API_HOST
@@ -332,6 +339,26 @@ def is_public_osv_url(osv_base_url: str) -> bool:
 def normalize_osv_base_url(osv_base_url: str) -> str:
     """Normalize OSV base URL whitespace and trailing slashes."""
     return osv_base_url.strip().rstrip("/")
+
+
+def validate_osv_base_url(osv_base_url: str) -> None:
+    """Require OSV URLs to be HTTPS, except HTTP loopback for local test services."""
+    try:
+        parsed = validate_base_url(
+            osv_base_url,
+            option_name="--osv-url",
+            allowed_schemes={"https", "http"},
+            scheme_message="--osv-url must be an absolute https URL with a hostname",
+        ).parsed
+    except BaseUrlValidationError as exc:
+        raise OsvConfigurationError(str(exc)) from exc
+
+    hostname = parsed.hostname
+    if hostname is None:
+        raise AssertionError("validated OSV base URL must include a hostname")
+    if parsed.scheme == "http" and not _is_loopback_hostname(hostname):
+        msg = "--osv-url must use https unless it points to a loopback host"
+        raise OsvConfigurationError(msg)
 
 
 def _client_base_url(osv_client: object) -> str | None:
@@ -347,6 +374,16 @@ def _normalized_hostname(hostname: str) -> str:
     except UnicodeError:
         ascii_hostname = hostname
     return ascii_hostname.rstrip(".").lower()
+
+
+def _is_loopback_hostname(hostname: str) -> bool:
+    normalized = _normalized_hostname(hostname)
+    if normalized == "localhost":
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def findings_from_osv_results(

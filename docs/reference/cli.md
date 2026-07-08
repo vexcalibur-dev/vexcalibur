@@ -47,6 +47,9 @@ Network behavior:
 - Public OSV queries fail unless `--allow-public-osv` is present.
 - Private mirrors do not require `--allow-public-osv`; pass the mirror base URL
   with `--osv-url`.
+- `--osv-url` must be an absolute `https://` URL with a hostname. Cleartext
+  `http://` is accepted only for loopback hosts such as `127.0.0.1`, `::1`, or
+  `localhost`. Do not include userinfo, query strings, or fragments.
 - The OSV endpoint must support the `/v1/querybatch` response shape used by the
   public OSV API.
 
@@ -85,6 +88,7 @@ uv run --frozen vexcalibur query-osv \
 | Missing `PURL...` argument | nonzero Typer usage error | Typer prints a missing-argument error. |
 | Invalid package URL | nonzero Typer parameter error | Typer includes `not a valid package URL`. |
 | Public OSV URL without `--allow-public-osv` | `1` | Standard error starts with `OSV query failed:` and mentions `--allow-public-osv`. |
+| Invalid or unsafe `--osv-url` | `1` | Standard error starts with `OSV query failed:` and names the URL constraint. |
 | OSV HTTP, network, pagination, or response-shape failure | `1` | Standard error starts with `OSV query failed:`. |
 
 Verification commands:
@@ -240,7 +244,9 @@ OSV is a separate network decision and still requires `--allow-public-osv`.
 | Unsupported, invalid, unsafe, or unqueryable SBOM | `1` | Standard error starts with `SBOM ingest failed:`. |
 | GitHub SBOM request, authentication, API, or SPDX parsing error | `1` | Standard error starts with `GitHub SBOM ingest failed:`. |
 | Local findings file error | `1` | Standard error starts with `Local findings ingest failed:`. |
+| Empty `--osv-url` | `1` | Standard error starts with `Invalid generate options:` and says `--osv-url must not be empty`. |
 | Public OSV URL without `--allow-public-osv` | `1` | Standard error starts with `VEX generation failed:` and mentions `--allow-public-osv`. |
+| Invalid or unsafe `--osv-url` | `1` | Standard error starts with `VEX generation failed:` and names the URL constraint. |
 | OSV HTTP, network, pagination, or response-shape failure | `1` | Standard error starts with `OSV query failed:`. |
 | Output file cannot be written | `1` | Standard error starts with `Could not write VEX output`. |
 
@@ -312,7 +318,8 @@ Vexcalibur source-mode flags are also available:
 The compatibility command preserves Vexcalibur's public-service boundary. A
 legacy `-c` config containing OSV or OSS Index sources is not enough to contact a
 public service. Use `--allow-public-osv` only when the SBOM inventory is safe to
-send to public OSV, or use `--osv-url` for a private OSV-compatible endpoint.
+send to public OSV, or use an absolute `https://` `--osv-url` for a private
+OSV-compatible endpoint.
 
 Offline migration example:
 
@@ -347,4 +354,5 @@ output.
 | Empty `--osv-url` | `1` | Standard error starts with `vexy compatibility failed:` and says `--osv-url must not be empty`. |
 | `--findings-file` combined with `--allow-public-osv` or `--osv-url` | `1` | Standard error starts with `vexy compatibility failed:` and identifies the incompatible option. |
 | Public OSV URL without `--allow-public-osv` | `1` | Standard error starts with `VEX generation failed:` and mentions `--allow-public-osv`. |
+| Invalid or unsafe `--osv-url` | `1` | Standard error starts with `VEX generation failed:` and names the URL constraint. |
 | OSV HTTP, network, pagination, or response-shape failure | `1` | Standard error starts with `OSV query failed:`. |

@@ -17,6 +17,7 @@ from packageurl import PackageURL
 
 from vexcalibur.domain import ComponentIdentity
 from vexcalibur.sbom import MAX_COMPONENTS, MAX_SBOM_BYTES, SbomError
+from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
 DEFAULT_GITHUB_API_URL = "https://api.github.com"
 GITHUB_API_VERSION = "2026-03-10"
@@ -314,23 +315,15 @@ def parse_github_repository(value: str) -> GithubRepository:
 
 def normalize_github_api_url(value: str) -> str:
     """Normalize and validate a GitHub API base URL."""
-    normalized = value.strip().rstrip("/")
-    parsed = urlparse(normalized)
-    if parsed.scheme != "https" or parsed.hostname is None:
-        msg = "--github-api-url must be an HTTPS URL"
-        raise GithubSbomConfigurationError(msg)
     try:
-        _ = parsed.port
-    except ValueError as exc:
-        msg = "--github-api-url port is invalid"
-        raise GithubSbomConfigurationError(msg) from exc
-    if parsed.username is not None or parsed.password is not None:
-        msg = "--github-api-url must not include userinfo"
-        raise GithubSbomConfigurationError(msg)
-    if parsed.params or parsed.query or parsed.fragment:
-        msg = "--github-api-url must not include params, query, or fragment"
-        raise GithubSbomConfigurationError(msg)
-    return normalized
+        return validate_base_url(
+            value,
+            option_name="--github-api-url",
+            allowed_schemes={"https"},
+            scheme_message="--github-api-url must be an HTTPS URL",
+        ).value
+    except BaseUrlValidationError as exc:
+        raise GithubSbomConfigurationError(str(exc)) from exc
 
 
 def resolve_github_token(

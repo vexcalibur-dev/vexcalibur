@@ -17,11 +17,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Fetch latest style guide
         id: fetch
         run: |
           source_sha="$(git ls-remote https://github.com/google/styleguide.git refs/heads/gh-pages | awk '{print $1}')"
+          if ! printf '%s\n' "$source_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "Unexpected google/styleguide gh-pages SHA: $source_sha" >&2
+            exit 1
+          fi
           curl -fsSL "https://raw.githubusercontent.com/google/styleguide/${source_sha}/pyguide.md" \
             -o docs/external/google-python-style-guide.md
           perl -0pi -e 's/[ \t]+$//mg; s/\n+\z/\n/' docs/external/google-python-style-guide.md
@@ -30,12 +36,14 @@ jobs:
 
       - name: Check for changes
         id: changes
+        env:
+          SOURCE_SHA: ${{ steps.fetch.outputs.source_sha }}
         run: |
           if git diff --quiet docs/external/google-python-style-guide.md; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             today="$(date -u +%F)"
-            sed -i "s|^- Current source branch snapshot:.*|- Current source branch snapshot: \`google/styleguide@${{ steps.fetch.outputs.source_sha }}\`|" docs/external/README.md
+            sed -i "s|^- Current source branch snapshot:.*|- Current source branch snapshot: \`google/styleguide@${SOURCE_SHA}\`|" docs/external/README.md
             sed -i "s|^- Fetched on:.*|- Fetched on: ${today}|" docs/external/README.md
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi

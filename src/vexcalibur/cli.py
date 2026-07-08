@@ -88,7 +88,7 @@ def query_osv(
             continue
 
         ids = ", ".join(vuln.id for vuln in result.vulnerabilities)
-        console.print(f"{result.purl}: {ids}")
+        console.print(f"{result.purl}: {ids}", markup=False, highlight=False)
 
 
 @app.command("generate")

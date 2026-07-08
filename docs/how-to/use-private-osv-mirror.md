@@ -27,6 +27,10 @@ Do not pass `--allow-public-osv` for private inventories. That flag is only for
 workflows where sending package URLs and versions to `https://api.osv.dev` is
 explicitly approved.
 
+Private mirror URLs must be absolute `https://` URLs with a hostname. Cleartext
+`http://` is accepted only for loopback hosts such as `http://127.0.0.1:8080`
+when testing a local OSV-compatible service.
+
 Expected success signal: the command exits with status `0` and writes
 CycloneDX 1.6 VEX JSON to `/tmp/vexcalibur-vex.json`.
 
