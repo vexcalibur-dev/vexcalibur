@@ -41,11 +41,18 @@ trusted release operator because manual runs can publish a GitHub Release and
 trigger PyPI publishing.
 
 The release workflow resolves the candidate tag first with read-only
-permissions. It then runs quality, workflow lint, security, offline tests,
-documentation, package build, and installed-wheel smoke checks against the exact
-release commit before it mints the write-capable GitHub App token. Before
-publishing, it generates release notes, scans the generated notes with
-`detect-secrets`, and then publishes the GitHub Release with the scanned notes.
+permissions. It then calls `.github/workflows/release-validation.yml` to run
+quality, workflow lint, security, offline tests, documentation, package build,
+and installed-wheel smoke checks against the exact release commit before it mints
+the write-capable GitHub App token. Before publishing, it generates release
+notes, scans the generated notes with `detect-secrets`, and then publishes the
+GitHub Release with the scanned notes.
+
+The reusable release-validation workflow is shared by the GitHub Release and
+PyPI workflows. The normal CI workflow keeps its own job definitions because it
+has different PR and scheduled-run behavior: pull request secret scans compare
+against the base branch baseline, scheduled profiles skip most PR gates, and CI
+uploads coverage artifacts for review diagnostics.
 
 ## PyPI Publishing
 
@@ -75,21 +82,24 @@ not point at the current `origin/main`. It also refuses GitHub Releases marked
 as prereleases. It does not support manual dispatch or manually created GitHub
 Release publishing.
 
-The publishing workflow:
+The publishing workflow validates release-event trust boundaries first, then
+calls `.github/workflows/release-validation.yml` before publishing. The combined
+path:
 
 - validates the release author, non-prerelease status, release tag format, and
   current `origin/main` tag target;
-- checks out the release tag with full Git history so tags are available;
-- runs quality, security, offline test, and documentation gates against the
-  release tag before publishing;
-- runs GitHub Actions workflow linting and shell script linting;
+- checks out the resolved release SHA with full Git history so tags are
+  available;
+- runs quality, security, offline test, workflow lint, shell lint, and
+  documentation gates through the shared release-validation workflow;
 - builds source and wheel distributions with `uv build --clear --no-create-gitignore --no-sources`;
 - verifies the source and wheel distribution metadata names and versions match
   the release tag;
 - runs `twine check`;
 - runs installed CLI smoke tests against the exact wheel artifact on the minimum
   and maximum supported Python versions; and
-- publishes from the `pypi` environment with `id-token: write`.
+- publishes from the `pypi` environment with `id-token: write` only after the
+  shared validation job succeeds.
 
 ## Scheduled Runs
 
