@@ -72,8 +72,8 @@ uv sync --extra docs
 make docs
 ```
 
-The repository is structured for generated Sphinx HTML documentation. The GitHub
-Pages workflow publishes `docs/_build/html` after it lands on `main`.
+The canonical generated documentation is available on the
+[Vexcalibur documentation site][vexcalibur-docs].
 
 Try the CLI:
 
@@ -163,19 +163,22 @@ Local findings mode can produce an empty VEX document when the findings file exp
 
 ## Project Links
 
-- [Documentation source](docs/index.md)
-- [Quickstart tutorial](docs/tutorials/quickstart.md)
-- [No-network local findings tutorial](docs/tutorials/offline-local-findings.md)
-- [Generate CycloneDX VEX](docs/how-to/generate-cyclonedx-vex.md)
-- [Use a private OSV mirror](docs/how-to/use-private-osv-mirror.md)
-- [CI and recurring checks](docs/development/ci.md)
-- [Project status](docs/explanation/project-status.md)
-- [CLI reference](docs/reference/cli.md)
-- [CycloneDX VEX output reference](docs/reference/cyclonedx-vex-output.md)
-- [Provider contract reference](docs/reference/provider-contract.md)
+- [Documentation][vexcalibur-docs]
+- [Documentation source](https://github.com/vexcalibur-dev/vexcalibur/tree/main/docs)
+- [Quickstart tutorial](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html)
+- [No-network local findings tutorial](https://vexcalibur-dev.github.io/vexcalibur/tutorials/offline-local-findings.html)
+- [Generate CycloneDX VEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html)
+- [Use a private OSV mirror](https://vexcalibur-dev.github.io/vexcalibur/how-to/use-private-osv-mirror.html)
+- [CI and recurring checks](https://vexcalibur-dev.github.io/vexcalibur/development/ci.html)
+- [Project status](https://vexcalibur-dev.github.io/vexcalibur/explanation/project-status.html)
+- [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html)
+- [CycloneDX VEX output reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html)
+- [Provider contract reference](https://vexcalibur-dev.github.io/vexcalibur/reference/provider-contract.html)
 - [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
-- [Python style policy](docs/development/python-style.md)
+- [Python style policy](https://vexcalibur-dev.github.io/vexcalibur/development/python-style.html)
 - [AI agent and style guidance](AGENTS.md)
 - [License](LICENSE)
+
+[vexcalibur-docs]: https://vexcalibur-dev.github.io/vexcalibur/

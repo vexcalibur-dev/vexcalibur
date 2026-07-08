@@ -55,6 +55,7 @@ dev = [
 ]
 
 [project.urls]
+Documentation = "https://vexcalibur-dev.github.io/vexcalibur/"
 Homepage = "https://github.com/vexcalibur-dev/vexcalibur"
 Issues = "https://github.com/vexcalibur-dev/vexcalibur/issues"
 
