@@ -7,7 +7,7 @@ not upload Vexcalibur with a local API token or password.
 
 - You are on `main`, and `main` contains the commit to release.
 - The release tag uses `vMAJOR.MINOR.PATCH`, for example `v0.1.0`.
-- The `vexcalibur-dev` organization has the `AUTOMATION_ID` variable and
+- The `vexcalibur-dev` organization has the `AUTOMATION_CLIENT_ID` variable and
   `AUTOMATION_SECRET` secret available to this repository. These identify a
   GitHub App named `vexcalibur-dev-automation`, installed on
   `vexcalibur-dev/vexcalibur` with Contents read/write permission so the release
