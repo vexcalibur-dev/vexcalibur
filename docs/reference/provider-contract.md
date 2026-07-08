@@ -21,9 +21,12 @@ class ExampleSource:
         ...
 ```
 
-`components` is the tuple returned by the SBOM loader. Each component includes:
+`components` is the tuple returned by the package inventory loader. Each
+component includes:
 
-- `ref`: CycloneDX `bom-ref`.
+- `ref`: Vexcalibur component reference. Local CycloneDX input uses the
+  CycloneDX `bom-ref`; GitHub Dependency Graph SBOM input uses the SPDX package
+  `SPDXID` when present, otherwise the package URL.
 - `name`: component name.
 - `version`: component version, or `None`.
 - `purl`: parsed `packageurl.PackageURL`.
@@ -38,7 +41,7 @@ Each finding must include:
 - `id`: vulnerability identifier.
 - `source_name`: provider or analysis source name.
 - `source_url`: provider or advisory URL.
-- `component_ref`: `bom-ref` from the parsed SBOM.
+- `component_ref`: `ref` from the parsed component identity.
 - `purl`: package URL string for the affected component.
 
 Optional fields:
@@ -48,8 +51,8 @@ Optional fields:
 - `analysis_detail`: human-readable analysis detail. Defaults to
   `Detected by vulnerability source; manual exploitability analysis required.`
 
-The renderer rejects findings whose `component_ref` is not present in the parsed
-SBOM component set.
+The renderer rejects findings whose `component_ref` is not present in the
+parsed component set.
 
 ## Errors
 

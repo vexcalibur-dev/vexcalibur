@@ -75,4 +75,5 @@ Replace `https://osv.internal.example` with your mirror URL. Vexcalibur treats t
 
 - Use [Generate CycloneDX VEX](../how-to/generate-cyclonedx-vex.md) for command recipes.
 - Use the [CLI reference](../reference/cli.md) for current flags and behavior.
+- Use `--github-repo OWNER/REPO` when the package inventory should come from a GitHub Dependency Graph SBOM instead of a local SBOM file.
 - Read [Architecture](../explanation/architecture.md) before changing provider behavior or public-service policy.
