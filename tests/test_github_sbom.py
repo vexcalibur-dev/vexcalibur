@@ -38,6 +38,11 @@ def test_normalize_github_api_url_rejects_cleartext_urls() -> None:
         normalize_github_api_url("http://github.example/api/v3")
 
 
+def test_normalize_github_api_url_rejects_malformed_authority() -> None:
+    with pytest.raises(GithubSbomConfigurationError, match="HTTPS"):
+        normalize_github_api_url("https://[::1")
+
+
 def test_normalize_github_api_url_rejects_userinfo() -> None:
     with pytest.raises(GithubSbomConfigurationError, match="userinfo"):
         normalize_github_api_url("https://api.github.com@collector.example/api/v3")

@@ -67,6 +67,40 @@ def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
     assert "pkg:npm/example@2.0.0: no vulnerabilities found" in result.output
 
 
+def test_query_osv_prints_server_controlled_ids_without_rich_markup(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            pass
+
+        def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
+            return [
+                OsvQueryResult(
+                    purl="pkg:pypi/example@1.0.0",
+                    vulnerabilities=(
+                        OsvVulnerabilitySummary(
+                            id="[link=https://evil.example]GHSA-test-0001[/link]"
+                        ),
+                    ),
+                )
+            ]
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "query-osv",
+            "pkg:pypi/example@1.0.0",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (
+        "pkg:pypi/example@1.0.0: [link=https://evil.example]GHSA-test-0001[/link]" in result.output
+    )
+
+
 def test_query_osv_requires_public_osv_opt_in_without_traceback(monkeypatch) -> None:
     class FakeOsvClient:
         def __init__(self, **kwargs) -> None:
@@ -147,6 +181,72 @@ def test_query_osv_allows_private_osv_url_without_public_opt_in(monkeypatch) -> 
 
     assert result.exit_code == 0
     assert captured_base_urls == ["https://osv.internal.example"]
+
+
+@pytest.mark.parametrize(
+    ("osv_url", "expected_message"),
+    (
+        ("api.osv.dev", "absolute https URL"),
+        ("http://osv.internal.example", "must use https"),
+        ("https://[::1", "absolute https URL"),
+        ("https://osv.internal.example:bad", "port"),
+        ("https://user@osv.internal.example", "userinfo"),
+        ("https://osv.internal.example?debug=true", "params, query, or fragment"),
+        ("https://osv.internal.example#fragment", "params, query, or fragment"),
+    ),
+)
+def test_query_osv_rejects_invalid_osv_url_without_traceback(
+    monkeypatch,
+    osv_url: str,
+    expected_message: str,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV client should not be constructed for invalid URL")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "query-osv",
+            "pkg:pypi/example@1.0.0",
+            "--osv-url",
+            osv_url,
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "OSV query failed" in result.output
+    assert expected_message in result.output
+    assert "Traceback" not in result.output
+
+
+def test_query_osv_allows_cleartext_loopback_osv_url(monkeypatch) -> None:
+    captured_base_urls: list[str] = []
+
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            captured_base_urls.append(base_url)
+
+        def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
+            return []
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "query-osv",
+            "pkg:pypi/example@1.0.0",
+            "--osv-url",
+            "http://127.0.0.1:8080/",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured_base_urls == ["http://127.0.0.1:8080"]
 
 
 def test_query_osv_requires_at_least_one_purl() -> None:
@@ -667,6 +767,29 @@ def test_generate_rejects_empty_osv_url_without_traceback(monkeypatch) -> None:
     assert "Traceback" not in result.output
 
 
+def test_generate_rejects_invalid_osv_url_without_traceback(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV client should not be constructed for an invalid URL")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--osv-url",
+            "https://osv.internal.example:bad",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "VEX generation failed" in result.output
+    assert "--osv-url port is invalid" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_generate_allows_private_osv_url_without_public_opt_in(monkeypatch) -> None:
     captured_base_urls: list[str] = []
 
@@ -1043,6 +1166,31 @@ def test_vexy_compat_root_shows_help_without_args() -> None:
 
     assert result.exit_code == 0
     assert "legacy vexy" in result.output
+
+
+def test_vexy_rejects_invalid_osv_url_without_traceback(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV client should not be constructed for an invalid URL")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        vexy.app,
+        [
+            "--in-file",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--output",
+            "-",
+            "--osv-url",
+            "https://osv.internal.example:bad",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "VEX generation failed" in result.output
+    assert "--osv-url port is invalid" in result.output
+    assert "Traceback" not in result.output
 
 
 def _documented_vexcalibur_generate_args(marker: str) -> list[str]:

@@ -7,8 +7,10 @@ from packageurl import PackageURL
 from vexcalibur.sources.osv import (
     OsvClient,
     OsvClientError,
+    OsvConfigurationError,
     OsvPackageQuery,
     OsvResponseError,
+    osv_client_for_url,
 )
 from vexcalibur.vex import parse_timestamp
 
@@ -17,6 +19,45 @@ def test_osv_client_normalizes_base_url_whitespace_and_trailing_slash() -> None:
     client = OsvClient(base_url=" https://osv.example.test/ ")
 
     assert client.base_url == "https://osv.example.test"
+
+
+@pytest.mark.parametrize(
+    ("base_url", "message"),
+    (
+        ("api.osv.dev", "absolute https URL"),
+        ("//api.osv.dev", "absolute https URL"),
+        ("ftp://api.osv.dev", "absolute https URL"),
+        ("https://[::1", "absolute https URL"),
+        ("https://osv.internal.example:bad", "port"),
+        ("https://user@osv.internal.example", "userinfo"),
+        ("https://osv.internal.example?debug=true", "params, query, or fragment"),
+        ("https://osv.internal.example#fragment", "params, query, or fragment"),
+        ("https://osv.internal.example/path;param", "params, query, or fragment"),
+        ("http://osv.internal.example", "must use https"),
+    ),
+)
+def test_osv_client_rejects_unsafe_base_urls(base_url: str, message: str) -> None:
+    with pytest.raises(OsvConfigurationError, match=message):
+        OsvClient(base_url=base_url)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    (
+        "http://127.0.0.1:8080/",
+        "http://[::1]:8080/",
+        "http://localhost:8080/",
+    ),
+)
+def test_osv_client_allows_http_loopback_base_urls(base_url: str) -> None:
+    client = OsvClient(base_url=base_url)
+
+    assert client.base_url == base_url.rstrip("/")
+
+
+def test_osv_client_for_url_rejects_scheme_less_public_osv_url() -> None:
+    with pytest.raises(OsvConfigurationError, match="absolute https URL"):
+        osv_client_for_url(osv_base_url="api.osv.dev", allow_public_osv=True)
 
 
 def test_query_sends_purl_to_osv_query_endpoint() -> None:
