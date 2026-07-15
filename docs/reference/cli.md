@@ -48,6 +48,11 @@ pkg:pypi/example@1.0.0: no vulnerabilities found
 
 Live IDs and ordering may change.
 
+IDs are printed as literal text rather than Rich markup. The response parser
+normalizes Unicode canonical equivalents and rejects IDs containing terminal
+controls, bidi controls, or line separators before they can reach a terminal,
+CI log, or VEX document.
+
 ### Exit behavior
 
 | Condition | Status | Error prefix or output |
@@ -94,7 +99,18 @@ Choose one source mode:
 | Private OSV | `--osv-url URL` | Sends inventory to that endpoint |
 | Public OSV | `--allow-public-osv` | Sends inventory to `https://api.osv.dev` |
 
-`--offline` currently requires `--findings-file`. A findings file cannot be combined with `--osv-url` or `--allow-public-osv`.
+`--offline` currently requires `--findings-file`. A findings file cannot be
+combined with `--osv-url`, either `--osv-source-*` option, or
+`--allow-public-osv`.
+
+Public OSV findings identify their source as `OSV` at `https://osv.dev/`. A
+custom endpoint instead uses `OSV-compatible mirror` and its canonicalized
+base URL. To keep a private endpoint out of the document, provide both
+`--osv-source-name` and `--osv-source-url` as a public provenance alias.
+Vexcalibur never invents that alias. The alias URL must be absolute HTTPS and
+must not contain credentials, a query, or a fragment. The `OSV` name and every
+HTTPS URL on the official `osv.dev` origin are reserved for canonical public
+OSV provenance.
 
 OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, or GitHub SPDX `versionInfo`. When an inventory supplies both an explicit version and a PURL version, their decoded values must match. The command rejects a contradiction and fails instead of treating an empty query set as authoritative.
 
@@ -121,6 +137,8 @@ statement or vulnerability assertion.
 | `--findings-file PATH` | — | Local findings JSON. |
 | `--offline` | Off | Disable network finding sources; requires local findings. |
 | `--osv-url TEXT` | Public OSV when no local findings are selected | OSV-compatible base URL. |
+| `--osv-source-name TEXT` | Endpoint-derived | Public source name alias; requires `--osv-source-url`. |
+| `--osv-source-url TEXT` | Endpoint-derived | Public HTTPS source URL alias; requires `--osv-source-name`. |
 | `--allow-public-osv` | Off | Consent to send the inventory to public OSV. |
 | `--github-repo OWNER/REPO` | — | Fetch a GitHub Dependency Graph SBOM instead of reading `INPUT_FILE`. |
 | `--github-api-url TEXT` | `https://api.github.com` | GitHub REST API base URL. |
@@ -152,6 +170,13 @@ OSV.
 ### Output
 
 Without `--output`, JSON goes to standard output. With it, the command writes the file and prints no success message.
+
+Generation rejects serialized output larger than 25 MiB, measured as UTF-8,
+before writing it to standard output or a file. Built-in renderers first apply
+an allocation-free conservative estimate for repeated, escaped, and derived
+strings. That estimate can reject an input whose eventual grouped document
+would be smaller than 25 MiB. Every renderer, including a custom Python
+renderer, remains subject to the exact post-render UTF-8 limit.
 
 `--output` overwrites an existing file without prompting. Its parent directory
 must already exist, and there is no `--force` or atomic-write option. The
@@ -190,16 +215,29 @@ pair. Read the
 | Findings cannot form the selected VEX format | `1` | `VEX generation failed:` |
 | Output write failure | `1` | `Could not write VEX output` |
 
-### Network limits
+### Resource limits
 
 The CLI uses these fixed client defaults:
 
-| Service | Request timeout | Polling or pagination | Automatic retry |
-| --- | --- | --- | --- |
-| OSV-compatible API | 30 seconds per request | At most 100 pagination rounds | None |
-| GitHub SBOM API and report download | 30 seconds per request | At most 30 report polls; one-second default delay; numeric `Retry-After` capped at 10 seconds | Report polling only; request failures are not retried |
+| Boundary | Default limit |
+| --- | --- |
+| OSV request I/O | 30-second HTTPX timeout per request phase; no automatic retry |
+| Complete OSV client operation | 120-second wall-clock deadline |
+| One encoded OSV response, including an error or redirect body | 8 MiB |
+| Encoded OSV responses across one client operation | 64 MiB |
+| One decoded OSV response, including an error or redirect body | 8 MiB |
+| Decoded OSV responses across one client operation | 64 MiB |
+| OSV pagination | 100 rounds; page tokens no longer than 4,096 characters |
+| OSV queries | 10,000 per operation; requests are split into ordered chunks of at most 1,000 |
+| OSV vulnerability data | IDs no longer than 512 characters; 10,000 unique IDs per query; 100,000 query-and-ID results per operation |
+| OSV-to-component expansion | 100,000 findings, checked before findings are materialized |
+| Built-in pre-render estimate and exact serialized VEX | 25 MiB UTF-8 budget; the conservative estimate may reject earlier |
+| GitHub SBOM API and report download | 30 seconds per request; at most 30 report polls; one-second default delay; numeric `Retry-After` capped at 10 seconds; report polling is the only retry |
 
-Library callers may configure these limits through the client constructors.
+`OsvClient` callers may tighten or raise its constructor limits. Encoded and
+decoded response limits are configured independently. The 1,000-query
+chunk size, 100,000-finding expansion limit, and 25 MiB output limit are fixed
+generation boundaries in this release.
 
 ## Shell completion
 
@@ -236,7 +274,10 @@ It does not restore Sonatype OSS Index behavior, CycloneDX XML VEX output, or Cy
 | `-X` | Off | Print compatibility diagnostics to standard error. |
 | `--timestamp TEXT` | Current UTC time | ISO-8601 document timestamp. |
 
-The current Vexcalibur source options are also accepted: `--findings-file`, `--offline`, `--osv-url`, and `--allow-public-osv`. The same trust boundary and option conflicts apply as for `vexcalibur generate`.
+The current Vexcalibur source options are also accepted: `--findings-file`,
+`--offline`, `--osv-url`, `--osv-source-name`, `--osv-source-url`, and
+`--allow-public-osv`. The same trust boundary and option conflicts apply as for
+`vexcalibur generate`.
 
 ### Offline migration example
 

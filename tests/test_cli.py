@@ -10,6 +10,7 @@ import vexcalibur.csaf as csaf_module
 from vexcalibur import cli
 from vexcalibur.compat import vexy
 from vexcalibur.domain import ComponentIdentity
+from vexcalibur.source_options import GenerateSourceOptions
 from vexcalibur.sources.osv import (
     OsvClientError,
     OsvPackageQuery,
@@ -23,6 +24,13 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
 FINDINGS_ROOT = Path(__file__).parent / "fixtures" / "findings"
 GOLDEN_ROOT = Path(__file__).parent / "golden"
 DOCS_ROOT = Path(__file__).parent.parent / "docs"
+
+
+def test_generate_source_options_preserves_four_argument_construction() -> None:
+    options = GenerateSourceOptions(None, False, None, False)
+
+    assert options.osv_source_name is None
+    assert options.osv_source_url is None
 
 
 def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
@@ -817,6 +825,102 @@ def test_generate_allows_private_osv_url_without_public_opt_in(monkeypatch) -> N
 
     assert result.exit_code == 0
     assert captured_base_urls == ["https://osv.internal.example"]
+
+
+def test_generate_uses_paired_osv_provenance_alias_options(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, *, base_url: str) -> None:
+            assert base_url == "https://osv.internal.example/private"
+
+        def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
+            return [
+                OsvQueryResult(
+                    purl=queries[0].purl.to_string(),
+                    version=queries[0].version,
+                    vulnerabilities=(OsvVulnerabilitySummary(id="PRIVATE-2026-1"),),
+                )
+            ]
+
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+            "--osv-url",
+            "https://osv.internal.example/private",
+            "--osv-source-name",
+            "Example Security Feed",
+            "--osv-source-url",
+            "https://security.example.test/vulnerability-data",
+        ],
+    )
+
+    assert result.exit_code == 0
+    vulnerability = json.loads(result.output)["vulnerabilities"][0]
+    assert vulnerability["source"] == {
+        "name": "Example Security Feed",
+        "url": "https://security.example.test/vulnerability-data",
+    }
+
+
+@pytest.mark.parametrize(
+    "alias_args",
+    (
+        ["--osv-source-name", "Example Security Feed"],
+        ["--osv-source-url", "https://security.example.test/vulnerability-data"],
+    ),
+)
+def test_generate_rejects_unpaired_osv_provenance_alias_options(
+    monkeypatch,
+    alias_args: list[str],
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("unpaired provenance should fail before constructing a client")
+
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--osv-url",
+            "https://osv.internal.example",
+            *alias_args,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "must be provided together" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_rejects_osv_provenance_alias_with_local_findings(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text('{"findings": []}', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(findings_path),
+            "--osv-source-name",
+            "Example Security Feed",
+            "--osv-source-url",
+            "https://security.example.test/vulnerability-data",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "cannot be combined with --findings-file" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_generate_offline_uses_local_findings_without_osv_client(

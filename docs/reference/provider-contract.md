@@ -57,6 +57,9 @@ The effective component version comes from the PURL when the PURL is versioned. 
 
 Do not place credentials, signed-download secrets, or access tokens in `source_url`. The shared adapter and document boundary reject URL userinfo without copying it into an error. Query values are format-visible and are not a secret-storage mechanism.
 
+Low-level result mappers must require explicit provenance. They must not label
+arbitrary compatible-format results as an official provider by default.
+
 OpenVEX and CSAF reject `action_statement`, `impact_statement`, and
 `fixed_version` on states where they are not required. OpenVEX rejects
 nonidentical assertions for one vulnerability and emitted product. CSAF groups
@@ -89,6 +92,12 @@ A network source must make public data sharing explicit. At minimum, it should:
 - require consent before sending package URLs, versions, or an SBOM-derived inventory there.
 - accept a private endpoint when the upstream API can be mirrored.
 - document the data that leaves the runner.
+- attribute returned data to the effective provider rather than a compatible
+  wire protocol.
+- disable or explicitly validate redirects so queries cannot cross the chosen
+  trust boundary.
+- bound encoded and decoded response bytes, pagination, overall time, parsed
+  records, and the provider-to-component expansion.
 
 The OSV source implements this policy with `--allow-public-osv` and `--osv-url`. A custom source passed to `generate_vex_from_source` owns its own network policy.
 
@@ -108,7 +117,11 @@ Do not duplicate output-format rules in a provider. For built-in formats, the do
 
 ## Tests
 
-Cover configuration, trust-boundary enforcement, parsing, invalid shapes, mapping, and CLI error reporting. A paginated network source also needs repeated-token and page-limit tests.
+Cover configuration, trust-boundary enforcement, parsing, invalid shapes,
+mapping, and CLI error reporting. A paginated network source also needs
+exact-limit and limit-plus-one body tests, compressed and chunked responses,
+error-body limits, repeated and oversized tokens, pagination floods, record
+deduplication, total deadlines, and expansion-limit tests.
 
 Run offline tests before opening a pull request:
 

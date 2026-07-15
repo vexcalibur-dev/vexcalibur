@@ -57,7 +57,13 @@ def test_render_cyclonedx_vex_json_matches_golden_and_schema() -> None:
 
     generated = render_cyclonedx_vex_json(
         components=components,
-        findings=findings_from_osv_results(components=components, results=results),
+        findings=findings_from_osv_results(
+            components=components,
+            results=results,
+            source_name="OSV",
+            source_url="https://osv.dev/",
+            analysis_detail="Detected by OSV; manual exploitability analysis required.",
+        ),
         timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
     )
 

@@ -64,7 +64,12 @@ The component model has one version rule across local files, GitHub SPDX, OSV qu
 
 A `VulnerabilitySource` receives all normalized components and returns `VulnerabilityFinding` values.
 
-`OsvSource` builds version-specific OSV queries and maps matches to findings. `LocalFindingsSource` validates a JSON file. It matches each item by component reference or unique package URL.
+`OsvSource` builds version-specific OSV queries and maps matches to findings.
+It carries the effective service provenance into every finding. Only the
+canonical public endpoint receives the official OSV name and URL. A mirror
+uses its own canonical endpoint unless the caller supplies an explicit public
+name-and-URL alias. `LocalFindingsSource` validates a JSON file. It matches each
+item by component reference or unique package URL.
 
 Provider-specific request and parsing logic stays inside the adapter.
 
@@ -90,11 +95,40 @@ Public OSV fails closed until the caller passes `--allow-public-osv`. A private 
 
 Library helpers perform the same public-endpoint check when they can identify the client's effective URL.
 
+The OSV client treats a compatible service as untrusted. It disables redirects
+for every request, even when an injected HTTP client normally follows them. It
+streams raw success and error bodies through independent encoded and decoded
+budgets. Gzip is decompressed in bounded chunks, and the wall-clock deadline is
+checked for every transport chunk, so slow-drip and compressed responses cannot
+defer enforcement. Those budgets are shared across pagination and batch
+chunks. The client also limits tokens and identifiers, deduplicates normalized
+IDs across pages, and retains the newest reported modification time without
+changing first-seen ID order. The public API's 1,000-query batch maximum is an
+individual request boundary, so a larger accepted inventory is split into
+ordered chunks under the same operation budget.
+
+Before provider results become domain findings, the source counts the complete
+component-and-vulnerability relation set. It rejects an over-limit expansion
+before allocating the individual findings. This prevents repeated package URLs
+and large result sets from turning two bounded inputs into an unbounded
+Cartesian product.
+
 Fetching a GitHub SBOM is a separate choice. `--github-repo` permits that input request, but it does not permit a later public OSV query. This is also why `--github-repo` and `--offline` conflict.
 
 ## Rendering boundary
 
 `VexRenderer` separates generation from a serialization format. Its component-and-finding signature remains available to custom renderers. The `generate_vex_from_*` helpers use `CycloneDxJsonRenderer` unless a caller supplies another renderer.
+
+Generation measures every renderer result as UTF-8 and rejects output over the
+shared limit before the CLI writes it. Before invoking an exact built-in
+renderer class, generation also applies an allocation-free conservative upper
+bound for repeated, JSON-escaped, and derived package-URL text. It considers
+only products referenced by findings and scales OpenVEX versioned package URLs
+per finding. Grouping can make the eventual document smaller than this bound,
+so preflight may reject before the exact limit. Renderer subclasses and other
+custom renderers use the post-render check because their expansion rules are
+not known. Built-in OSV relation expansion is bounded before findings are
+materialized.
 
 The built-in renderers also implement `VexDocumentRenderer`. Their compatibility method creates the atomic document, then delegates to the document renderer.
 
