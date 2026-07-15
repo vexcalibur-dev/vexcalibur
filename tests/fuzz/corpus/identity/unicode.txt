@@ -1,0 +1,3 @@
+agile-VEX-世界
+1.0+build
+urn:component:世界

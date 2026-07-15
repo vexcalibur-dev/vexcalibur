@@ -1,0 +1,67 @@
+name: Parser fuzzing
+
+on:
+  schedule:
+    - cron: "41 8 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: parser-fuzzing
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UV_CACHE_DIR: /tmp/vexcalibur-fuzz-uv-cache
+  XDG_CACHE_HOME: /tmp/vexcalibur-fuzz-cache
+  FUZZ_MAX_LEN: "65536"
+  FUZZ_TIMEOUT_SECONDS: "5"
+  FUZZ_RSS_LIMIT_MB: "2048"
+  FUZZ_MAX_TOTAL_TIME: "120"
+
+jobs:
+  fuzz:
+    name: Bounded Atheris campaign
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up uv and CPython
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version-file: .tool-versions
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Install locked fuzzing dependencies
+        run: uv sync --frozen --group fuzz
+
+      - name: Verify the supported Atheris runtime
+        run: |
+          test "$(uname -m)" = "x86_64"
+          uv run --frozen --group fuzz python -c \
+            'import platform, sys; assert platform.python_implementation() == "CPython"; assert sys.version_info[:2] == (3, 14)'
+
+      - name: Audit fuzzing dependencies
+        run: uv run --frozen --group fuzz pip-audit --cache-dir /tmp/vexcalibur-fuzz-pip-audit-cache
+
+      - name: Run coverage-guided parser fuzzing
+        env:
+          FUZZ_ARTIFACT_ROOT: ${{ runner.temp }}/vexcalibur-fuzz-artifacts
+          FUZZ_CORPUS_ROOT: ${{ runner.temp }}/vexcalibur-fuzz-corpus
+        run: scripts/run-atheris.sh
+
+      - name: Upload synthetic crash reproducers
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: parser-fuzz-crashes-${{ github.run_id }}
+          path: ${{ runner.temp }}/vexcalibur-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7

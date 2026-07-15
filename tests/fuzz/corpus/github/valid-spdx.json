@@ -1,0 +1,1 @@
+{"sbom":{"spdxVersion":"SPDX-2.3","packages":[{"SPDXID":"SPDXRef-example","name":"example","versionInfo":"1.0.0","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:pypi/example@1.0.0"}]}]}}

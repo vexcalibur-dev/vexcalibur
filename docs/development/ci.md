@@ -12,6 +12,8 @@ The `CI` workflow runs these jobs on pull requests and pushes to `main`:
 - `actionlint` and `shellcheck`.
 - dependency and secret scans.
 - offline tests on Python 3.10–3.14.
+- deterministic Hypothesis properties for untrusted parser and source-client
+  boundaries on Python 3.14.
 - source and wheel builds.
 - installed-wheel checks for `vexcalibur` and `vexy`.
 - OpenVEX parsing and statement validation with `go-vex` 0.2.8. The version is pinned in `tests/integration/openvex-go/go.mod`.
@@ -33,6 +35,11 @@ by the protected `main` ruleset. That ruleset also requires the dedicated
 CodeQL, dependency-review, and pre-commit checks, with strict up-to-date branch
 enforcement. See [Verify GitHub governance](github-governance.md) for the
 cross-repository policy and drift check.
+
+The ordinary version matrix excludes tests marked `fuzz`; the dedicated
+`Parser fuzz smoke` job runs them once with deterministic examples and a
+five-minute job limit. See [Fuzz untrusted input boundaries](fuzzing.md) for
+targets, local commands, and crash triage.
 
 A normal manual run executes the same job set as a pull request or push. Its secret scan uses the current branch baseline, while a pull request uses the exact base-commit baseline. Set `run_live_services` to add live compatibility tests. Set `run_scheduled_profile` to run only the scheduled profile: repository security checks plus live-service tests.
 
@@ -57,6 +64,11 @@ The scheduled CI run has two parts:
 | Live external-service compatibility | Run tests marked `live` against services such as OSV and GitHub. |
 
 A live failure may be a service outage, network problem, or upstream schema change. It does not mean the repository security job failed.
+
+The separate weekly `Parser fuzzing` workflow runs bounded Atheris campaigns
+against synthetic inputs. It has read-only repository permissions and uploads
+reproducers only after a failure. It does not call a public vulnerability or
+source-code service.
 
 Reproduce a live failure only when its fixture package data is approved for the public services:
 
