@@ -21,6 +21,7 @@ from cyclonedx.model.vulnerability import (
 from cyclonedx.output import make_outputter
 from cyclonedx.schema import OutputFormat, SchemaVersion
 
+import vexcalibur.render as _render
 from vexcalibur.document import (
     VexAssertion,
     VexDocument,
@@ -30,7 +31,8 @@ from vexcalibur.document import (
     vex_document_from_findings,
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
-from vexcalibur.render import VexRenderError as VexRenderError
+
+VexRenderError = _render.VexRenderError
 
 _AssertionGroupKey = tuple[str, str, str, VexAnalysisState, str]
 _CycloneDxAssertionKey = tuple[str, str, str, str, str, str, str, str]

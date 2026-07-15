@@ -6,8 +6,10 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Protocol
 
+import vexcalibur.errors as _errors
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
-from vexcalibur.errors import VexRenderError as VexRenderError
+
+VexRenderError = _errors.VexRenderError
 
 if TYPE_CHECKING:
     from vexcalibur.document import VexDocument

@@ -7,7 +7,6 @@ from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
 from packageurl import PackageURL
 
-import vexcalibur.sources.osv as osv_module
 from vexcalibur.domain import (
     DEFAULT_ANALYSIS_DETAIL,
     ComponentIdentity,
@@ -542,7 +541,7 @@ def test_generate_vex_from_sbom_allows_public_osv_with_explicit_opt_in(monkeypat
         created_clients.append(client)
         return client
 
-    monkeypatch.setattr(osv_module, "OsvClient", fake_osv_client)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", fake_osv_client)
 
     generate_vex_from_sbom(
         input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
@@ -561,7 +560,7 @@ def test_generate_vex_from_sbom_allows_private_osv_url_without_public_opt_in(mon
         created_clients.append(client)
         return client
 
-    monkeypatch.setattr(osv_module, "OsvClient", fake_osv_client)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", fake_osv_client)
 
     generate_vex_from_sbom(
         input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",

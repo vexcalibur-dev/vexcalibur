@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-import vexcalibur.sbom as sbom_module
 from vexcalibur.sbom import (
     SbomError,
     load_cyclonedx_json,
@@ -847,7 +846,7 @@ def test_load_cyclonedx_sbom_rejects_xml_component_depth_limit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(sbom_module, "MAX_COMPONENT_DEPTH", 1)
+    monkeypatch.setattr("vexcalibur.sbom.MAX_COMPONENT_DEPTH", 1)
     nested_components = _xml_component(
         ref="component:root",
         children=_xml_component(
@@ -869,7 +868,8 @@ def test_load_cyclonedx_sbom_rejects_xml_component_count_limit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(sbom_module, "MAX_COMPONENTS", 1)
+    component_limit = 1
+    monkeypatch.setattr("vexcalibur.sbom.MAX_COMPONENTS", component_limit)
     sbom_path = tmp_path / "too-many.xml"
     sbom_path.write_text(
         _xml_bom(
@@ -881,7 +881,7 @@ def test_load_cyclonedx_sbom_rejects_xml_component_count_limit(
         encoding="utf-8",
     )
 
-    with pytest.raises(SbomError, match=f"more than {sbom_module.MAX_COMPONENTS} components"):
+    with pytest.raises(SbomError, match=f"more than {component_limit} components"):
         load_cyclonedx_sbom(sbom_path)
 
 

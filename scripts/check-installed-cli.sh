@@ -35,6 +35,8 @@ if [[ ! -f "$wheel" ]]; then
 fi
 
 venv_dir="$work_dir/venv"
-"$uv_bin" venv "$venv_dir"
-"$uv_bin" pip install --python "$venv_dir/bin/python" "$wheel"
+"$repo_root/scripts/install-locked-wheel.sh" \
+  "$venv_dir" \
+  "$wheel" \
+  "$work_dir/runtime-requirements.txt"
 VEXCALIBUR_BIN_DIR="$venv_dir/bin" "$venv_dir/bin/python" tests/integration/check_installed_cli.py
