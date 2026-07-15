@@ -3,7 +3,6 @@ from datetime import datetime
 import pytest
 from packageurl import PackageURL
 
-import vexcalibur.generate as generate_module
 from vexcalibur.csaf import (
     Csaf20DocumentMetadata,
     Csaf20VexJsonRenderer,
@@ -80,7 +79,7 @@ def test_builtin_renderers_reject_oversized_fields_before_rendering(
         render_was_called = True
         return "{}"
 
-    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 64 * 1024)
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
     monkeypatch.setattr(type(selected_renderer), "render", unexpected_render)
 
     with pytest.raises(VexRenderError, match="65536 byte output limit"):
@@ -126,7 +125,7 @@ def test_openvex_preflight_accounts_for_percent_encoded_derived_version(
         render_was_called = True
         return "{}"
 
-    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 64 * 1024)
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
     monkeypatch.setattr(type(renderer), "render", unexpected_render)
 
     with pytest.raises(VexRenderError, match="65536 byte output limit"):
@@ -173,7 +172,7 @@ def test_openvex_preflight_scales_derived_purl_budget_per_finding(
         render_was_called = True
         return "{}"
 
-    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 64 * 1024)
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
     monkeypatch.setattr(type(renderer), "render", unexpected_render)
 
     with pytest.raises(VexRenderError, match="65536 byte output limit"):
@@ -196,7 +195,7 @@ def test_preflight_ignores_unreferenced_component_text(
         version="1.0.0",
         purl=PackageURL.from_string("pkg:pypi/clean@1.0.0"),
     )
-    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 64 * 1024)
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
 
     rendered = generate_vex_from_components(
         components=(component,),
@@ -237,7 +236,7 @@ def test_builtin_renderer_subclass_uses_exact_post_render_limit(
         component_ref=component.ref,
         purl=component.purl.to_string(),
     )
-    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 64)
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64)
 
     with pytest.raises(VexRenderError, match="64 byte output limit"):
         generate_vex_from_components(

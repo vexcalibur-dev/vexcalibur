@@ -7,7 +7,6 @@ from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
 from packageurl import PackageURL
 
-import vexcalibur.generate as generate_module
 from vexcalibur.domain import (
     DEFAULT_ANALYSIS_DETAIL,
     ComponentIdentity,
@@ -206,7 +205,7 @@ def test_generate_vex_from_components_enforces_utf8_output_byte_limit(monkeypatc
         ) -> str:
             return self.output
 
-    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 2)
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 2)
 
     assert (
         generate_vex_from_components(

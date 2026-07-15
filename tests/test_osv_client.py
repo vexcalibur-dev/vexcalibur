@@ -8,7 +8,6 @@ import httpx
 import pytest
 from packageurl import PackageURL
 
-import vexcalibur.sources.osv as osv_module
 from vexcalibur.domain import ComponentIdentity, VulnerabilitySourceInputError
 from vexcalibur.sources.osv import (
     OsvClient,
@@ -1200,7 +1199,7 @@ def test_query_applies_overall_operation_deadline(monkeypatch) -> None:
         now = 2.0
         return httpx.Response(200, content=b'{"vulns":[]}')
 
-    monkeypatch.setattr(osv_module.time, "monotonic", monotonic)
+    monkeypatch.setattr("vexcalibur.sources.osv.time.monotonic", monotonic)
     client = OsvClient(
         base_url="https://osv.example.test",
         operation_timeout=1.0,
