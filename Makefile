@@ -50,7 +50,7 @@ secrets: ## Check tracked files for newly introduced secrets
 
 secrets-pr: ## Check tracked files against the base branch secret baseline
 	git show $(SECRETS_BASELINE_REF):.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
-	git ls-files -z | xargs -0 $(UV) run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
+	git ls-files -z -- . ':(exclude).secrets.baseline' | xargs -0 $(UV) run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
 
 check: lint workflow-lint typecheck audit secrets test ## Run local quality gate
 
