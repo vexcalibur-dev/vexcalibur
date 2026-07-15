@@ -10,6 +10,10 @@ on:
         description: Optional explicit MAJOR.MINOR.PATCH version. Empty computes the next version.
         required: false
         type: string
+      recovery-tag:
+        description: Existing annotated vMAJOR.MINOR.PATCH tag to resume. Mutually exclusive with version.
+        required: false
+        type: string
 
 concurrency:
   group: release-main
@@ -36,7 +40,8 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       previous_tag: ${{ steps.release.outputs.previous_tag }}
       bump: ${{ steps.release.outputs.bump }}
-      sha: ${{ steps.sha.outputs.sha }}
+      sha: ${{ steps.release.outputs.sha }}
+      mode: ${{ steps.release.outputs.mode }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -44,29 +49,90 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require current main tip
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-          if [[ "${current_main_sha}" != "${GITHUB_SHA}" ]]; then
-            echo "Refusing to release from a stale main workflow run." >&2
-            echo "Current main: ${current_main_sha}" >&2
-            echo "Workflow SHA: ${GITHUB_SHA}" >&2
-            exit 1
-          fi
-
       - name: Determine release version
         id: release
         env:
           MANUAL_VERSION: ${{ github.event.inputs.version || '' }}
-        run: scripts/next-release-tag.sh "${MANUAL_VERSION}"
+          RECOVERY_TAG: ${{ github.event.inputs['recovery-tag'] || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
 
-      - name: Record release SHA
-        id: sha
-        run: printf 'sha=%s\n' "${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${MANUAL_VERSION}" && -n "${RECOVERY_TAG}" ]]; then
+            echo "version and recovery-tag are mutually exclusive." >&2
+            exit 1
+          fi
+
+          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ ! "${current_main_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "GitHub returned a malformed current main SHA." >&2
+            exit 1
+          fi
+
+          if [[ -z "${RECOVERY_TAG}" ]]; then
+            if [[ "${current_main_sha}" != "${GITHUB_SHA}" ]]; then
+              echo "Refusing to release from a stale main workflow run." >&2
+              echo "Current main: ${current_main_sha}" >&2
+              echo "Workflow SHA: ${GITHUB_SHA}" >&2
+              exit 1
+            fi
+
+            scripts/next-release-tag.sh "${MANUAL_VERSION}"
+            {
+              printf 'sha=%s\n' "${GITHUB_SHA}"
+              printf 'mode=normal\n'
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ ! "${RECOVERY_TAG}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+            echo "recovery-tag must be an exact vMAJOR.MINOR.PATCH tag." >&2
+            exit 1
+          fi
+          if ! git rev-parse -q --verify "refs/tags/${RECOVERY_TAG}" >/dev/null; then
+            echo "Recovery tag ${RECOVERY_TAG} does not exist." >&2
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "refs/tags/${RECOVERY_TAG}")" != "tag" ]]; then
+            echo "Recovery tag ${RECOVERY_TAG} is not annotated." >&2
+            exit 1
+          fi
+          if [[ "$(git cat-file -p "refs/tags/${RECOVERY_TAG}" | sed -n '2s/^type //p')" != \
+            "commit" ]]; then
+            echo "Recovery tag ${RECOVERY_TAG} does not directly annotate a commit." >&2
+            exit 1
+          fi
+
+          release_sha="$(git rev-parse --verify "refs/tags/${RECOVERY_TAG}^{commit}")"
+          if [[ ! "${release_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Recovery tag resolved to a malformed commit SHA." >&2
+            exit 1
+          fi
+          if ! git cat-file -e "${current_main_sha}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "${current_main_sha}"
+          fi
+          if ! git merge-base --is-ancestor "${release_sha}" "${current_main_sha}"; then
+            echo "Recovery tag ${RECOVERY_TAG} is not contained in current main." >&2
+            exit 1
+          fi
+
+          previous_tag=""
+          if parent_sha="$(git rev-parse --verify "${release_sha}^" 2>/dev/null)"; then
+            previous_tag="$(
+              git tag --merged "${parent_sha}" --list 'v*' |
+                grep -E '^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$' |
+                sort -V | tail -n 1 || true
+            )"
+          fi
+          {
+            printf 'skip=false\n'
+            printf 'tag=%s\n' "${RECOVERY_TAG}"
+            printf 'version=%s\n' "${RECOVERY_TAG#v}"
+            printf 'previous_tag=%s\n' "${previous_tag}"
+            printf 'bump=recovery\n'
+            printf 'sha=%s\n' "${release_sha}"
+            printf 'mode=recovery\n'
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Stop on skipped release
         if: steps.release.outputs.skip == 'true'
@@ -77,12 +143,14 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
     permissions:
+      actions: read
       contents: read
     uses: ./.github/workflows/release-validation.yml
     with:
       release-sha: ${{ needs.resolve.outputs.sha }}
       release-tag: ${{ needs.resolve.outputs.tag }}
       release-version: ${{ needs.resolve.outputs.version }}
+      publication-only: ${{ needs.resolve.outputs.mode == 'recovery' }}
 
   generate-release-notes:
     name: Generate release notes
@@ -112,6 +180,7 @@ jobs:
           RELEASE_TAG: ${{ needs.validation.outputs.tag }}
           PREVIOUS_TAG: ${{ needs.resolve.outputs.previous_tag }}
           RELEASE_SHA: ${{ needs.validation.outputs.sha }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
@@ -119,6 +188,114 @@ jobs:
           notes_dir="${RUNNER_TEMP}/release-notes"
           notes_path="${notes_dir}/vexcalibur-release-notes.md"
           mkdir -p "${notes_dir}"
+
+          if [[ ! "${APP_SLUG}" =~ ^[a-z0-9][a-z0-9-]{0,99}$ ]]; then
+            echo "GitHub returned a malformed App slug." >&2
+            exit 1
+          fi
+          bot_user_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          if [[ ! "${bot_user_id}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "GitHub returned a malformed App bot user id." >&2
+            exit 1
+          fi
+          bot_name="${APP_SLUG}[bot]"
+          bot_email="${bot_user_id}+${bot_name}@users.noreply.github.com"
+
+          recover_tag_notes() {
+            local ref_path="$1"
+            local tag_object_sha tag_path expected_notes_sha256
+
+            if ! jq -e --arg ref "refs/tags/${RELEASE_TAG}" \
+              '.ref == $ref and .object.type == "tag" and
+               (.object.sha | test("^[0-9a-f]{40}$"))' "${ref_path}" >/dev/null; then
+              echo "Release tag ${RELEASE_TAG} is not an annotated tag." >&2
+              return 1
+            fi
+            tag_object_sha="$(jq -r .object.sha "${ref_path}")"
+            tag_path="${RUNNER_TEMP}/release-notes-tag-object.json"
+            gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
+            if ! jq -e \
+              --arg tag "${RELEASE_TAG}" \
+              --arg sha "${RELEASE_SHA}" \
+              --arg name "${bot_name}" \
+              --arg email "${bot_email}" \
+              '(.message | fromjson) as $message |
+               .tag == $tag and .object.type == "commit" and .object.sha == $sha and
+               .tagger.name == $name and .tagger.email == $email and
+               ($message | type == "object") and
+               ($message | keys) ==
+                 ["release_notes", "release_notes_sha256", "schema_version", "tag"] and
+               $message.schema_version == 1 and $message.tag == $tag and
+               ($message.release_notes | type == "string") and
+               ($message.release_notes_sha256 | type == "string" and
+                test("^[0-9a-f]{64}$"))' "${tag_path}" >/dev/null; then
+              echo "Release tag ${RELEASE_TAG} has an invalid release-note payload." >&2
+              return 1
+            fi
+            jq --join-output '.message | fromjson | .release_notes' \
+              "${tag_path}" > "${notes_path}"
+            expected_notes_sha256="$(
+              jq -r '.message | fromjson | .release_notes_sha256' "${tag_path}"
+            )"
+            notes_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
+            if [[ "${notes_sha256}" != "${expected_notes_sha256}" ]]; then
+              echo "Release tag ${RELEASE_TAG} has an invalid release-note digest." >&2
+              return 1
+            fi
+          }
+
+          tag_exists=false
+          tag_ref="${RUNNER_TEMP}/release-notes-tag-ref.json"
+          tag_error="${RUNNER_TEMP}/release-notes-tag.error"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+            > "${tag_ref}" 2> "${tag_error}"; then
+            tag_exists=true
+            recover_tag_notes "${tag_ref}"
+          elif ! grep -q '(HTTP 404)' "${tag_error}"; then
+            echo "Could not resolve release tag ${RELEASE_TAG}." >&2
+            sed -n '1,5p' "${tag_error}" >&2
+            exit 1
+          fi
+
+          existing_release="${RUNNER_TEMP}/existing-github-release.json"
+          release_error="${RUNNER_TEMP}/existing-github-release.error"
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            > "${existing_release}" 2> "${release_error}"; then
+            if ! jq -e \
+              --arg tag "${RELEASE_TAG}" \
+              --arg sha "${RELEASE_SHA}" \
+              --arg author "${APP_SLUG}[bot]" \
+              '.tag_name == $tag and .target_commitish == $sha and .name == $tag and
+               .prerelease == false and .author.login == $author and
+               (.body | type == "string") and
+               ((.draft == true and (.immutable == false or .immutable == null)) or
+                (.draft == false and .immutable == true))' \
+              "${existing_release}" >/dev/null; then
+              echo "Existing release differs from the exact recovery contract." >&2
+              exit 1
+            fi
+            if [[ "${tag_exists}" != "true" ]]; then
+              echo "Existing release has no protected annotated notes tag." >&2
+              exit 1
+            fi
+            release_body="${RUNNER_TEMP}/existing-release-body.md"
+            jq --join-output '.body' "${existing_release}" > "${release_body}"
+            if ! cmp --silent "${notes_path}" "${release_body}"; then
+              echo "Existing release notes differ from the protected tag payload." >&2
+              exit 1
+            fi
+            printf 'sha256=%s\n' "${notes_sha256}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          elif ! grep -q '(HTTP 404)' "${release_error}"; then
+            echo "Could not resolve existing GitHub Release ${RELEASE_TAG}." >&2
+            sed -n '1,5p' "${release_error}" >&2
+            exit 1
+          fi
+
+          if [[ "${tag_exists}" == "true" ]]; then
+            printf 'sha256=%s\n' "${notes_sha256}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
 
           args=(
             "repos/${GITHUB_REPOSITORY}/releases/generate-notes"
@@ -211,29 +388,122 @@ jobs:
       - scan-release-notes
     if: needs.resolve.outputs.skip != 'true'
     permissions:
+      actions: read
       contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download validated release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.validation.outputs.sha }}
+          name: ${{ needs.validation.outputs.release-assets-artifact }}
+          path: ${{ runner.temp }}/release-assets
 
-      - name: Require current main tip
+      - name: Verify validated release assets
         env:
+          ARTIFACT_NAME: ${{ needs.validation.outputs.release-assets-artifact }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.validation.outputs.release-assets-artifact-digest }}
+          EXPECTED_CHECKSUM_FILE_SHA256: ${{ needs.validation.outputs.release-assets-sha256 }}
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
         run: |
           set -euo pipefail
 
-          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-          if [[ "${current_main_sha}" != "${RELEASE_SHA}" ]]; then
-            echo "Refusing to publish a stale release." >&2
-            echo "Current main: ${current_main_sha}" >&2
-            echo "Release SHA: ${RELEASE_SHA}" >&2
+          if [[ ! "${ARTIFACT_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "The validated release-asset artifact name is malformed." >&2
             exit 1
           fi
+          normalized_artifact_digest="${EXPECTED_ARTIFACT_DIGEST#sha256:}"
+          if [[ ! "${normalized_artifact_digest}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "The validated release-asset artifact digest is malformed." >&2
+            exit 1
+          fi
+          if [[ ! "${EXPECTED_CHECKSUM_FILE_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "The validated SHA256SUMS digest is malformed." >&2
+            exit 1
+          fi
+
+          matches=0
+          observed_artifact_digest=""
+          while IFS=$'\t' read -r name expired digest; do
+            if [[ "${name}" == "${ARTIFACT_NAME}" ]]; then
+              matches=$((matches + 1))
+              if [[ "${expired}" != "false" ]]; then
+                echo "The validated release-asset artifact has expired." >&2
+                exit 1
+              fi
+              observed_artifact_digest="${digest#sha256:}"
+            fi
+          done < <(
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+              --jq '.artifacts[] | [.name, .expired, .digest] | @tsv'
+          )
+          if ((matches != 1)); then
+            echo "Expected exactly one current-run artifact named ${ARTIFACT_NAME}; found ${matches}." >&2
+            exit 1
+          fi
+          if [[ "${observed_artifact_digest}" != "${normalized_artifact_digest}" ]]; then
+            echo "The Actions artifact digest differs from reusable validation." >&2
+            exit 1
+          fi
+
+          asset_dir="${RUNNER_TEMP}/release-assets"
+          checksum_path="${asset_dir}/SHA256SUMS"
+          if [[ ! -f "${checksum_path}" || -L "${checksum_path}" ]]; then
+            echo "The release-asset artifact has no regular SHA256SUMS file." >&2
+            exit 1
+          fi
+          if [[ "$(sha256sum "${checksum_path}" | awk '{print $1}')" != \
+            "${EXPECTED_CHECKSUM_FILE_SHA256}" ]]; then
+            echo "The downloaded SHA256SUMS file differs from reusable validation." >&2
+            exit 1
+          fi
+          if find "${asset_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+            echo "The release-asset artifact contains a directory or non-regular file." >&2
+            exit 1
+          fi
+
+          declare -A recorded_names=()
+          line_count=0
+          while IFS= read -r line || [[ -n "${line}" ]]; do
+            digest="${line%%  *}"
+            filename="${line#*  }"
+            if [[ "${line}" != "${digest}  ${filename}" ]] || \
+              [[ ! "${digest}" =~ ^[0-9a-f]{64}$ ]] || \
+              [[ ! "${filename}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$ ]] || \
+              [[ "${filename}" == "SHA256SUMS" ]]; then
+              echo "SHA256SUMS contains a malformed line." >&2
+              exit 1
+            fi
+            if [[ -n "${recorded_names[${filename}]:-}" ]]; then
+              echo "SHA256SUMS contains a duplicate filename." >&2
+              exit 1
+            fi
+            recorded_names["${filename}"]=1
+            line_count=$((line_count + 1))
+          done < "${checksum_path}"
+          if ((line_count == 0 || line_count > 100)); then
+            echo "SHA256SUMS has an invalid number of entries." >&2
+            exit 1
+          fi
+          while IFS= read -r -d '' path; do
+            filename="${path##*/}"
+            if [[ "${filename}" != "SHA256SUMS" && -z "${recorded_names[${filename}]:-}" ]]; then
+              echo "SHA256SUMS does not bind ${filename}." >&2
+              exit 1
+            fi
+            size="$(stat --format=%s "${path}")"
+            if ((size <= 0 || size > 33554432)); then
+              echo "Release asset ${filename} has an invalid size." >&2
+              exit 1
+            fi
+          done < <(find "${asset_dir}" -mindepth 1 -maxdepth 1 -type f -print0)
+          if [[ ! -f "${asset_dir}/manifest.json" ]]; then
+            echo "The validated release assets have no manifest.json." >&2
+            exit 1
+          fi
+          (
+            cd "${asset_dir}"
+            sha256sum --check --strict SHA256SUMS
+          )
 
       - name: Download scanned release notes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -264,6 +534,60 @@ jobs:
             exit 1
           fi
 
+      - name: Preflight immutable release policy and target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          policy_path="${RUNNER_TEMP}/immutable-release-policy.json"
+          policy_error="${RUNNER_TEMP}/immutable-release-policy.error"
+          if gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            > "${policy_path}" 2> "${policy_error}"; then
+            if ! jq -e '.enabled == true and .enforced_by_owner == true' \
+              "${policy_path}" >/dev/null; then
+              echo "Immutable releases are not enabled and owner-enforced for this repository." >&2
+              exit 1
+            fi
+          elif grep -Eq '\(HTTP (401|403)\)|Requires authentication|Resource not accessible' \
+            "${policy_error}"; then
+            echo "::warning title=Immutable release preflight deferred::The read-only workflow token cannot inspect the Administration-read immutable-release endpoint. Publication will still fail unless GitHub reports immutable:true and verifies the release plus every asset."
+          else
+            echo "Could not preflight the repository immutable-release policy." >&2
+            sed -n '1,5p' "${policy_error}" >&2
+            exit 1
+          fi
+
+          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ ! "${current_main_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "GitHub returned a malformed current main SHA." >&2
+            exit 1
+          fi
+          if [[ "${RELEASE_MODE}" == "normal" ]]; then
+            if [[ "${current_main_sha}" != "${RELEASE_SHA}" ]]; then
+              echo "Refusing to publish a stale normal release." >&2
+              exit 1
+            fi
+          elif [[ "${RELEASE_MODE}" == "recovery" ]]; then
+            comparison="$(
+              gh api "repos/${GITHUB_REPOSITORY}/compare/${RELEASE_SHA}...${current_main_sha}" \
+                --jq .status
+            )"
+            if [[ "${comparison}" != "ahead" && "${comparison}" != "identical" ]]; then
+              echo "Recovery target ${RELEASE_TAG} is no longer contained in current main." >&2
+              exit 1
+            fi
+          else
+            echo "Unknown release mode ${RELEASE_MODE}." >&2
+            exit 1
+          fi
+
       - name: Generate app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -278,49 +602,605 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.validation.outputs.tag }}
           RELEASE_SHA: ${{ needs.validation.outputs.sha }}
-          RELEASE_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
+          if [[ ! "${APP_SLUG}" =~ ^[a-z0-9][a-z0-9-]{0,99}$ ]]; then
+            echo "GitHub returned a malformed App slug." >&2
+            exit 1
+          fi
           bot_user_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
-          git config user.name "${APP_SLUG}[bot]"
-          git config user.email "${bot_user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if [[ ! "${bot_user_id}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "GitHub returned a malformed App bot user id." >&2
+            exit 1
+          fi
+          bot_name="${APP_SLUG}[bot]"
+          bot_email="${bot_user_id}+${bot_name}@users.noreply.github.com"
+          notes_path="${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
+          notes_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
+          tag_message_path="${RUNNER_TEMP}/release-tag-message.json"
+          jq --compact-output --join-output --null-input \
+            --arg tag "${RELEASE_TAG}" \
+            --arg notes_sha256 "${notes_sha256}" \
+            --rawfile release_notes "${notes_path}" \
+            '{schema_version: 1, tag: $tag,
+              release_notes_sha256: $notes_sha256,
+              release_notes: $release_notes}' > "${tag_message_path}"
 
-          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
-            tag_sha="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
-            if [[ "${tag_sha}" != "${RELEASE_SHA}" ]]; then
-              echo "Release tag ${RELEASE_TAG} already exists on ${tag_sha}, not ${RELEASE_SHA}." >&2
-              exit 1
+          validate_tag() {
+            local ref_path="$1"
+            local tag_object_sha tag_path
+            if ! jq -e --arg tag "refs/tags/${RELEASE_TAG}" \
+              '.ref == $tag and .object.type == "tag" and (.object.sha | test("^[0-9a-f]{40}$"))' \
+              "${ref_path}" >/dev/null; then
+              echo "Release tag ${RELEASE_TAG} is not an annotated tag." >&2
+              return 1
             fi
-            echo "Release tag ${RELEASE_TAG} already points at ${RELEASE_SHA}."
-          else
-            git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}" "${RELEASE_SHA}"
-            git push origin "${RELEASE_TAG}"
+            tag_object_sha="$(jq -r '.object.sha' "${ref_path}")"
+            tag_path="${RUNNER_TEMP}/release-tag-object.json"
+            gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
+            if ! jq -e \
+              --arg tag "${RELEASE_TAG}" \
+              --arg sha "${RELEASE_SHA}" \
+              --arg name "${bot_name}" \
+              --arg email "${bot_email}" \
+              --arg notes_sha256 "${notes_sha256}" \
+              --rawfile release_notes "${notes_path}" \
+              '(.message | fromjson) as $message |
+               .tag == $tag and .object.type == "commit" and .object.sha == $sha and
+               .tagger.name == $name and .tagger.email == $email and
+               ($message | keys) ==
+                 ["release_notes", "release_notes_sha256", "schema_version", "tag"] and
+               $message.schema_version == 1 and $message.tag == $tag and
+               $message.release_notes_sha256 == $notes_sha256 and
+               $message.release_notes == $release_notes' \
+              "${tag_path}" >/dev/null; then
+              echo "Release tag ${RELEASE_TAG} differs from the bot-authored tag contract." >&2
+              return 1
+            fi
+          }
+
+          ref_path="${RUNNER_TEMP}/release-tag-ref.json"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+            > "${ref_path}" 2>/dev/null; then
+            validate_tag "${ref_path}"
+            exit 0
           fi
 
+          payload_path="${RUNNER_TEMP}/create-release-tag.json"
+          jq -n \
+            --arg tag "${RELEASE_TAG}" \
+            --arg object "${RELEASE_SHA}" \
+            --arg name "${bot_name}" \
+            --arg email "${bot_email}" \
+            --rawfile message "${tag_message_path}" \
+            '{tag: $tag, message: $message, object: $object, type: "commit",
+              tagger: {name: $name, email: $email}}' > "${payload_path}"
+          tag_object_sha="$(
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
+              --input "${payload_path}" --jq .sha
+          )"
+          ref_payload_path="${RUNNER_TEMP}/create-release-tag-ref.json"
+          jq -n --arg ref "refs/tags/${RELEASE_TAG}" --arg sha "${tag_object_sha}" \
+            '{ref: $ref, sha: $sha}' > "${ref_payload_path}"
+          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            --input "${ref_payload_path}" > "${ref_path}"; then
+            # A concurrent recovery may have created the ref. It is acceptable only
+            # when the resulting remote object is exactly the expected annotated tag.
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" > "${ref_path}"
+          fi
+          validate_tag "${ref_path}"
+
       - name: Create GitHub Release
+        id: release
         env:
           RELEASE_TAG: ${{ needs.validation.outputs.tag }}
           RELEASE_SHA: ${{ needs.validation.outputs.sha }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
-          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "GitHub Release ${RELEASE_TAG} already exists."
-            exit 0
+          notes_path="${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
+          release_path="${RUNNER_TEMP}/github-release.json"
+          if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            > "${release_path}" 2>/dev/null; then
+            if ! gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft \
+              --verify-tag \
+              --target "${RELEASE_SHA}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file "${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"; then
+              # A concurrent recovery is harmless only when it produced the exact
+              # release state checked below.
+              :
+            fi
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+              > "${release_path}"
           fi
 
-          args=(
-            release create "${RELEASE_TAG}"
-            --repo "${GITHUB_REPOSITORY}"
-            --verify-tag
-            --target "${RELEASE_SHA}"
-            --title "${RELEASE_TAG}"
-            --notes-file "${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
-          )
+          if ! jq -e \
+            --arg tag "${RELEASE_TAG}" \
+            --arg sha "${RELEASE_SHA}" \
+            --arg author "${APP_SLUG}[bot]" \
+            --rawfile body "${notes_path}" \
+            '.tag_name == $tag and .target_commitish == $sha and .name == $tag and
+             (.body // "") == $body and .prerelease == false and
+             .author.login == $author and
+             ((.draft == true and (.immutable == false or .immutable == null)) or
+              (.draft == false and .immutable == true))' \
+            "${release_path}" >/dev/null; then
+            echo "Existing GitHub Release ${RELEASE_TAG} differs from the exact release contract." >&2
+            exit 1
+          fi
 
-          gh "${args[@]}"
+          release_id="$(jq -r '.id' "${release_path}")"
+          if [[ ! "${release_id}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "GitHub returned a malformed release id." >&2
+            exit 1
+          fi
+          {
+            printf 'id=%s\n' "${release_id}"
+            printf 'published=%s\n' "$(jq -r '(.draft == false)' "${release_path}")"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Reconcile exact release assets
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          RELEASE_PUBLISHED: ${{ steps.release.outputs.published }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          asset_dir="${RUNNER_TEMP}/release-assets"
+          expected_uploader="${APP_SLUG}[bot]"
+          local_names="${RUNNER_TEMP}/local-release-asset-names.txt"
+          find "${asset_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | \
+            LC_ALL=C sort > "${local_names}"
+
+          refresh_assets() {
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+              --jq '.[]' | jq -s '.' > "${RUNNER_TEMP}/remote-release-assets.json"
+          }
+
+          require_no_extra_assets() {
+            local remote_names="${RUNNER_TEMP}/remote-release-asset-names.txt"
+            jq -r '.[].name' "${RUNNER_TEMP}/remote-release-assets.json" | \
+              LC_ALL=C sort > "${remote_names}"
+            if [[ "$(wc -l < "${remote_names}")" != \
+              "$(LC_ALL=C sort -u "${remote_names}" | wc -l)" ]]; then
+              echo "GitHub Release contains duplicate asset names." >&2
+              return 1
+            fi
+            if comm -13 "${local_names}" "${remote_names}" | grep -q .; then
+              echo "GitHub Release contains an asset outside the validated asset set." >&2
+              comm -13 "${local_names}" "${remote_names}" >&2
+              return 1
+            fi
+          }
+
+          refresh_assets
+          require_no_extra_assets
+          while IFS= read -r name; do
+            local_path="${asset_dir}/${name}"
+            reconciled=false
+            for attempt in 1 2 3 4; do
+              refresh_assets
+              require_no_extra_assets
+              match_count="$(
+                jq --arg name "${name}" '[.[] | select(.name == $name)] | length' \
+                  "${RUNNER_TEMP}/remote-release-assets.json"
+              )"
+              if [[ "${match_count}" == "1" ]]; then
+                asset_id="$(
+                  jq -r --arg name "${name}" '.[] | select(.name == $name) | .id' \
+                    "${RUNNER_TEMP}/remote-release-assets.json"
+                )"
+                state="$(
+                  jq -r --arg name "${name}" '.[] | select(.name == $name) | .state' \
+                    "${RUNNER_TEMP}/remote-release-assets.json"
+                )"
+                size="$(
+                  jq -r --arg name "${name}" '.[] | select(.name == $name) | .size' \
+                    "${RUNNER_TEMP}/remote-release-assets.json"
+                )"
+                uploader="$(
+                  jq -r --arg name "${name}" \
+                    '.[] | select(.name == $name) | .uploader.login' \
+                    "${RUNNER_TEMP}/remote-release-assets.json"
+                )"
+                label="$(
+                  jq -r --arg name "${name}" \
+                    '.[] | select(.name == $name) | (.label // "")' \
+                    "${RUNNER_TEMP}/remote-release-assets.json"
+                )"
+                if [[ "${state}" == "uploaded" && "${size}" == "$(stat --format=%s "${local_path}")" ]]; then
+                  if [[ "${uploader}" != "${expected_uploader}" ]]; then
+                    echo "Existing release asset ${name} was uploaded by ${uploader}, not ${expected_uploader}." >&2
+                    exit 1
+                  fi
+                  if [[ -n "${label}" ]]; then
+                    echo "Existing release asset ${name} has an unexpected display label." >&2
+                    exit 1
+                  fi
+                  downloaded="${RUNNER_TEMP}/existing-${name}"
+                  gh api -H 'Accept: application/octet-stream' \
+                    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "${downloaded}"
+                  if ! cmp --silent "${local_path}" "${downloaded}"; then
+                    echo "Existing release asset ${name} differs from the validated bytes." >&2
+                    exit 1
+                  fi
+                  reconciled=true
+                  break
+                fi
+                if [[ "${RELEASE_PUBLISHED}" == "false" && "${state}" == "starter" && \
+                  "${size}" == "0" ]]; then
+                  if ((attempt == 4)); then
+                    echo "Release asset ${name} remained a zero-byte starter after bounded retries." >&2
+                    exit 1
+                  fi
+                  gh api --method DELETE \
+                    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+                else
+                  echo "Existing release asset ${name} is incomplete or has the wrong size/state." >&2
+                  exit 1
+                fi
+              elif [[ "${match_count}" != "0" ]]; then
+                echo "GitHub Release has multiple assets named ${name}." >&2
+                exit 1
+              fi
+
+              if [[ "${RELEASE_PUBLISHED}" == "true" ]]; then
+                echo "Published release ${RELEASE_TAG} is missing immutable asset ${name}." >&2
+                exit 1
+              fi
+              if ((attempt == 4)); then
+                echo "Could not complete release asset ${name} after bounded retries." >&2
+                exit 1
+              fi
+              gh release upload "${RELEASE_TAG}" "${local_path}" \
+                --repo "${GITHUB_REPOSITORY}" || true
+              sleep "$((attempt * 2))"
+            done
+            if [[ "${reconciled}" != "true" ]]; then
+              echo "Release asset ${name} never reached the completed state." >&2
+              exit 1
+            fi
+          done < "${local_names}"
+
+          refresh_assets
+          remote_names="${RUNNER_TEMP}/final-remote-release-asset-names.txt"
+          jq -r '.[].name' "${RUNNER_TEMP}/remote-release-assets.json" | \
+            LC_ALL=C sort > "${remote_names}"
+          if ! cmp --silent "${local_names}" "${remote_names}"; then
+            echo "Final GitHub Release asset names differ from the validated set." >&2
+            exit 1
+          fi
+          if ! jq -e --arg uploader "${expected_uploader}" \
+            'length > 0 and
+             all(.[]; .uploader.login == $uploader and
+                      (.label == null or .label == ""))' \
+            "${RUNNER_TEMP}/remote-release-assets.json" >/dev/null; then
+            echo "Final GitHub Release assets have an unexpected uploader or display label." >&2
+            exit 1
+          fi
+
+          download_dir="${RUNNER_TEMP}/downloaded-release-assets"
+          mkdir -p "${download_dir}"
+          while IFS= read -r name; do
+            asset_id="$(
+              jq -r --arg name "${name}" '.[] | select(.name == $name) | .id' \
+                "${RUNNER_TEMP}/remote-release-assets.json"
+            )"
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "${download_dir}/${name}"
+            if ! cmp --silent "${asset_dir}/${name}" "${download_dir}/${name}"; then
+              echo "Downloaded release asset ${name} differs before publication." >&2
+              exit 1
+            fi
+          done < "${local_names}"
+
+      - name: Publish immutable GitHub Release
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+          RELEASE_PUBLISHED: ${{ steps.release.outputs.published }}
+          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          notes_path="${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
+          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${RELEASE_MODE}" == "normal" ]]; then
+            if [[ "${current_main_sha}" != "${RELEASE_SHA}" ]]; then
+              echo "Main advanced while the normal release was being prepared; leaving the draft intact." >&2
+              exit 1
+            fi
+          elif [[ "${RELEASE_MODE}" == "recovery" ]]; then
+            comparison="$(
+              gh api "repos/${GITHUB_REPOSITORY}/compare/${RELEASE_SHA}...${current_main_sha}" \
+                --jq .status
+            )"
+            if [[ "${comparison}" != "ahead" && "${comparison}" != "identical" ]]; then
+              echo "Recovery target is no longer contained in main; leaving the draft intact." >&2
+              exit 1
+            fi
+          else
+            echo "Unknown release mode ${RELEASE_MODE}; leaving the draft intact." >&2
+            exit 1
+          fi
+
+          if [[ ! "${APP_SLUG}" =~ ^[a-z0-9][a-z0-9-]{0,99}$ ]]; then
+            echo "GitHub returned a malformed App slug." >&2
+            exit 1
+          fi
+          bot_user_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          if [[ ! "${bot_user_id}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "GitHub returned a malformed App bot user id." >&2
+            exit 1
+          fi
+          bot_name="${APP_SLUG}[bot]"
+          bot_email="${bot_user_id}+${bot_name}@users.noreply.github.com"
+
+          validate_tag_contract() {
+            local ref_path="${RUNNER_TEMP}/pre-publish-tag-ref.json"
+            local tag_path="${RUNNER_TEMP}/pre-publish-tag-object.json"
+            local tag_object_sha
+
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" > "${ref_path}"
+            if ! jq -e --arg ref "refs/tags/${RELEASE_TAG}" \
+              '.ref == $ref and .object.type == "tag" and
+               (.object.sha | test("^[0-9a-f]{40}$"))' "${ref_path}" >/dev/null; then
+              echo "Release tag changed before immutable publication." >&2
+              return 1
+            fi
+            tag_object_sha="$(jq -r .object.sha "${ref_path}")"
+            gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
+            notes_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
+            jq -e \
+              --arg tag "${RELEASE_TAG}" \
+              --arg sha "${RELEASE_SHA}" \
+              --arg name "${bot_name}" \
+              --arg email "${bot_email}" \
+              --arg notes_sha256 "${notes_sha256}" \
+              --rawfile release_notes "${notes_path}" \
+              '(.message | fromjson) as $message |
+               .tag == $tag and .object.type == "commit" and .object.sha == $sha and
+               .tagger.name == $name and .tagger.email == $email and
+               ($message | keys) ==
+                 ["release_notes", "release_notes_sha256", "schema_version", "tag"] and
+               $message.schema_version == 1 and $message.tag == $tag and
+               $message.release_notes_sha256 == $notes_sha256 and
+               $message.release_notes == $release_notes' \
+              "${tag_path}" >/dev/null
+          }
+
+          validate_tag_contract
+          asset_dir="${RUNNER_TEMP}/release-assets"
+          local_names="${RUNNER_TEMP}/pre-publish-local-asset-names.txt"
+          find "${asset_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | \
+            LC_ALL=C sort > "${local_names}"
+          pre_publish_assets="${RUNNER_TEMP}/pre-publish-assets.json"
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+            --jq '.[]' | jq -s \
+              'sort_by(.name) |
+               map({id: .id, name: .name, size: .size, state: .state,
+                    uploader: .uploader.login, label: .label})' \
+              > "${pre_publish_assets}"
+          remote_names="${RUNNER_TEMP}/pre-publish-remote-asset-names.txt"
+          jq -r '.[].name' "${pre_publish_assets}" > "${remote_names}"
+          if ! cmp --silent "${local_names}" "${remote_names}"; then
+            echo "Release asset names changed immediately before publication." >&2
+            exit 1
+          fi
+          pre_publish_dir="$(mktemp -d "${RUNNER_TEMP}/pre-publish-assets.XXXXXX")"
+          chmod 700 "${pre_publish_dir}"
+          while IFS= read -r name; do
+            if [[ "$(
+              jq --arg name "${name}" --arg uploader "${bot_name}" \
+                '[.[] | select(.name == $name and .state == "uploaded" and
+                               .uploader == $uploader and
+                               (.label == null or .label == ""))] | length' \
+                "${pre_publish_assets}"
+            )" != "1" ]]; then
+              echo "Release asset ${name} is not uniquely completed by ${bot_name} before publication." >&2
+              exit 1
+            fi
+            asset_id="$(
+              jq -r --arg name "${name}" '.[] | select(.name == $name) | .id' \
+                "${pre_publish_assets}"
+            )"
+            asset_size="$(
+              jq -r --arg name "${name}" '.[] | select(.name == $name) | .size' \
+                "${pre_publish_assets}"
+            )"
+            if [[ "${asset_size}" != "$(stat --format=%s "${asset_dir}/${name}")" ]]; then
+              echo "Release asset ${name} changed size before publication." >&2
+              exit 1
+            fi
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "${pre_publish_dir}/${name}"
+            if ! cmp --silent "${asset_dir}/${name}" "${pre_publish_dir}/${name}"; then
+              echo "Release asset ${name} changed bytes before publication." >&2
+              exit 1
+            fi
+          done < "${local_names}"
+
+          current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${RELEASE_MODE}" == "normal" && "${current_main_sha}" != "${RELEASE_SHA}" ]]; then
+            echo "Main advanced during the pre-publication check; leaving the draft intact." >&2
+            exit 1
+          fi
+          if [[ "${RELEASE_MODE}" == "recovery" ]]; then
+            comparison="$(
+              gh api "repos/${GITHUB_REPOSITORY}/compare/${RELEASE_SHA}...${current_main_sha}" \
+                --jq .status
+            )"
+            if [[ "${comparison}" != "ahead" && "${comparison}" != "identical" ]]; then
+              echo "Recovery target left main during the pre-publication check." >&2
+              exit 1
+            fi
+          fi
+
+          release_path="${RUNNER_TEMP}/immediate-pre-publish-release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "${release_path}"
+          if ! jq -e \
+            --argjson id "${RELEASE_ID}" \
+            --arg tag "${RELEASE_TAG}" \
+            --arg sha "${RELEASE_SHA}" \
+            --arg author "${bot_name}" \
+            --arg originally_published "${RELEASE_PUBLISHED}" \
+            --rawfile body "${notes_path}" \
+            '.id == $id and .tag_name == $tag and .target_commitish == $sha and
+             .name == $tag and (.body // "") == $body and .prerelease == false and
+             .author.login == $author and
+             (if $originally_published == "true"
+              then .draft == false and .immutable == true
+              else ((.draft == true and (.immutable == false or .immutable == null)) or
+                    (.draft == false and .immutable == true))
+              end)' "${release_path}" >/dev/null; then
+            echo "Release metadata changed immediately before publication." >&2
+            exit 1
+          fi
+          current_published="$(jq -r '(.draft == false)' "${release_path}")"
+          validate_tag_contract
+          current_assets="${RUNNER_TEMP}/immediate-pre-publish-assets.json"
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+            --jq '.[]' | jq -s \
+              'sort_by(.name) |
+               map({id: .id, name: .name, size: .size, state: .state,
+                    uploader: .uploader.login, label: .label})' \
+              > "${current_assets}"
+          if ! cmp --silent "${pre_publish_assets}" "${current_assets}"; then
+            echo "Release assets changed during the pre-publication byte check." >&2
+            exit 1
+          fi
+          if [[ "${current_published}" == "false" ]]; then
+            publication_transition="${RUNNER_TEMP}/immutable-publication-transition.json"
+            jq -n \
+              --arg tag "${RELEASE_TAG}" \
+              --arg sha "${RELEASE_SHA}" \
+              --rawfile body "${notes_path}" \
+              '{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body,
+                draft: false, prerelease: false}' \
+              > "${publication_transition}"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              --input "${publication_transition}" > /dev/null
+          fi
+
+          release_path="${RUNNER_TEMP}/published-github-release.json"
+          published=false
+          for attempt in 1 2 3 4 5 6; do
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "${release_path}"
+            if jq -e \
+              --arg tag "${RELEASE_TAG}" \
+              --arg sha "${RELEASE_SHA}" \
+              --arg author "${APP_SLUG}[bot]" \
+              --rawfile body "${notes_path}" \
+              '.tag_name == $tag and .target_commitish == $sha and .name == $tag and
+               (.body // "") == $body and .draft == false and .prerelease == false and
+               .immutable == true and .author.login == $author' \
+              "${release_path}" >/dev/null; then
+              published=true
+              break
+            fi
+            sleep "$((attempt * 2))"
+          done
+          if [[ "${published}" != "true" ]]; then
+            echo "GitHub Release did not reach the exact immutable published state." >&2
+            exit 1
+          fi
+
+          local_names="${RUNNER_TEMP}/published-local-release-asset-names.txt"
+          remote_names="${RUNNER_TEMP}/published-remote-release-asset-names.txt"
+          remote_assets="${RUNNER_TEMP}/published-remote-release-assets.json"
+          find "${RUNNER_TEMP}/release-assets" -mindepth 1 -maxdepth 1 -type f \
+            -printf '%f\n' | LC_ALL=C sort > "${local_names}"
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+            --jq '.[]' | jq -s '.' > "${remote_assets}"
+          jq -r '.[].name' "${remote_assets}" | LC_ALL=C sort > "${remote_names}"
+          if ! cmp --silent "${local_names}" "${remote_names}"; then
+            echo "Published immutable release asset names differ from the validated set." >&2
+            exit 1
+          fi
+
+          post_publish_dir="${RUNNER_TEMP}/published-release-assets"
+          mkdir -p "${post_publish_dir}"
+          while IFS= read -r name; do
+            if [[ "$(
+              jq --arg name "${name}" --arg uploader "${bot_name}" \
+                '[.[] | select(.name == $name and .state == "uploaded" and
+                               .uploader.login == $uploader and
+                               (.label == null or .label == ""))] | length' \
+                "${remote_assets}"
+            )" != "1" ]]; then
+              echo "Published release asset ${name} is not uniquely completed by ${bot_name}." >&2
+              exit 1
+            fi
+            asset_id="$(
+              jq -r --arg name "${name}" '.[] | select(.name == $name) | .id' \
+                "${remote_assets}"
+            )"
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "${post_publish_dir}/${name}"
+            if ! cmp --silent "${RUNNER_TEMP}/release-assets/${name}" \
+              "${post_publish_dir}/${name}"; then
+              echo "Published immutable release asset ${name} differs from validated bytes." >&2
+              exit 1
+            fi
+          done < "${local_names}"
+
+      - name: Verify release and every asset attestation
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          retry_verification() {
+            local attempt delay
+            for attempt in 1 2 3 4 5 6 7 8; do
+              if "$@"; then
+                return 0
+              fi
+              if ((attempt == 8)); then
+                return 1
+              fi
+              delay=$((1 << attempt))
+              if ((delay > 15)); then
+                delay=15
+              fi
+              sleep "${delay}"
+            done
+          }
+
+          if ! retry_verification gh release verify "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}"; then
+            echo "GitHub did not produce a valid release attestation within the retry bound." >&2
+            exit 1
+          fi
+          while IFS= read -r name; do
+            if ! retry_verification gh release verify-asset "${RELEASE_TAG}" \
+              "${RUNNER_TEMP}/release-assets/${name}" --repo "${GITHUB_REPOSITORY}"; then
+              echo "GitHub did not verify release asset ${name} within the retry bound." >&2
+              exit 1
+            fi
+          done < <(
+            find "${RUNNER_TEMP}/release-assets" -mindepth 1 -maxdepth 1 -type f \
+              -printf '%f\n' | LC_ALL=C sort
+          )

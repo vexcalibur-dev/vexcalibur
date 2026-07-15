@@ -418,6 +418,20 @@ jobs:
           VEXCALIBUR_WHEEL: ${{ steps.wheel.outputs.path }}
         run: make release-evidence-check
 
+  publication-contract:
+    name: Immutable publication contract
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/release-validation.yml
+    with:
+      release-sha: ${{ github.sha }}
+      release-tag: v0.0.0
+      release-version: 0.0.0
+      publication-only: true
+      synthetic-ci-version: true
+
   docs:
     name: Build docs
     runs-on: ubuntu-latest
@@ -469,12 +483,12 @@ jobs:
   ci:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [quality, workflow-lint, security, test, fuzz-smoke, build, installed-cli, openvex-interoperability, csaf-conformance, release-evidence, docs]
+    needs: [quality, workflow-lint, security, test, fuzz-smoke, build, installed-cli, openvex-interoperability, csaf-conformance, release-evidence, publication-contract, docs]
     if: always() && github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     steps:
       - name: Check required jobs
         run: |
-          for result in "${{ needs.quality.result }}" "${{ needs.workflow-lint.result }}" "${{ needs.security.result }}" "${{ needs.test.result }}" "${{ needs.fuzz-smoke.result }}" "${{ needs.build.result }}" "${{ needs.installed-cli.result }}" "${{ needs.openvex-interoperability.result }}" "${{ needs.csaf-conformance.result }}" "${{ needs.release-evidence.result }}" "${{ needs.docs.result }}"; do
+          for result in "${{ needs.quality.result }}" "${{ needs.workflow-lint.result }}" "${{ needs.security.result }}" "${{ needs.test.result }}" "${{ needs.fuzz-smoke.result }}" "${{ needs.build.result }}" "${{ needs.installed-cli.result }}" "${{ needs.openvex-interoperability.result }}" "${{ needs.csaf-conformance.result }}" "${{ needs.release-evidence.result }}" "${{ needs.publication-contract.result }}" "${{ needs.docs.result }}"; do
             if [ "$result" != "success" ]; then
               echo "Required job failed or was skipped: $result"
               exit 1

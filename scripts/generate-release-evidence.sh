@@ -139,6 +139,7 @@ fi
 cp -- "$review" "$staging_dir/review.json"
 cp -- "$findings" "$staging_dir/findings.json"
 
+raw_constraints="$temporary_root/runtime-constraints.txt"
 "$uv_bin" export \
   --quiet \
   --frozen \
@@ -146,7 +147,11 @@ cp -- "$findings" "$staging_dir/findings.json"
   --no-emit-project \
   --no-annotate \
   --no-header \
-  --output-file "$staging_dir/runtime-constraints.txt"
+  --output-file "$raw_constraints"
+{
+  printf '%s\n' '--require-hashes' '--only-binary :all:' ''
+  cat -- "$raw_constraints"
+} >"$staging_dir/runtime-constraints.txt"
 
 raw_sbom="$temporary_root/uv-export.cdx.json"
 "$uv_bin" export \

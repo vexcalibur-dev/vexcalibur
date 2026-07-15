@@ -4,7 +4,9 @@ import copy
 import json
 import stat
 import subprocess
+import tarfile
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -46,6 +48,20 @@ def _write_test_wheel(
             wheel.writestr(member, release_evidence.canonical_json(scm_metadata))
 
 
+def _write_test_sdist(path: Path, *, version: str = "0.4.0", commit: str = "a" * 40) -> None:
+    metadata = (f"Metadata-Version: 2.4\nName: vexcalibur\nVersion: {version}\n").encode()
+    member = tarfile.TarInfo(f"vexcalibur-{version}/PKG-INFO")
+    member.size = len(metadata)
+    version_source = (
+        f"__version__ = version = '{version}'\n__commit_id__ = commit_id = 'g{commit[:10]}'\n"
+    ).encode()
+    version_member = tarfile.TarInfo(f"vexcalibur-{version}/src/vexcalibur/_version.py")
+    version_member.size = len(version_source)
+    with tarfile.open(path, "w:gz") as sdist:
+        sdist.addfile(member, BytesIO(metadata))
+        sdist.addfile(version_member, BytesIO(version_source))
+
+
 def _write_integrity_bundle(tmp_path: Path) -> Path:
     bundle = tmp_path / "integrity-bundle"
     bundle.mkdir()
@@ -63,6 +79,74 @@ def _write_integrity_bundle(tmp_path: Path) -> Path:
     (bundle / "manifest.json").write_text(release_evidence.canonical_json(manifest))
     release_evidence.write_checksums(bundle)
     return bundle
+
+
+def _write_zero_publication_inventory(
+    tmp_path: Path, *, source_tree_clean: bool = True
+) -> tuple[Path, Path]:
+    inputs = tmp_path / "inventory-inputs"
+    inputs.mkdir()
+    for source, name in (
+        (PRODUCTION_REVIEW, "review.json"),
+        (PRODUCTION_FINDINGS, "findings.json"),
+    ):
+        (inputs / name).write_bytes(source.read_bytes())
+    (inputs / "runtime-constraints.txt").write_text(
+        "--require-hashes\n--only-binary :all:\n\nexample==1 \\\n"
+        "    --hash=sha256:" + "a" * 64 + "\n"
+    )
+    (inputs / "sbom.cdx.json").write_text(
+        release_evidence.canonical_json(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.5",
+                "version": 1,
+                "metadata": {
+                    "timestamp": "2026-07-15T17:05:56Z",
+                    "component": {
+                        "type": "application",
+                        "name": "vexcalibur",
+                        "version": "0.4.0",
+                        "purl": "pkg:pypi/vexcalibur@0.4.0",
+                        "bom-ref": "pkg:pypi/vexcalibur@0.4.0",
+                        "properties": [
+                            {
+                                "name": "vexcalibur:source:uv-lock-sha256",
+                                "value": release_evidence.sha256_file(LOCK),
+                            }
+                        ],
+                    },
+                },
+                "components": [],
+            }
+        )
+    )
+    wheel = tmp_path / "vexcalibur-0.4.0-py3-none-any.whl"
+    _write_test_wheel(wheel, commit="a" * 40)
+    inventory = tmp_path / "inventory"
+    release_evidence.prepare_publication_inventory(
+        output_dir=inventory,
+        release_sha="a" * 40,
+        release_version="0.4.0",
+        source_date_epoch=1_784_135_156,
+        lock_path=LOCK,
+        review_path=inputs / "review.json",
+        findings_path=inputs / "findings.json",
+        constraints_path=inputs / "runtime-constraints.txt",
+        sbom_path=inputs / "sbom.cdx.json",
+        uv_version="0.11.17",
+        source_tree_clean=source_tree_clean,
+    )
+    return inventory, wheel
+
+
+def _write_zero_vex_output(path: Path) -> None:
+    path.mkdir()
+    (path / "vex.cdx.json").write_text(
+        release_evidence.canonical_json(
+            {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1}
+        )
+    )
 
 
 def test_checked_production_review_is_bound_to_the_lock_and_has_zero_findings() -> None:
@@ -188,6 +272,57 @@ def test_wheel_source_rejects_nonregular_unix_members(tmp_path: Path, unix_mode:
         release_evidence.validate_wheel_source(wheel, release_sha="a" * 40)
 
 
+def test_wheel_source_rejects_duplicate_and_traversal_members(tmp_path: Path) -> None:
+    wheel = tmp_path / "vexcalibur-0.4.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("../outside", "bad")
+        archive.writestr(
+            "vexcalibur-0.4.0.dist-info/METADATA",
+            "Name: vexcalibur\nVersion: 0.4.0\n",
+        )
+        archive.writestr(
+            "vexcalibur-0.4.0.dist-info/scm_version.json",
+            release_evidence.canonical_json({"node": "g" + "a" * 40, "dirty": False}),
+        )
+
+    with pytest.raises(release_evidence.EvidenceError, match="unsafe archive member"):
+        release_evidence.validate_wheel_source(wheel, release_sha="a" * 40)
+
+
+@pytest.mark.parametrize(
+    "member_name",
+    ["C:/outside.txt", "c:relative.txt", "vexcalibur/control\nname", "vexcalibur/del\x7fname"],
+)
+def test_archive_member_names_reject_drive_qualified_and_control_characters(
+    member_name: str,
+) -> None:
+    with pytest.raises(release_evidence.EvidenceError, match="unsafe archive member"):
+        release_evidence._validate_archive_member_name(member_name, artifact="archive")
+
+
+def test_archive_member_budget_rejects_decompression_bombs() -> None:
+    member = zipfile.ZipInfo("large.bin")
+    member.file_size = release_evidence.MAX_ARCHIVE_UNCOMPRESSED_BYTES + 1
+
+    with pytest.raises(release_evidence.EvidenceError, match="uncompressed byte limit"):
+        release_evidence._validate_zip_members([member])
+
+
+def test_distribution_metadata_rejects_sdist_from_another_commit(tmp_path: Path) -> None:
+    wheel = tmp_path / "vexcalibur-0.4.0-py3-none-any.whl"
+    _write_test_wheel(wheel, commit="a" * 40)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist, commit="b" * 40)
+
+    with pytest.raises(release_evidence.EvidenceError, match="sdist SCM commit"):
+        release_evidence._validate_distribution_metadata(
+            wheel_path=wheel,
+            sdist_path=sdist,
+            expected_version="0.4.0",
+            expected_release_sha="a" * 40,
+        )
+
+
 @pytest.mark.parametrize("analysis_state", ["not_affected", "resolved", None])
 def test_review_rejects_stronger_or_implicit_analysis_states(
     analysis_state: str | None,
@@ -301,6 +436,108 @@ def test_existing_nonempty_goldens_are_cross_format_equivalent() -> None:
         "false_positive",
         "not_affected",
     }
+
+
+def test_cyclonedx_assertions_reject_ambiguous_component_identity() -> None:
+    document = {
+        "components": [
+            {"bom-ref": "duplicate", "purl": "pkg:pypi/evil@1"},
+            {"bom-ref": "duplicate", "purl": "pkg:pypi/expected@1"},
+        ],
+        "vulnerabilities": [
+            {
+                "id": "CVE-2099-1",
+                "analysis": {"state": "in_triage"},
+                "affects": [{"ref": "duplicate"}],
+            }
+        ],
+    }
+
+    with pytest.raises(release_evidence.EvidenceError, match="duplicate bom-ref"):
+        release_evidence._cyclonedx_assertions(document)
+
+
+def test_csaf_assertions_reject_ambiguous_product_identity() -> None:
+    document = {
+        "product_tree": {
+            "full_product_names": [
+                {
+                    "product_id": "duplicate",
+                    "product_identification_helper": {"purl": "pkg:pypi/evil@1"},
+                },
+                {
+                    "product_id": "duplicate",
+                    "product_identification_helper": {"purl": "pkg:pypi/expected@1"},
+                },
+            ]
+        },
+        "vulnerabilities": [
+            {
+                "cve": "CVE-2099-1",
+                "notes": [{"text": "Original Vexcalibur analysis state: in_triage"}],
+                "product_status": {"under_investigation": ["duplicate"]},
+            }
+        ],
+    }
+
+    with pytest.raises(release_evidence.EvidenceError, match="duplicate product_id"):
+        release_evidence._csaf_assertions(document)
+
+
+@pytest.mark.parametrize(
+    "product",
+    [
+        {
+            "@id": "pkg:pypi/evil@1",
+            "identifiers": {"purl": "pkg:pypi/expected@1"},
+        },
+        {
+            "@id": "pkg:pypi/expected@1",
+            "identifiers": {"purl": "pkg:pypi/expected@1"},
+            "subcomponents": [{"@id": "pkg:pypi/evil@1"}],
+        },
+    ],
+)
+def test_openvex_assertions_reject_ambiguous_product_identity(
+    product: dict[str, object],
+) -> None:
+    document = {
+        "statements": [
+            {
+                "vulnerability": {"name": "CVE-2099-1"},
+                "status": "under_investigation",
+                "status_notes": "Original Vexcalibur analysis state: in_triage",
+                "products": [product],
+            }
+        ]
+    }
+
+    with pytest.raises(release_evidence.EvidenceError, match="OpenVEX product"):
+        release_evidence._openvex_assertions(document)
+
+
+def test_openvex_assertions_reject_ambiguous_vulnerability_identity() -> None:
+    document = {
+        "statements": [
+            {
+                "vulnerability": {
+                    "name": "CVE-2099-1",
+                    "@id": "https://evil.example/CVE-2099-2",
+                },
+                "status": "under_investigation",
+                "status_notes": "Original Vexcalibur analysis state: in_triage",
+                "products": [
+                    {
+                        "@id": "pkg:pypi/expected@1",
+                        "identifiers": {"purl": "pkg:pypi/expected@1"},
+                    }
+                ],
+            }
+        ]
+    }
+
+    with pytest.raises(release_evidence.EvidenceError, match="vulnerability identity"):
+        release_evidence._openvex_assertions(document)
 
 
 def test_zero_finding_manifest_records_omissions_and_sorted_checksums(tmp_path: Path) -> None:
@@ -438,6 +675,264 @@ def test_checksum_verifier_rejects_incorrect_manifest_size(tmp_path: Path) -> No
 
     with pytest.raises(release_evidence.EvidenceError, match="artifact size mismatch"):
         release_evidence.verify_bundle(bundle)
+
+
+def test_hashed_file_uri_is_absolute_encoded_and_digest_bound(tmp_path: Path) -> None:
+    artifact = tmp_path / "wheel with spaces.whl"
+    artifact.write_bytes(b"wheel bytes")
+
+    uri = release_evidence.hashed_file_uri(artifact)
+
+    assert uri.startswith("file://")
+    assert "wheel%20with%20spaces.whl" in uri
+    assert uri.endswith(f"#sha256={release_evidence.sha256_file(artifact)}")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "example>=1 \\\n    --hash=sha256:" + "a" * 64 + "\n",
+        "example @ https://example.test/example.whl \\\n    --hash=sha256:" + "a" * 64 + "\n",
+        "--find-links https://example.test/simple\n",
+        "-r another.txt\n",
+        "example==1\n",
+        "example==1 \\\n    --hash=sha256:" + "a" * 64 + " \\\n    --no-binary :all:\n",
+    ],
+)
+def test_runtime_constraints_reject_weakened_entries(tmp_path: Path, body: str) -> None:
+    constraints = tmp_path / "constraints.txt"
+    constraints.write_text("--require-hashes\n--only-binary :all:\n\n" + body)
+
+    with pytest.raises(release_evidence.EvidenceError, match="runtime constraint"):
+        release_evidence._validate_runtime_constraints(constraints)
+
+
+def test_publication_inventory_rejects_self_checksummed_constraint_forgery(
+    tmp_path: Path,
+) -> None:
+    inventory, _ = _write_zero_publication_inventory(tmp_path)
+    constraints = inventory / "runtime-constraints.txt"
+    constraints.write_text(
+        "--require-hashes\n--only-binary :all:\n\n--find-links https://example.test/simple\n"
+    )
+    manifest_path = inventory / "manifest.json"
+    manifest = release_evidence.load_json(manifest_path)
+    record = next(
+        item for item in manifest["artifacts"] if item["name"] == "runtime-constraints.txt"
+    )
+    record["sha256"] = release_evidence.sha256_file(constraints)
+    record["size"] = constraints.stat().st_size
+    manifest_path.write_text(release_evidence.canonical_json(manifest))
+    release_evidence.write_checksums(inventory)
+
+    with pytest.raises(release_evidence.EvidenceError, match="runtime constraint"):
+        release_evidence.verify_publication_inventory(
+            inventory_dir=inventory,
+            expected_release_sha="a" * 40,
+            expected_release_version="0.4.0",
+        )
+
+
+def test_publication_finalization_binds_distributions_and_action_output(tmp_path: Path) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+    action_commit = release_evidence.PUBLICATION_ACTION_COMMIT
+    bundle = tmp_path / "publication"
+
+    release_evidence.finalize_publication_bundle(
+        output_dir=bundle,
+        inventory_dir=inventory,
+        wheel_path=wheel,
+        sdist_path=sdist,
+        direct_output_dir=direct_output,
+        action_output_dir=action_output,
+        release_tag="v0.4.0",
+        action_commit=action_commit,
+        expected_wheel_sha256=release_evidence.sha256_file(wheel),
+        expected_sdist_sha256=release_evidence.sha256_file(sdist),
+    )
+    release_evidence.verify_publication_bundle(
+        bundle_dir=bundle,
+        expected_release_tag="v0.4.0",
+        expected_release_sha="a" * 40,
+        expected_action_commit=action_commit,
+    )
+    release_evidence.verify_publication_bundle(
+        bundle_dir=bundle,
+        expected_release_tag="v0.4.0",
+        expected_release_sha="a" * 40,
+        expected_action_commit=None,
+    )
+
+    manifest = release_evidence.load_json(bundle / "manifest.json")
+    assert manifest["schema_version"] == 2
+    assert manifest["intended_use"] == "immutable_release_candidate"
+    assert manifest["publication"]["release_tag"] == "v0.4.0"
+    assert manifest["publication"]["action"]["commit"] == action_commit
+    assert (
+        manifest["publication"]["payload_digest_algorithm"]
+        == release_evidence.PAYLOAD_DIGEST_ALGORITHM
+    )
+    assert (
+        manifest["publication"]["action"]["payload_sha256"]
+        == manifest["publication"]["direct_generation"]["payload_sha256"]
+    )
+    assert manifest["validation"]["action_local_wheel_equivalence"] == "passed"
+    assert (bundle / wheel.name).read_bytes() == wheel.read_bytes()
+    assert (bundle / sdist.name).read_bytes() == sdist.read_bytes()
+    assert (bundle / "uv.lock").read_bytes() == LOCK.read_bytes()
+    checksum_names = {
+        line.split("  ", maxsplit=1)[1] for line in (bundle / "SHA256SUMS").read_text().splitlines()
+    }
+    assert wheel.name in checksum_names
+    assert sdist.name in checksum_names
+
+
+def test_publication_assets_are_reproducible_across_recovery_runs(tmp_path: Path) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+
+    bundles = [tmp_path / "first-publication", tmp_path / "recovery-publication"]
+    for bundle in bundles:
+        release_evidence.finalize_publication_bundle(
+            output_dir=bundle,
+            inventory_dir=inventory,
+            wheel_path=wheel,
+            sdist_path=sdist,
+            direct_output_dir=direct_output,
+            action_output_dir=action_output,
+            release_tag="v0.4.0",
+            action_commit=release_evidence.PUBLICATION_ACTION_COMMIT,
+            expected_wheel_sha256=release_evidence.sha256_file(wheel),
+            expected_sdist_sha256=release_evidence.sha256_file(sdist),
+        )
+
+    first_files = {path.name: path.read_bytes() for path in bundles[0].iterdir()}
+    recovery_files = {path.name: path.read_bytes() for path in bundles[1].iterdir()}
+    assert recovery_files == first_files
+
+
+def test_publication_finalization_rejects_action_mismatch_before_copy(
+    tmp_path: Path,
+) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    action_output.mkdir()
+    (action_output / "vex.cdx.json").write_text("different\n")
+    bundle = tmp_path / "publication"
+
+    with pytest.raises(release_evidence.EvidenceError, match="Action output differs"):
+        release_evidence.finalize_publication_bundle(
+            output_dir=bundle,
+            inventory_dir=inventory,
+            wheel_path=wheel,
+            sdist_path=sdist,
+            direct_output_dir=direct_output,
+            action_output_dir=action_output,
+            release_tag="v0.4.0",
+            action_commit=release_evidence.PUBLICATION_ACTION_COMMIT,
+            expected_wheel_sha256=release_evidence.sha256_file(wheel),
+            expected_sdist_sha256=release_evidence.sha256_file(sdist),
+        )
+
+    assert not bundle.exists()
+
+
+def test_publication_finalization_never_clobbers_an_existing_asset(tmp_path: Path) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+    bundle = tmp_path / "publication"
+    bundle.mkdir()
+    existing = bundle / wheel.name
+    existing.write_bytes(b"must not be replaced")
+
+    with pytest.raises(release_evidence.EvidenceError, match="output already exists"):
+        release_evidence.finalize_publication_bundle(
+            output_dir=bundle,
+            inventory_dir=inventory,
+            wheel_path=wheel,
+            sdist_path=sdist,
+            direct_output_dir=direct_output,
+            action_output_dir=action_output,
+            release_tag="v0.4.0",
+            action_commit=release_evidence.PUBLICATION_ACTION_COMMIT,
+            expected_wheel_sha256=release_evidence.sha256_file(wheel),
+            expected_sdist_sha256=release_evidence.sha256_file(sdist),
+        )
+
+    assert existing.read_bytes() == b"must not be replaced"
+
+
+def test_publication_verifier_rejects_a_coherently_checksummed_extra_asset(
+    tmp_path: Path,
+) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+    action_commit = release_evidence.PUBLICATION_ACTION_COMMIT
+    bundle = tmp_path / "publication"
+    release_evidence.finalize_publication_bundle(
+        output_dir=bundle,
+        inventory_dir=inventory,
+        wheel_path=wheel,
+        sdist_path=sdist,
+        direct_output_dir=direct_output,
+        action_output_dir=action_output,
+        release_tag="v0.4.0",
+        action_commit=action_commit,
+        expected_wheel_sha256=release_evidence.sha256_file(wheel),
+        expected_sdist_sha256=release_evidence.sha256_file(sdist),
+    )
+    extra = bundle / "unexpected.txt"
+    extra.write_text("unexpected\n")
+    manifest_path = bundle / "manifest.json"
+    manifest = release_evidence.load_json(manifest_path)
+    manifest["artifacts"].append(
+        {
+            "name": extra.name,
+            "sha256": release_evidence.sha256_file(extra),
+            "size": extra.stat().st_size,
+        }
+    )
+    manifest["artifacts"].sort(key=lambda record: record["name"])
+    manifest_path.write_text(release_evidence.canonical_json(manifest))
+    release_evidence.write_checksums(bundle)
+
+    with pytest.raises(release_evidence.EvidenceError, match="asset file set differs"):
+        release_evidence.verify_publication_bundle(
+            bundle_dir=bundle,
+            expected_release_tag="v0.4.0",
+            expected_release_sha="a" * 40,
+            expected_action_commit=action_commit,
+        )
+
+
+def test_publication_requires_clean_production_evidence(tmp_path: Path) -> None:
+    with pytest.raises(release_evidence.EvidenceError, match="clean source tree"):
+        _write_zero_publication_inventory(tmp_path, source_tree_clean=False)
 
 
 @pytest.mark.parametrize(
