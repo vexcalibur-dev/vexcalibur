@@ -173,6 +173,37 @@ def test_vendored_csaf_schema_has_the_pinned_oasis_hash() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "source_url",
+    (
+        "https://audit-user@example.test/advisory",
+        "https://audit-user:super-secret@example.test/advisory",  # pragma: allowlist secret
+        "https://audit%2Duser:super%2Dsecret@example.test/advisory",  # pragma: allowlist secret
+    ),
+)
+def test_csaf_renderer_rejects_source_url_userinfo_without_echoing_it(source_url: str) -> None:
+    finding = _finding(source_url=source_url)
+
+    with pytest.raises(CsafRenderError, match="must not include userinfo") as captured:
+        _render(finding)
+
+    assert "audit" not in str(captured.value)
+
+
+def test_csaf_document_renderer_rejects_conflicting_product_version() -> None:
+    finding = _finding()
+    document = vex_document_from_findings(components=_components(), findings=(finding,))
+    product = replace(document.products[0], version="9.9")
+    document = replace(
+        document,
+        products=(product,),
+        assertions=(replace(document.assertions[0], product=product),),
+    )
+
+    with pytest.raises(CsafRenderError, match="conflicting version identity"):
+        Csaf20VexJsonRenderer(metadata=_metadata()).render_document(document=document)
+
+
 def test_csaf_compatibility_renderer_adapts_then_delegates() -> None:
     components = _components()
     finding = _finding(component=components[0])

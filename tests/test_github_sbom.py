@@ -388,6 +388,113 @@ def test_component_identities_from_github_spdx_sbom_rejects_invalid_purl() -> No
         component_identities_from_github_spdx_sbom(raw_response, source="owner/repo")
 
 
+def test_component_identities_from_github_spdx_sbom_rejects_conflicting_versions() -> None:
+    raw_response = {
+        "spdxVersion": "SPDX-2.3",
+        "packages": [
+            {
+                "SPDXID": "SPDXRef-demo",
+                "name": "demo",
+                "versionInfo": "2.0",
+                "externalRefs": [
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": "pkg:pypi/demo@1.0",
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(GithubSbomClientError, match=r"version '2.0'.*version '1.0'"):
+        component_identities_from_github_spdx_sbom(raw_response, source="owner/repo")
+
+
+def test_component_identities_from_github_spdx_sbom_compares_decoded_version() -> None:
+    raw_response = {
+        "spdxVersion": "SPDX-2.3",
+        "packages": [
+            {
+                "SPDXID": "SPDXRef-demo",
+                "name": "demo",
+                "versionInfo": "1.0",
+                "externalRefs": [
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": "pkg:pypi/demo@1%2E0",
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert (
+        component_identities_from_github_spdx_sbom(
+            raw_response,
+            source="owner/repo",
+        )[0].purl.to_string()
+        == "pkg:pypi/demo@1.0"
+    )
+
+
+def test_component_identities_from_github_spdx_sbom_rejects_distinct_purls() -> None:
+    raw_response = {
+        "spdxVersion": "SPDX-2.3",
+        "packages": [
+            {
+                "SPDXID": "SPDXRef-demo",
+                "name": "demo",
+                "externalRefs": [
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": "pkg:pypi/demo@1.0",
+                    },
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": "pkg:pypi/demo@2.0",
+                    },
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(GithubSbomClientError, match="multiple distinct package URL"):
+        component_identities_from_github_spdx_sbom(raw_response, source="owner/repo")
+
+
+def test_component_identities_from_github_spdx_sbom_allows_equivalent_purl_refs() -> None:
+    raw_response = {
+        "spdxVersion": "SPDX-2.3",
+        "packages": [
+            {
+                "SPDXID": "SPDXRef-demo",
+                "name": "demo",
+                "versionInfo": "1.0",
+                "externalRefs": [
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": "pkg:pypi/demo@1%2E0",
+                    },
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": "pkg:pypi/demo@1.0",
+                    },
+                ],
+            }
+        ],
+    }
+
+    components = component_identities_from_github_spdx_sbom(raw_response, source="owner/repo")
+
+    assert [component.purl.to_string() for component in components] == ["pkg:pypi/demo@1.0"]
+
+
 def test_github_sbom_client_fetches_components_with_auth_header() -> None:
     captured_requests: list[httpx.Request] = []
 
@@ -611,6 +718,57 @@ def test_github_sbom_client_rejects_oversized_response() -> None:
         client = GithubSbomClient(client=http_client)
 
         with pytest.raises(GithubSbomClientError, match="byte limit"):
+            client.component_identities("vexcalibur-dev/vexcalibur")
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    (
+        (
+            b'{"spdxVersion":"SPDX-2.3","spdxVersion":"SPDX-2.3","packages":[]}',
+            "duplicate JSON object keys",
+        ),
+        (
+            b'{"spdxVersion":"SPDX-2.3","packages":['
+            b'{"name":"demo","name":"other","externalRefs":[]}]}',
+            "duplicate JSON object keys",
+        ),
+        (
+            b'{"spdxVersion":"SPDX-2.3","packages":[],"extra":'
+            + b"[" * 2_000
+            + b"]" * 2_000
+            + b"}",
+            "too deeply nested",
+        ),
+        (
+            b'{"spdxVersion":"SPDX-2.3","packages":[],"extra":' + b"1" * 1_001 + b"}",
+            "oversized JSON integer",
+        ),
+        (b"\xff", "UTF-8 JSON"),
+        (b"{", "must be JSON"),
+    ),
+)
+def test_github_sbom_client_normalizes_strict_json_failures(
+    document: bytes,
+    message: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/dependency-graph/sbom/generate-report"):
+            return httpx.Response(
+                201,
+                json={
+                    "sbom_url": (
+                        "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+                        "dependency-graph/sbom/fetch-report/report-id"
+                    )
+                },
+            )
+        return httpx.Response(200, content=document)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = GithubSbomClient(client=http_client)
+
+        with pytest.raises(GithubSbomClientError, match=message):
             client.component_identities("vexcalibur-dev/vexcalibur")
 
 

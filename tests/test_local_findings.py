@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -374,20 +375,101 @@ def test_load_local_findings_rejects_non_utf8_json(tmp_path: Path) -> None:
 
 
 def test_load_local_findings_rejects_deeply_nested_json(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     findings_path = tmp_path / "findings.json"
-    findings_path.write_text("{}", encoding="utf-8")
+    findings_path.write_text("[" * 2_000 + "]" * 2_000, encoding="utf-8")
     components = load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")
-
-    def raise_recursion_error(*args: object, **kwargs: object) -> object:
-        raise RecursionError
-
-    monkeypatch.setattr("vexcalibur.sources.local.json.load", raise_recursion_error)
 
     with pytest.raises(LocalFindingsError, match="too deeply nested"):
         load_local_findings(
             findings_path,
             components=components,
         )
+
+
+@pytest.mark.parametrize(
+    "document",
+    (
+        '{"findings":[],"findings":[]}',
+        (
+            '{"findings":[{"id":"CVE-2026-0001","id":"CVE-2026-0002",'
+            '"component_ref":"component:django"}]}'
+        ),
+    ),
+)
+def test_load_local_findings_rejects_duplicate_keys_at_every_depth(
+    tmp_path: Path,
+    document: str,
+) -> None:
+    findings_path = tmp_path / "duplicate-key.json"
+    findings_path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(LocalFindingsError, match="duplicate JSON object keys"):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+def test_load_local_findings_rejects_oversized_json_integer(tmp_path: Path) -> None:
+    findings_path = tmp_path / "oversized-integer.json"
+    findings_path.write_text(
+        '{"findings":[],"untrusted":' + "1" * 1_001 + "}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LocalFindingsError, match="oversized JSON integer"):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+def test_load_local_findings_rejects_fifo_as_typed_source_error(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    os.mkfifo(findings_path)
+
+    with pytest.raises(LocalFindingsError, match="must resolve to a regular file"):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    (
+        "https://audit-user@example.test/advisory",
+        "https://audit-user:super-secret@example.test/advisory",  # pragma: allowlist secret
+        "https://audit%2Duser:super%2Dsecret@example.test/advisory",  # pragma: allowlist secret
+    ),
+)
+def test_load_local_findings_rejects_source_url_userinfo_without_echoing_it(
+    tmp_path: Path,
+    source_url: str,
+) -> None:
+    findings_path = tmp_path / "userinfo.json"
+    findings_path.write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "CVE-2026-0001",
+                        "component_ref": "component:django",
+                        "source_url": source_url,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LocalFindingsError, match="must not include userinfo") as captured:
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
+
+    assert "audit-user" not in str(captured.value)
+    assert "super-secret" not in str(captured.value)

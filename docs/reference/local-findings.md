@@ -1,8 +1,8 @@
 # Local findings format
 
-A local findings file supplies vulnerability and exploitability data without a network provider. The file must be UTF-8 JSON no larger than 5 MiB.
+A local findings file supplies vulnerability and exploitability data without a network provider. The file must resolve to a regular file and contain no more than 5 MiB of UTF-8 JSON. A symbolic link to a regular file is accepted. FIFOs, devices, sockets, directories, and links to those objects are rejected before content is read.
 
-The top-level value is an object with one required `findings` array. Unknown fields are rejected. The array may contain at most 10,000 items.
+The top-level value is an object with one required `findings` array. Unknown fields and duplicate object keys at any depth are rejected. JSON may contain at most 100 nested arrays or objects, and an integer literal may contain at most 1,000 decimal digits. The array may contain at most 10,000 items.
 
 ```json
 {
@@ -35,7 +35,7 @@ The top-level value is an object with one required `findings` array. Unknown fie
 | `component_ref` | One selector required | — | Non-empty component reference from the parsed SBOM. |
 | `purl` | One selector required | — | Valid package URL that matches exactly one parsed component. |
 | `source_name` | No | `Local` | Non-empty string. |
-| `source_url` | No | `https://vexcalibur.dev/sources/local` | HTTP or HTTPS URL with a host. CSAF output also requires ASCII RFC 3986 syntax. |
+| `source_url` | No | `https://vexcalibur.dev/sources/local` | HTTP or HTTPS URL with a host and no username or password. CSAF output also requires ASCII RFC 3986 syntax. |
 | `modified` | No | Omitted | ISO-8601 timestamp string. Naive values are treated as UTC. |
 | `analysis_state` | No | `in_triage` | One of the states listed below. |
 | `analysis_detail` | No | `Provided by local findings file; manual exploitability analysis required.` | Non-empty human-readable analysis. |
@@ -47,6 +47,8 @@ The top-level value is an object with one required `findings` array. Unknown fie
 Supported `analysis_state` values are `resolved`, `exploitable`, `in_triage`, `false_positive`, and `not_affected`.
 
 Supported `remediation_category` values are `mitigation`, `no_fix_planned`, `none_available`, `vendor_fix`, and `workaround`.
+
+Do not put credentials or secrets in `source_url`, including its query string. Vexcalibur rejects URL userinfo such as `user:password@host`. Query values may be serialized into every generated VEX format, so use an attributable public advisory URL rather than a signed or credential-bearing link.
 
 CycloneDX output ignores `action_statement`, `impact_statement`, `fixed_version`, and `remediation_category`. These fields do not change CycloneDX grouping, content, or document identity.
 

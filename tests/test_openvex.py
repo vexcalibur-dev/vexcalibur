@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 from packageurl import PackageURL
 
-from vexcalibur.document import VexDocument
+from vexcalibur.document import VexDocument, vex_document_from_findings
 from vexcalibur.domain import (
     ComponentIdentity,
     VexAnalysisState,
@@ -105,6 +105,43 @@ def test_render_openvex_matches_all_states_golden_and_official_schema() -> None:
     assert "Confirmed fixed product version: 1.2" in statements[0]["status_notes"]
     assert all("last_updated" not in statement for statement in statements)
     assert "last_updated" not in document
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    (
+        "https://audit-user@example.test/advisory",
+        "https://audit-user:super-secret@example.test/advisory",  # pragma: allowlist secret
+        "https://audit%2Duser:super%2Dsecret@example.test/advisory",  # pragma: allowlist secret
+    ),
+)
+def test_openvex_renderer_rejects_source_url_userinfo_without_echoing_it(
+    source_url: str,
+) -> None:
+    finding = _finding(source_url=source_url)
+
+    with pytest.raises(OpenVexRenderError, match="must not include userinfo") as captured:
+        render_openvex_json(
+            components=_components(),
+            findings=(finding,),
+            author="Vexcalibur Test Maintainers",
+        )
+
+    assert "audit" not in str(captured.value)
+
+
+def test_openvex_document_renderer_rejects_conflicting_product_version() -> None:
+    finding = _finding()
+    document = vex_document_from_findings(components=_components(), findings=(finding,))
+    product = replace(document.products[0], version="9.9")
+    document = replace(
+        document,
+        products=(product,),
+        assertions=(replace(document.assertions[0], product=product),),
+    )
+
+    with pytest.raises(OpenVexRenderError, match="conflicting version identity"):
+        OpenVexJsonRenderer(author="Vexcalibur Test Maintainers").render_document(document=document)
 
 
 def test_openvex_compatibility_renderer_adapts_then_delegates() -> None:

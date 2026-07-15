@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import codecs
-import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,7 +12,9 @@ from cyclonedx.model.component import Component
 from defusedxml import ElementTree as DefusedElementTree  # type: ignore[import-untyped]
 from defusedxml.common import DefusedXmlException  # type: ignore[import-untyped]
 
-from vexcalibur.domain import ComponentIdentity
+from vexcalibur.domain import ComponentIdentity, ComponentVersionError
+from vexcalibur.input_file import BoundedFileReadError, read_bounded_regular_file
+from vexcalibur.json_boundary import JsonFailureKind, StrictJsonError, strict_json_loads
 
 SUPPORTED_CYCLONEDX_VERSIONS = frozenset(("1.4", "1.5", "1.6"))
 SUPPORTED_CYCLONEDX_JSON_VERSIONS = SUPPORTED_CYCLONEDX_VERSIONS
@@ -81,9 +82,15 @@ def load_cyclonedx_sbom(path: Path) -> tuple[ComponentIdentity, ...]:
     """Load supported component identities from a CycloneDX JSON or XML SBOM."""
     raw_content = _read_sbom_bytes(path)
     if _looks_like_xml(raw_content):
-        return _component_identities_from_bom(_parse_cyclonedx_xml(raw_content, path=path))
+        return _component_identities_from_bom(
+            _parse_cyclonedx_xml(raw_content, path=path),
+            path=path,
+        )
 
-    return _component_identities_from_bom(_parse_cyclonedx_json(raw_content, path=path))
+    return _component_identities_from_bom(
+        _parse_cyclonedx_json(raw_content, path=path),
+        path=path,
+    )
 
 
 def load_cyclonedx_json(path: Path) -> tuple[ComponentIdentity, ...]:
@@ -93,28 +100,28 @@ def load_cyclonedx_json(path: Path) -> tuple[ComponentIdentity, ...]:
         msg = f"SBOM {path} appears to be XML; use load_cyclonedx_sbom for XML input"
         raise SbomError(msg)
 
-    return _component_identities_from_bom(_parse_cyclonedx_json(raw_content, path=path))
+    return _component_identities_from_bom(
+        _parse_cyclonedx_json(raw_content, path=path),
+        path=path,
+    )
 
 
 def _read_sbom_bytes(path: Path) -> bytes:
     try:
-        if path.stat().st_size > MAX_SBOM_BYTES:
-            msg = f"SBOM {path} exceeds the {MAX_SBOM_BYTES} byte limit"
-            raise SbomError(msg)
-        return path.read_bytes()
-    except OSError as exc:
-        msg = f"Could not read SBOM {path}: {exc}"
-        raise SbomError(msg) from exc
+        return read_bounded_regular_file(
+            path,
+            max_bytes=MAX_SBOM_BYTES,
+            description=f"SBOM {path}",
+        )
+    except BoundedFileReadError as exc:
+        raise SbomError(str(exc)) from exc
 
 
 def _parse_cyclonedx_json(raw_content: bytes, *, path: Path) -> Bom:
     try:
-        raw_bom = json.loads(raw_content.decode("utf-8"))
-    except UnicodeDecodeError as exc:
-        msg = f"SBOM {path} is not valid UTF-8 JSON"
-        raise SbomError(msg) from exc
-    except json.JSONDecodeError as exc:
-        msg = f"SBOM {path} is not valid JSON: {exc.msg}"
+        raw_bom = strict_json_loads(raw_content)
+    except StrictJsonError as exc:
+        msg = _sbom_json_error_message(path=path, error=exc)
         raise SbomError(msg) from exc
 
     _validate_cyclonedx_json_shape(raw_bom, path=path)
@@ -154,9 +161,19 @@ def _parse_cyclonedx_xml(raw_content: bytes, *, path: Path) -> Bom:
     return cast(Bom, bom)
 
 
-def _component_identities_from_bom(bom: Bom) -> tuple[ComponentIdentity, ...]:
+def _component_identities_from_bom(
+    bom: Bom,
+    *,
+    path: Path,
+) -> tuple[ComponentIdentity, ...]:
     components = _component_tree(bom)
-    identities = tuple(_component_identity(component) for component in components if component.purl)
+    try:
+        identities = tuple(
+            _component_identity(component) for component in components if component.purl
+        )
+    except ComponentVersionError as exc:
+        msg = f"SBOM {path} contains a component with conflicting version identity: {exc}"
+        raise SbomError(msg) from exc
     _validate_unique_component_refs(identities)
     return tuple(
         sorted(
@@ -164,6 +181,18 @@ def _component_identities_from_bom(bom: Bom) -> tuple[ComponentIdentity, ...]:
             key=lambda component: (component.purl.to_string(), component.ref),
         )
     )
+
+
+def _sbom_json_error_message(*, path: Path, error: StrictJsonError) -> str:
+    if error.kind is JsonFailureKind.ENCODING:
+        return f"SBOM {path} is not valid UTF-8 JSON"
+    if error.kind is JsonFailureKind.DUPLICATE_KEY:
+        return f"SBOM {path} must not contain duplicate JSON object keys"
+    if error.kind is JsonFailureKind.NESTING:
+        return f"SBOM {path} is too deeply nested"
+    if error.kind is JsonFailureKind.INTEGER:
+        return f"SBOM {path} contains an oversized JSON integer"
+    return f"SBOM {path} is not valid JSON: {error}"
 
 
 def _validate_cyclonedx_json_shape(raw_bom: Any, *, path: Path) -> None:

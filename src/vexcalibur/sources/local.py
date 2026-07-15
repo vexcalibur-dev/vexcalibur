@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -20,6 +19,9 @@ from vexcalibur.domain import (
     VulnerabilityFinding,
     VulnerabilitySourceError,
 )
+from vexcalibur.input_file import BoundedFileReadError, read_bounded_regular_file
+from vexcalibur.json_boundary import JsonFailureKind, StrictJsonError, strict_json_loads
+from vexcalibur.url_policy import UrlUserinfoError, reject_url_userinfo
 
 MAX_LOCAL_FINDINGS_BYTES = 5 * 1024 * 1024
 MAX_LOCAL_FINDINGS = 10_000
@@ -76,8 +78,8 @@ class _LocalFindingModel(BaseModel):
     @field_validator("source_url")
     @classmethod
     def _validate_source_url(cls, value: str) -> str:
-        parsed = urlparse(value)
         try:
+            parsed = urlparse(value)
             hostname = parsed.hostname
             port_is_valid = parsed.port is None or parsed.port >= 0
         except ValueError as exc:
@@ -91,6 +93,10 @@ class _LocalFindingModel(BaseModel):
         ):
             msg = "source_url must be an HTTP(S) URL with a host"
             raise ValueError(msg)
+        try:
+            reject_url_userinfo(value, field_name="source_url")
+        except UrlUserinfoError as exc:
+            raise ValueError(str(exc)) from exc
         return value
 
     @field_validator("modified", mode="before")
@@ -155,22 +161,18 @@ def load_local_findings(
 
 def _parse_local_findings_document(path: Path) -> _LocalFindingsDocument:
     try:
-        if path.stat().st_size > MAX_LOCAL_FINDINGS_BYTES:
-            msg = f"local findings {path} exceeds the {MAX_LOCAL_FINDINGS_BYTES} byte limit"
-            raise LocalFindingsError(msg)
-        with path.open(encoding="utf-8") as stream:
-            raw_document = json.load(stream)
-    except OSError as exc:
-        msg = f"Could not read local findings {path}: {exc}"
-        raise LocalFindingsError(msg) from exc
-    except UnicodeDecodeError as exc:
-        msg = f"Local findings {path} is not valid UTF-8 JSON"
-        raise LocalFindingsError(msg) from exc
-    except json.JSONDecodeError as exc:
-        msg = f"Local findings {path} is not valid JSON: {exc.msg}"
-        raise LocalFindingsError(msg) from exc
-    except RecursionError as exc:
-        msg = f"Local findings {path} is too deeply nested"
+        raw_content = read_bounded_regular_file(
+            path,
+            max_bytes=MAX_LOCAL_FINDINGS_BYTES,
+            description=f"local findings {path}",
+        )
+    except BoundedFileReadError as exc:
+        raise LocalFindingsError(str(exc)) from exc
+
+    try:
+        raw_document = strict_json_loads(raw_content)
+    except StrictJsonError as exc:
+        msg = _local_json_error_message(path=path, error=exc)
         raise LocalFindingsError(msg) from exc
 
     if not isinstance(raw_document, dict):
@@ -178,6 +180,18 @@ def _parse_local_findings_document(path: Path) -> _LocalFindingsDocument:
         raise LocalFindingsError(msg)
 
     return _validate_local_findings_document(raw_document, path=path)
+
+
+def _local_json_error_message(*, path: Path, error: StrictJsonError) -> str:
+    if error.kind is JsonFailureKind.ENCODING:
+        return f"Local findings {path} is not valid UTF-8 JSON"
+    if error.kind is JsonFailureKind.DUPLICATE_KEY:
+        return f"Local findings {path} must not contain duplicate JSON object keys"
+    if error.kind is JsonFailureKind.NESTING:
+        return f"Local findings {path} is too deeply nested"
+    if error.kind is JsonFailureKind.INTEGER:
+        return f"Local findings {path} contains an oversized JSON integer"
+    return f"Local findings {path} is not valid JSON: {error}"
 
 
 def _validate_local_findings_document(

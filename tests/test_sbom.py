@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -968,3 +969,138 @@ def test_load_cyclonedx_json_rejects_non_integer_bom_version(tmp_path: Path) -> 
 
     with pytest.raises(SbomError, match=r"version.*integer"):
         load_cyclonedx_json(sbom_path)
+
+
+@pytest.mark.parametrize(
+    "document",
+    (
+        '{"bomFormat":"CycloneDX","bomFormat":"CycloneDX","specVersion":"1.6"}',
+        (
+            '{"bomFormat":"CycloneDX","specVersion":"1.6","components":['
+            '{"type":"library","name":"demo","version":"1.0","version":"2.0",'
+            '"purl":"pkg:pypi/demo@1.0"}]}'
+        ),
+    ),
+)
+def test_load_cyclonedx_json_rejects_duplicate_keys_at_every_depth(
+    tmp_path: Path,
+    document: str,
+) -> None:
+    sbom_path = tmp_path / "duplicate-key.json"
+    sbom_path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(SbomError, match="duplicate JSON object keys"):
+        load_cyclonedx_json(sbom_path)
+
+
+def test_load_cyclonedx_json_rejects_excessive_json_nesting(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "deep.json"
+    nested = "[" * 2_000 + "]" * 2_000
+    sbom_path.write_text(
+        '{"bomFormat":"CycloneDX","specVersion":"1.6","metadata":{"extra":' + nested + "}}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match="too deeply nested"):
+        load_cyclonedx_json(sbom_path)
+
+
+def test_load_cyclonedx_json_rejects_oversized_json_integer(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "oversized-integer.json"
+    sbom_path.write_text(
+        '{"bomFormat":"CycloneDX","specVersion":"1.6","version":' + "1" * 1_001 + "}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match="oversized JSON integer"):
+        load_cyclonedx_json(sbom_path)
+
+
+@pytest.mark.parametrize("loader", (load_cyclonedx_json, load_cyclonedx_sbom))
+def test_cyclonedx_loaders_reject_fifo_as_typed_sbom_error(
+    tmp_path: Path,
+    loader: object,
+) -> None:
+    fifo = tmp_path / "sbom.json"
+    os.mkfifo(fifo)
+
+    with pytest.raises(SbomError, match="must resolve to a regular file"):
+        loader(fifo)  # type: ignore[operator]
+
+
+def test_load_cyclonedx_json_rejects_conflicting_component_versions(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "conflicting-version.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "components": [{
+            "type": "library",
+            "name": "demo",
+            "version": "2.0",
+            "purl": "pkg:pypi/demo@1.0"
+          }]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match=r"component version '2.0'.*version '1.0'"):
+        load_cyclonedx_json(sbom_path)
+
+
+def test_load_cyclonedx_json_compares_decoded_purl_version(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "encoded-version.json"
+    sbom_path.write_text(
+        """
+        {
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.6",
+          "components": [{
+            "type": "library",
+            "name": "demo",
+            "version": "1.0",
+            "purl": "pkg:pypi/demo@1%2E0"
+          }]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    assert load_cyclonedx_json(sbom_path)[0].purl.to_string() == "pkg:pypi/demo@1.0"
+
+
+def test_load_cyclonedx_sbom_rejects_conflicting_xml_component_versions(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "conflicting-version.xml"
+    sbom_path.write_text(
+        _xml_bom(
+            "<components>"
+            + _xml_component(ref="component:demo", version="2.0", purl="pkg:pypi/demo@1.0")
+            + "</components>"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match=r"component version '2.0'.*version '1.0'"):
+        load_cyclonedx_sbom(sbom_path)
+
+
+def test_load_cyclonedx_sbom_compares_decoded_xml_purl_version(tmp_path: Path) -> None:
+    sbom_path = tmp_path / "encoded-version.xml"
+    sbom_path.write_text(
+        _xml_bom(
+            "<components>"
+            + _xml_component(
+                ref="component:demo",
+                version="1.0",
+                purl="pkg:pypi/demo@1%2E0",
+            )
+            + "</components>"
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_cyclonedx_sbom(sbom_path)[0].purl.to_string() == "pkg:pypi/demo@1.0"

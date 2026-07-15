@@ -11,6 +11,10 @@ class BaseUrlValidationError(ValueError):
     """Raised when a user-provided service base URL is unsafe or malformed."""
 
 
+class UrlUserinfoError(ValueError):
+    """Raised when a URL authority contains user credentials."""
+
+
 @dataclass(frozen=True)
 class ValidatedBaseUrl:
     """A normalized base URL and its parsed representation."""
@@ -52,3 +56,32 @@ def validate_base_url(
         raise BaseUrlValidationError(msg)
 
     return ValidatedBaseUrl(value=normalized, parsed=parsed)
+
+
+def reject_url_userinfo(value: str, *, field_name: str) -> None:
+    """Reject URL userinfo without including its value in an error."""
+    try:
+        parsed = urlparse(value)
+        username = parsed.username
+        password = parsed.password
+    except ValueError:
+        if _authority_contains_userinfo(value):
+            msg = f"{field_name} must not include userinfo"
+            raise UrlUserinfoError(msg) from None
+        # The owning boundary reports other malformed URLs according to its format.
+        return
+    if username is not None or password is not None:
+        msg = f"{field_name} must not include userinfo"
+        raise UrlUserinfoError(msg)
+
+
+def _authority_contains_userinfo(value: str) -> bool:
+    _, scheme_separator, remainder = value.partition("://")
+    if not scheme_separator:
+        if not value.startswith("//"):
+            return False
+        remainder = value[2:]
+    authority = remainder
+    for delimiter in "/?#":
+        authority = authority.partition(delimiter)[0]
+    return "@" in authority

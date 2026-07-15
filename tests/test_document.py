@@ -6,12 +6,17 @@ from packageurl import PackageURL
 from vexcalibur.document import (
     VexAnalysisQualifier,
     VexDisposition,
+    VexProduct,
+    VexProductIdentifier,
     VexProductIdentifierType,
     analysis_state,
+    product_purl,
+    validate_vex_document,
     vex_document_from_findings,
 )
 from vexcalibur.domain import (
     ComponentIdentity,
+    ComponentVersionError,
     VexAnalysisState,
     VexRemediationCategory,
     VulnerabilityFinding,
@@ -226,3 +231,86 @@ def test_document_values_are_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         document.products = ()  # type: ignore[misc]
+
+
+def test_component_identity_rejects_conflicting_explicit_and_purl_versions() -> None:
+    with pytest.raises(ComponentVersionError, match=r"version '2.0'.*version '1.0'"):
+        ComponentIdentity(
+            ref="component:demo",
+            name="demo",
+            version="2.0",
+            purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+        )
+
+
+def test_component_identity_compares_decoded_purl_version() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1%2E0"),
+    )
+
+    assert component.purl.to_string() == "pkg:pypi/demo@1.0"
+
+
+def test_product_boundary_rejects_conflicting_explicit_and_purl_versions() -> None:
+    product = VexProduct(
+        key="component:demo",
+        name="demo",
+        version="2.0",
+        identifiers=(
+            VexProductIdentifier(
+                type=VexProductIdentifierType.PURL,
+                value="pkg:pypi/demo@1.0",
+            ),
+        ),
+    )
+
+    with pytest.raises(VexRenderError, match="conflicting version identity"):
+        product_purl(product)
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    (
+        "https://audit-user@example.test/advisory",
+        "https://audit-user:super-secret@example.test/advisory",  # pragma: allowlist secret
+        "https://audit%2Duser:super%2Dsecret@example.test/advisory",  # pragma: allowlist secret
+        "https://audit-user:super-secret@[broken",  # pragma: allowlist secret
+    ),
+)
+def test_adapter_rejects_source_url_userinfo_without_echoing_it(source_url: str) -> None:
+    component = _component()
+    finding = replace(_finding(component), source_url=source_url)
+
+    with pytest.raises(VexRenderError, match="must not include userinfo") as captured:
+        vex_document_from_findings(components=(component,), findings=(finding,))
+
+    assert "audit-user" not in str(captured.value)
+    assert "super-secret" not in str(captured.value)
+
+
+def test_direct_document_boundary_rejects_source_url_userinfo() -> None:
+    component = _component()
+    document = vex_document_from_findings(
+        components=(component,),
+        findings=(_finding(component),),
+    )
+    vulnerability = replace(
+        document.vulnerabilities[0],
+        source_url=(
+            "https://audit-user:super-secret@example.test/advisory"  # pragma: allowlist secret
+        ),
+    )
+    document = replace(
+        document,
+        vulnerabilities=(vulnerability,),
+        assertions=(replace(document.assertions[0], vulnerability=vulnerability),),
+    )
+
+    with pytest.raises(VexRenderError, match="must not include userinfo") as captured:
+        validate_vex_document(document)
+
+    assert "audit-user" not in str(captured.value)
+    assert "super-secret" not in str(captured.value)

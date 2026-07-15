@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import time
@@ -15,7 +14,8 @@ from urllib.parse import ParseResult, quote, urlparse
 import httpx
 from packageurl import PackageURL
 
-from vexcalibur.domain import ComponentIdentity
+from vexcalibur.domain import ComponentIdentity, ComponentVersionError
+from vexcalibur.json_boundary import JsonFailureKind, StrictJsonError, strict_json_loads
 from vexcalibur.sbom import MAX_COMPONENTS, MAX_SBOM_BYTES, SbomError
 from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
@@ -444,18 +444,27 @@ def _read_limited_response_content(response: httpx.Response) -> bytes:
 
 def _json_object_from_response(raw_content: bytes, *, description: str) -> dict[str, Any]:
     try:
-        response_body = json.loads(raw_content.decode("utf-8"))
-    except UnicodeDecodeError as exc:
-        msg = f"{description} must be UTF-8 JSON"
-        raise GithubSbomClientError(msg) from exc
-    except json.JSONDecodeError as exc:
-        msg = f"{description} must be JSON"
+        response_body = strict_json_loads(raw_content)
+    except StrictJsonError as exc:
+        msg = _github_json_error_message(description=description, error=exc)
         raise GithubSbomClientError(msg) from exc
 
     if not isinstance(response_body, dict):
         msg = f"{description} must be a JSON object"
         raise GithubSbomClientError(msg)
     return response_body
+
+
+def _github_json_error_message(*, description: str, error: StrictJsonError) -> str:
+    if error.kind is JsonFailureKind.ENCODING:
+        return f"{description} must be UTF-8 JSON"
+    if error.kind is JsonFailureKind.DUPLICATE_KEY:
+        return f"{description} must not contain duplicate JSON object keys"
+    if error.kind is JsonFailureKind.NESTING:
+        return f"{description} is too deeply nested"
+    if error.kind is JsonFailureKind.INTEGER:
+        return f"{description} contains an oversized JSON integer"
+    return f"{description} must be JSON"
 
 
 def _report_poll_delay(*, response: httpx.Response, default_interval: float) -> float:
@@ -551,12 +560,16 @@ def _github_spdx_package_identity(
         raise GithubSbomClientError(msg)
 
     ref = spdx_id.strip() if isinstance(spdx_id, str) and spdx_id.strip() else purl.to_string()
-    return ComponentIdentity(
-        ref=ref,
-        name=name or purl.name,
-        version=version,
-        purl=purl,
-    )
+    try:
+        return ComponentIdentity(
+            ref=ref,
+            name=name or purl.name,
+            version=version,
+            purl=purl,
+        )
+    except ComponentVersionError as exc:
+        msg = f"GitHub SBOM {source} package has conflicting version identity: {exc}"
+        raise GithubSbomClientError(msg) from exc
 
 
 def _is_github_repository_package(
@@ -577,6 +590,7 @@ def _github_spdx_package_purl(package: dict[str, Any], *, source: str) -> Packag
     if not isinstance(external_refs, list):
         msg = f"GitHub SBOM {source} package externalRefs values must be lists"
         raise GithubSbomClientError(msg)
+    package_urls: dict[str, PackageURL] = {}
     for external_ref in external_refs:
         if not isinstance(external_ref, dict):
             msg = f"GitHub SBOM {source} package externalRefs entries must be objects"
@@ -590,11 +604,15 @@ def _github_spdx_package_purl(package: dict[str, Any], *, source: str) -> Packag
             msg = f"GitHub SBOM {source} package purl referenceLocator values must be strings"
             raise GithubSbomClientError(msg)
         try:
-            return PackageURL.from_string(reference_locator)
+            package_url = PackageURL.from_string(reference_locator)
         except ValueError as exc:
             msg = f"GitHub SBOM {source} package purl is invalid: {exc}"
             raise GithubSbomClientError(msg) from exc
-    return None
+        package_urls[package_url.to_string()] = package_url
+    if len(package_urls) > 1:
+        msg = f"GitHub SBOM {source} package has multiple distinct package URL references"
+        raise GithubSbomClientError(msg)
+    return next(iter(package_urls.values()), None)
 
 
 def _validate_unique_component_refs(components: tuple[ComponentIdentity, ...]) -> None:

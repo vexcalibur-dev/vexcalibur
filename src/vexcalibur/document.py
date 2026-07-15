@@ -10,11 +10,14 @@ from packageurl import PackageURL
 
 from vexcalibur.domain import (
     ComponentIdentity,
+    ComponentVersionError,
     VexAnalysisState,
     VexRemediationCategory,
     VulnerabilityFinding,
+    canonical_component_version,
 )
 from vexcalibur.errors import VexRenderError
+from vexcalibur.url_policy import UrlUserinfoError, reject_url_userinfo
 
 
 class VexDisposition(str, Enum):
@@ -163,10 +166,16 @@ def product_purl(product: VexProduct) -> PackageURL:
         msg = f"product {product.key!r} must contain exactly one package URL identifier"
         raise VexRenderError(msg)
     try:
-        return PackageURL.from_string(purls[0])
+        purl = PackageURL.from_string(purls[0])
     except ValueError as exc:
         msg = f"product {product.key!r} contains an invalid package URL: {exc}"
         raise VexRenderError(msg) from exc
+    try:
+        canonical_component_version(version=product.version, purl=purl)
+    except ComponentVersionError as exc:
+        msg = f"product {product.key!r} has conflicting version identity: {exc}"
+        raise VexRenderError(msg) from exc
+    return purl
 
 
 def versioned_product_purl(product: VexProduct) -> str:
@@ -182,6 +191,17 @@ def versioned_product_purl(product: VexProduct) -> str:
         qualifiers=purl.qualifiers,
         subpath=purl.subpath,
     ).to_string()
+
+
+def validate_vex_document(document: VexDocument) -> None:
+    """Validate shared product identity and source-URL boundaries."""
+    for product in document.products:
+        product_purl(product)
+    for vulnerability in document.vulnerabilities:
+        _validate_source_url(vulnerability.source_url)
+    for assertion in document.assertions:
+        product_purl(assertion.product)
+        _validate_source_url(assertion.vulnerability.source_url)
 
 
 def analysis_state(assertion: VexAssertion) -> VexAnalysisState:
@@ -215,6 +235,11 @@ def _components_by_ref(
     components_by_ref: dict[str, ComponentIdentity] = {}
     duplicate_refs: set[str] = set()
     for component in components:
+        try:
+            canonical_component_version(version=component.version, purl=component.purl)
+        except ComponentVersionError as exc:
+            msg = f"component {component.ref!r} has conflicting version identity: {exc}"
+            raise VexRenderError(msg) from exc
         if component.ref in components_by_ref:
             duplicate_refs.add(component.ref)
         components_by_ref[component.ref] = component
@@ -256,6 +281,7 @@ def _assertion_from_finding(
             f"{finding.component_ref!r} PURL {component_purl!r}"
         )
         raise VexRenderError(msg)
+    _validate_source_url(finding.source_url)
     try:
         disposition, qualifier = _DISPOSITION_AND_QUALIFIER_BY_STATE[finding.analysis_state]
     except (KeyError, TypeError) as exc:
@@ -277,6 +303,13 @@ def _assertion_from_finding(
         fixed_version=finding.fixed_version,
         remediation_category=finding.remediation_category,
     )
+
+
+def _validate_source_url(value: str) -> None:
+    try:
+        reject_url_userinfo(value, field_name="vulnerability source_url")
+    except UrlUserinfoError as exc:
+        raise VexRenderError(str(exc)) from exc
 
 
 def _assertion_sort_key(assertion: VexAssertion) -> tuple[str, ...]:

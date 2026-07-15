@@ -15,6 +15,7 @@ from vexcalibur.document import (
     VexDocument,
     analysis_state,
     product_purl,
+    validate_vex_document,
     versioned_product_purl,
     vex_document_from_findings,
 )
@@ -121,6 +122,10 @@ def _render_openvex_document(
     role: str | None,
     timestamp: datetime,
 ) -> str:
+    try:
+        validate_vex_document(document)
+    except VexRenderError as exc:
+        raise OpenVexRenderError(str(exc)) from exc
     canonical_assertions = _canonical_assertions(document.assertions)
     if not canonical_assertions:
         msg = "OpenVEX output requires at least one vulnerability finding"

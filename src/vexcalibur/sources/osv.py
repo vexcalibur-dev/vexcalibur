@@ -13,10 +13,13 @@ from packageurl import PackageURL
 
 from vexcalibur.domain import (
     ComponentIdentity,
+    ComponentVersionError,
     VulnerabilityFinding,
     VulnerabilitySourceError,
     VulnerabilitySourceInputError,
+    canonical_component_version,
 )
+from vexcalibur.json_boundary import JsonFailureKind, StrictJsonError, strict_json_loads
 from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
 DEFAULT_OSV_API_URL = "https://api.osv.dev"
@@ -241,9 +244,9 @@ class OsvClient:
             raise OsvClientError(msg) from exc
 
         try:
-            response_body = response.json()
-        except ValueError as exc:
-            msg = "OSV response body must be JSON"
+            response_body = strict_json_loads(response.content)
+        except StrictJsonError as exc:
+            msg = _osv_json_error_message(exc)
             raise OsvResponseError(msg) from exc
 
         if not isinstance(response_body, dict):
@@ -251,6 +254,18 @@ class OsvClient:
             raise OsvResponseError(msg)
 
         return response_body
+
+
+def _osv_json_error_message(error: StrictJsonError) -> str:
+    if error.kind is JsonFailureKind.ENCODING:
+        return "OSV response body must be UTF-8 JSON"
+    if error.kind is JsonFailureKind.DUPLICATE_KEY:
+        return "OSV response body must not contain duplicate JSON object keys"
+    if error.kind is JsonFailureKind.NESTING:
+        return "OSV response body is too deeply nested"
+    if error.kind is JsonFailureKind.INTEGER:
+        return "OSV response body contains an oversized JSON integer"
+    return "OSV response body must be JSON"
 
 
 @dataclass(frozen=True)
@@ -393,9 +408,13 @@ def findings_from_osv_results(
 ) -> tuple[VulnerabilityFinding, ...]:
     """Map OSV query results onto affected SBOM component references."""
     components_by_query: dict[tuple[str, str | None], list[ComponentIdentity]] = {}
-    for component in components:
-        key = (component.purl.to_string(), _osv_query_version(component))
-        components_by_query.setdefault(key, []).append(component)
+    try:
+        for component in components:
+            key = (component.purl.to_string(), _osv_query_version(component))
+            components_by_query.setdefault(key, []).append(component)
+    except ComponentVersionError as exc:
+        msg = f"component has conflicting version identity: {exc}"
+        raise VulnerabilitySourceInputError(msg) from exc
 
     findings: list[VulnerabilityFinding] = []
     for result in results:
@@ -431,18 +450,23 @@ def osv_queries_for_components(
 ) -> list[OsvPackageQuery]:
     """Build precise OSV package queries for SBOM components."""
     queries_by_key: dict[tuple[str, str | None], OsvPackageQuery] = {}
-    for component in components:
-        if component.purl.version is None and component.version is None:
-            continue
-        query = OsvPackageQuery(purl=component.purl, version=_osv_query_version(component))
-        queries_by_key[(query.purl.to_string(), query.version)] = query
+    try:
+        for component in components:
+            if canonical_component_version(version=component.version, purl=component.purl) is None:
+                continue
+            query = OsvPackageQuery(purl=component.purl, version=_osv_query_version(component))
+            queries_by_key[(query.purl.to_string(), query.version)] = query
+    except ComponentVersionError as exc:
+        msg = f"component has conflicting version identity: {exc}"
+        raise VulnerabilitySourceInputError(msg) from exc
     return [queries_by_key[key] for key in sorted(queries_by_key)]
 
 
 def _osv_query_version(component: ComponentIdentity) -> str | None:
+    version = canonical_component_version(version=component.version, purl=component.purl)
     if component.purl.version is not None:
         return None
-    return component.version
+    return version
 
 
 def _query_payload(query: OsvPackageQuery, *, page_token: str | None = None) -> dict[str, Any]:
