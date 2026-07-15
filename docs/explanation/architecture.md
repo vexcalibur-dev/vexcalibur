@@ -25,13 +25,16 @@ CycloneDX JSON/XML file       GitHub Dependency Graph SBOM
               VulnerabilityFinding values
                          |
                          v
-              CycloneDX 1.6 renderer
-                         |
-                         v
+                 selected VexRenderer
+                    /          \
+                   v            v
+          CycloneDX 1.6    OpenVEX 0.2.0
+                   \            /
+                    v          v
                   VEX JSON document
 ```
 
-The two inventory paths meet at `ComponentIdentity`. The two finding paths meet at `VulnerabilityFinding`. The renderer receives the same value types from every path.
+The two inventory paths meet at `ComponentIdentity`. The two finding paths meet at `VulnerabilityFinding`. Every renderer receives the same value types.
 
 ## Inventory boundary
 
@@ -63,16 +66,24 @@ Fetching a GitHub SBOM is a separate choice. `--github-repo` permits that input 
 
 ## Rendering boundary
 
-`vexcalibur.vex` is currently a CycloneDX 1.6 JSON renderer. It groups findings by vulnerability, source, state, and detail. Each group points at the component references it assesses.
+`VexRenderer` separates generation from a serialization format. `generate_vex_from_*` helpers use `CycloneDxJsonRenderer` unless a caller supplies another renderer.
+
+In the current source tree, `vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders OpenVEX 0.2.0 JSON. Each renderer owns grouping, required metadata, validation, and state mapping.
 
 OSV says that a vulnerability matches a package version; it does not decide exploitability for a particular deployment. OSV findings therefore enter VEX as `in_triage`. A local finding can carry a reviewed state such as `not_affected` or `exploitable`.
 
-The normalized finding boundary is also where another VEX renderer can fit. A new format still needs an explicit semantic mapping. Similar field names do not guarantee that states, products, provenance, or timestamps mean the same thing.
+The normalized finding boundary is where CSAF can fit next. A new format still needs an explicit semantic mapping. Similar field names do not guarantee that states, products, provenance, or timestamps mean the same thing.
 
 Format conversion should expose any loss or default instead of hiding it in serialization code.
+
+OpenVEX demonstrates this rule. It collapses `false_positive` into `not_affected` and records the original state in notes. It emits `resolved` as `fixed` only when `fixed_version` matches the identified product.
+
+The renderer requires explicit action and impact statements for the states that need them. It also rejects competing assertions for one vulnerability and product.
+
+Source `modified` timestamps describe upstream records. The OpenVEX renderer does not claim they are statement revision times. The CycloneDX renderer can place them in vulnerability `updated` because that field describes the vulnerability record.
 
 ## Legacy command boundary
 
 The `vexy` executable maps a small legacy command surface to the same loaders, sources, and renderer. It does not parse legacy credentials or revive OSS Index. Keeping the adapter thin preserves Vexcalibur's source validation and public-service policy.
 
-See the [provider contract](../reference/provider-contract.md) for extension rules and the [output reference](../reference/cyclonedx-vex-output.md) for the current rendering contract.
+See the [provider contract](../reference/provider-contract.md) for source extension rules. Read the [CycloneDX](../reference/cyclonedx-vex-output.md) and [OpenVEX](../reference/openvex-output.md) references for renderer contracts.

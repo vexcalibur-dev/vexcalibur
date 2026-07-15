@@ -4,6 +4,10 @@ Python API
 The Python API is pre-1.0. Import paths, signatures, exceptions, and return
 shapes may change between releases.
 
+The OpenVEX names on this page describe the current source tree. Published
+version 0.1.1 does not include them. They will enter the published package in
+the next release.
+
 Domain objects
 --------------
 
@@ -61,14 +65,41 @@ repository read access.
 Generation
 ----------
 
+Generation helpers use CycloneDX when ``renderer`` is omitted. Pass an
+``OpenVexJsonRenderer`` to select OpenVEX and supply its author metadata::
+
+   from pathlib import Path
+
+   from vexcalibur.generate import generate_vex_from_local_findings
+   from vexcalibur.openvex import OpenVexJsonRenderer
+
+   document = generate_vex_from_local_findings(
+       input_file=Path("sbom.json"),
+       findings_file=Path("findings.json"),
+       renderer=OpenVexJsonRenderer(
+           author="Example Security Team",
+           role="VEX document producer",
+       ),
+   )
+
 .. automodule:: vexcalibur.generate
    :members: generate_vex_from_components, generate_vex_from_source, generate_vex_from_sbom, generate_vex_from_github_sbom, generate_vex_from_local_findings
 
 VEX rendering
 -------------
 
+``VexRenderer`` is the format boundary used by generation helpers.
+``CycloneDxJsonRenderer`` is the default. ``OpenVexJsonRenderer`` stores the
+required document metadata and delegates to the native OpenVEX serializer.
+
+.. automodule:: vexcalibur.render
+   :members: VexOutputFormat, VexRenderer, VexRenderError
+
 .. automodule:: vexcalibur.vex
-   :members: VexRenderError, parse_timestamp, render_cyclonedx_vex_json
+   :members: CycloneDxJsonRenderer, parse_timestamp, render_cyclonedx_vex_json
+
+.. automodule:: vexcalibur.openvex
+   :members: OpenVexJsonRenderer, OpenVexRenderError, render_openvex_json
 
 OSV source
 ----------

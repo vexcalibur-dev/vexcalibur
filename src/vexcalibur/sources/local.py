@@ -56,6 +56,9 @@ class _LocalFindingModel(BaseModel):
     modified: datetime | None = None
     analysis_state: VexAnalysisState = VexAnalysisState.IN_TRIAGE
     analysis_detail: str = Field(default=LOCAL_ANALYSIS_DETAIL, min_length=1)
+    action_statement: str | None = Field(default=None, min_length=1)
+    impact_statement: str | None = Field(default=None, min_length=1)
+    fixed_version: str | None = Field(default=None, min_length=1)
 
     @field_validator("purl")
     @classmethod
@@ -221,6 +224,9 @@ def _finding_from_model(
         modified=model.modified,
         analysis_state=model.analysis_state,
         analysis_detail=model.analysis_detail,
+        action_statement=model.action_statement,
+        impact_statement=model.impact_statement,
+        fixed_version=model.fixed_version,
     )
 
 

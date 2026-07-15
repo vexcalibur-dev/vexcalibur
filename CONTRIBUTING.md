@@ -11,6 +11,8 @@ Install these prerequisites:
 - Python 3.10 or newer.
 - The `uv`, `actionlint`, and `shellcheck` versions in `.tool-versions`.
 
+OpenVEX renderer changes also need Go 1.25.8. The version and the `go-vex` 0.2.8 dependency are recorded in `tests/integration/openvex-go/go.mod`. Other Python and documentation work does not require Go locally.
+
 Activate the pinned tools with `mise`, `asdf`, or an equivalent version manager. Then install the locked dependencies:
 
 ```bash
@@ -34,6 +36,12 @@ Run live compatibility tests only when the test data may be sent to the covered 
 
 ```bash
 make test-live
+```
+
+Run the pinned official OpenVEX parser after changing that renderer or its goldens:
+
+```bash
+make openvex-interop
 ```
 
 Build the manual after changing documentation, CLI behavior, package metadata, or a public Python API:

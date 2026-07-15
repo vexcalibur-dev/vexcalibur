@@ -290,3 +290,57 @@ jobs:
           VEXCALIBUR_EXPECTED_VERSION: ${{ inputs.release-version }}
           VEXCALIBUR_WHEEL: ${{ steps.dist.outputs.wheel }}
         run: make installed-cli-check
+
+  openvex-interoperability:
+    name: OpenVEX interoperability
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release-sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: tests/integration/openvex-go/go.mod
+          cache-dependency-path: tests/integration/openvex-go/go.sum
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version-file: .tool-versions
+          enable-cache: true
+          python-version: ${{ env.MAX_PYTHON }}
+
+      - name: Download distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+
+      - name: Parse the OpenVEX golden with go-vex
+        run: make openvex-interop
+
+      - name: Parse installed-wheel output with go-vex
+        run: |
+          mapfile -t wheels < <(find dist -maxdepth 1 -type f -name "*.whl" | sort)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "Expected exactly one wheel in dist, found ${#wheels[@]}" >&2
+            exit 2
+          fi
+
+          uv venv /tmp/vexcalibur-openvex-interop
+          uv pip install --python /tmp/vexcalibur-openvex-interop/bin/python "${wheels[0]}"
+          /tmp/vexcalibur-openvex-interop/bin/vexcalibur generate \
+            tests/fixtures/sbom/cyclonedx-json-simple.json \
+            --findings-file tests/fixtures/findings/all-analysis-states.json \
+            --offline \
+            --format openvex \
+            --author "Vexcalibur interoperability test" \
+            --timestamp 2026-06-23T00:00:00Z \
+            --output /tmp/vexcalibur-openvex-interop.json
+          go -C tests/integration/openvex-go run . /tmp/vexcalibur-openvex-interop.json

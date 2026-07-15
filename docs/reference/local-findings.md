@@ -2,7 +2,7 @@
 
 A local findings file supplies vulnerability and exploitability data without a network provider. The file must be UTF-8 JSON no larger than 5 MiB.
 
-The top-level value is an object with one required `findings` array. Unknown fields are rejected. The array may contain at most 10,000 items and may be empty.
+The top-level value is an object with one required `findings` array. Unknown fields are rejected. The array may contain at most 10,000 items.
 
 ```json
 {
@@ -14,7 +14,8 @@ The top-level value is an object with one required `findings` array. Unknown fie
       "source_url": "https://security.example.test/vulns/CVE-2026-0001",
       "modified": "2026-01-01T00:00:00Z",
       "analysis_state": "not_affected",
-      "analysis_detail": "The affected feature is disabled in this deployment."
+      "analysis_detail": "The affected feature is disabled in this deployment.",
+      "impact_statement": "The deployment does not enable the affected feature."
     }
   ]
 }
@@ -24,7 +25,7 @@ The top-level value is an object with one required `findings` array. Unknown fie
 
 | Field | Required | Type | Description |
 | --- | --- | --- | --- |
-| `findings` | Yes | Array | Zero to 10,000 finding objects. An empty array records that the local source supplied no findings. |
+| `findings` | Yes | Array | Zero to 10,000 finding objects. CycloneDX accepts an empty array, but OpenVEX output rejects it. |
 
 ## Finding fields
 
@@ -37,9 +38,20 @@ The top-level value is an object with one required `findings` array. Unknown fie
 | `source_url` | No | `https://vexcalibur.dev/sources/local` | HTTP or HTTPS URL with a host. |
 | `modified` | No | Omitted | ISO-8601 timestamp string. Naive values are treated as UTC. |
 | `analysis_state` | No | `in_triage` | One of the states listed below. |
-| `analysis_detail` | No | `Provided by local findings file; manual exploitability analysis required.` | Non-empty string. |
+| `analysis_detail` | No | `Provided by local findings file; manual exploitability analysis required.` | Non-empty human-readable analysis. |
+| `action_statement` | No | Omitted | Non-empty remediation or mitigation text. OpenVEX requires it for `exploitable` and rejects it for other states. |
+| `impact_statement` | No | Omitted | Non-empty impact text. OpenVEX requires it for `false_positive` and `not_affected`. It rejects the field for other states. |
+| `fixed_version` | No | Omitted | Non-empty version text. OpenVEX requires it for `resolved` and rejects it for other states. It must match the emitted product package URL version. |
 
 Supported `analysis_state` values are `resolved`, `exploitable`, `in_triage`, `false_positive`, and `not_affected`.
+
+CycloneDX output ignores `action_statement`, `impact_statement`, and `fixed_version`. These fields do not change CycloneDX grouping, content, or document identity.
+
+OpenVEX rejects nonidentical assertions for the same vulnerability ID and emitted product package URL. Differences in source, state, analysis detail, evidence fields, or modification time make assertions nonidentical.
+
+`modified` describes the source record. CycloneDX maps it to vulnerability `updated`; OpenVEX keeps it in `status_notes` to avoid mislabeling it as a statement revision time.
+
+OpenVEX requires a version in the emitted product package URL. It uses the component's separate version when the package URL is unversioned. It rejects the assertion when both are unversioned.
 
 ## Component matching
 

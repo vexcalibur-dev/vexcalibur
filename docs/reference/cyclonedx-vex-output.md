@@ -1,6 +1,6 @@
 # CycloneDX VEX output
 
-`vexcalibur generate` writes CycloneDX 1.6 JSON. The renderer consumes normalized component identities and provider-neutral findings.
+`vexcalibur generate` writes CycloneDX 1.6 JSON by default. Pass `--format cyclonedx` when an explicit selector helps automation. The renderer consumes normalized component identities and provider-neutral findings.
 
 ## Document fields
 
@@ -64,6 +64,8 @@ Local findings accept these states:
 - `not_affected`
 
 The local default state is `in_triage`. Its default detail is `Provided by local findings file; manual exploitability analysis required.`
+
+CycloneDX ignores the OpenVEX-only `action_statement`, `impact_statement`, and `fixed_version` fields. They do not change grouping, serialized content, or the document serial number.
 
 OSV findings use source name `OSV` and URL `https://osv.dev/`. Local findings default to source name `Local` and URL `https://vexcalibur.dev/sources/local`.
 

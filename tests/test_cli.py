@@ -20,6 +20,7 @@ from vexcalibur.vex import parse_timestamp
 
 runner = CliRunner()
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
+FINDINGS_ROOT = Path(__file__).parent / "fixtures" / "findings"
 GOLDEN_ROOT = Path(__file__).parent / "golden"
 DOCS_ROOT = Path(__file__).parent.parent / "docs"
 
@@ -1161,6 +1162,187 @@ def test_vexcalibur_root_shows_help_without_args() -> None:
     assert "generate" in result.output
 
 
+def test_generate_openvex_matches_golden() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--format",
+            "openvex",
+            "--author",
+            "Vexcalibur Test Maintainers",
+            "--author-role",
+            "Document producer",
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == (GOLDEN_ROOT / "openvex-vex-all-analysis-states.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_documented_openvex_local_example_executes(tmp_path: Path) -> None:
+    output_path = tmp_path / "openvex.json"
+    args = _documented_generate_args(
+        DOCS_ROOT / "how-to" / "generate-openvex.md",
+        "openvex-local-example",
+    )
+    args = [str(output_path) if arg.endswith("/vexcalibur-openvex.json") else arg for arg in args]
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+    document = json.loads(output_path.read_text(encoding="utf-8"))
+    assert document["@context"] == "https://openvex.dev/ns/v0.2.0"
+    assert document["author"] == "Example Security Team"
+    assert len(document["statements"]) == 5
+
+
+def test_generate_openvex_requires_author_before_network(monkeypatch) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before OpenVEX option validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "openvex",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--author is required with --format openvex" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_rejects_openvex_metadata_with_cyclonedx_before_network(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV must not be contacted before format option validation")
+
+    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--author",
+            "Example Security Team",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--author and --author-role require --format openvex" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_openvex_rejects_empty_author_without_traceback() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--format",
+            "openvex",
+            "--author",
+            " ",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "VEX generation failed: OpenVEX output requires a nonempty author" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_openvex_rejects_empty_findings_without_writing_output(
+    tmp_path: Path,
+) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text('{"findings": []}', encoding="utf-8")
+    output_path = tmp_path / "openvex.json"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(findings_path),
+            "--offline",
+            "--format",
+            "openvex",
+            "--author",
+            "Example Security Team",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "requires at least one vulnerability finding" in result.output
+    assert not output_path.exists()
+    assert "Traceback" not in result.output
+
+
+def test_generate_openvex_rejects_affected_finding_without_action(
+    tmp_path: Path,
+) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        """
+        {
+          "findings": [
+            {
+              "id": "CVE-2026-0001",
+              "component_ref": "component:django",
+              "analysis_state": "exploitable",
+              "analysis_detail": "The vulnerable feature is reachable."
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(findings_path),
+            "--offline",
+            "--format",
+            "openvex",
+            "--author",
+            "Example Security Team",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "requires an action_statement" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_vexy_compat_root_shows_help_without_args() -> None:
     result = runner.invoke(vexy.app, ["--help"])
 
@@ -1194,10 +1376,14 @@ def test_vexy_rejects_invalid_osv_url_without_traceback(monkeypatch) -> None:
 
 
 def _documented_vexcalibur_generate_args(marker: str) -> list[str]:
-    command = _extract_marked_bash_command(
+    return _documented_generate_args(
         DOCS_ROOT / "how-to" / "generate-cyclonedx-vex.md",
         marker,
     )
+
+
+def _documented_generate_args(path: Path, marker: str) -> list[str]:
+    command = _extract_marked_bash_command(path, marker)
     args = shlex.split(command)
     assert args[:4] == ["uv", "run", "--frozen", "vexcalibur"]
     assert args[4] == "generate"

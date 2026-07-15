@@ -15,7 +15,7 @@ DEFAULT_ANALYSIS_DETAIL = (
 
 
 class VexAnalysisState(str, Enum):
-    """CycloneDX VEX analysis states supported by the domain model."""
+    """Vulnerability analysis states supported by the domain model."""
 
     RESOLVED = "resolved"
     EXPLOITABLE = "exploitable"
@@ -47,6 +47,9 @@ class VulnerabilityFinding:
     modified: datetime | None = None
     analysis_state: VexAnalysisState = VexAnalysisState.IN_TRIAGE
     analysis_detail: str = DEFAULT_ANALYSIS_DETAIL
+    action_statement: str | None = None
+    impact_statement: str | None = None
+    fixed_version: str | None = None
 
 
 class VulnerabilitySourceError(RuntimeError):

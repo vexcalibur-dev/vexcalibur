@@ -4,7 +4,7 @@ This file gives automated contributors the repository rules needed to work safel
 
 ## Project state
 
-Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services or local JSON. The current renderer writes CycloneDX 1.6 VEX JSON.
+Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services or local JSON. The current source tree renders CycloneDX 1.6 or OpenVEX 0.2.0 JSON. Published version 0.1.1 includes only CycloneDX output.
 
 The implementation is Python, but domain and product decisions should remain ecosystem-neutral unless an issue narrows the scope. Do not present a planned input, provider, or output format as available.
 
@@ -24,8 +24,9 @@ The implementation is Python, but domain and product decisions should remain eco
 - Typer, HTTPX, Pydantic, and `cyclonedx-python-lib`
 - Ruff, strict MyPy, Pytest, `actionlint`, `shellcheck`, `pip-audit`, and `detect-secrets`
 - Sphinx and MyST for the manual
+- Go 1.25.8 for the pinned OpenVEX interoperability check
 
-Pinned tool versions are in `.tool-versions`.
+Python and repository tool versions are in `.tool-versions`. The interoperability module records Go 1.25.8 and pins `go-vex` 0.2.8 in `tests/integration/openvex-go/go.mod`.
 
 ## Common commands
 
@@ -41,7 +42,7 @@ Run the local gate:
 make check
 ```
 
-Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`, `make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`, `make build`, and `make pre-commit`.
+Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`, `make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`, `make build`, `make openvex-interop`, and `make pre-commit`.
 
 `make workflow-lint` needs `actionlint` and `shellcheck` on `PATH`.
 
@@ -71,10 +72,14 @@ Core modules live under `src/vexcalibur/`:
 | `domain.py` | Provider-neutral components, findings, and source protocol |
 | `sources/osv.py` | OSV policy, client, parsing, and domain mapping |
 | `sources/local.py` | Local findings validation and matching |
+| `render.py` | Format-neutral renderer protocol and output selector |
 | `vex.py` | CycloneDX 1.6 rendering |
+| `openvex.py` | Native OpenVEX 0.2.0 rendering |
 | `compat/vexy.py` | Limited legacy command adapter |
 
 Keep provider code in `sources/`. A provider returns domain findings and does not render a VEX format. A renderer consumes domain values and does not query a source.
+
+Keep format-specific mapping inside its renderer. Do not silently treat source update times as statement revision times or analysis prose as remediation guidance.
 
 ## Public data policy
 
@@ -94,6 +99,8 @@ Follow [docs/development/python-style.md](docs/development/python-style.md) and 
 Put tests under `tests/`. Mark external calls with `@pytest.mark.live`. Prefer deterministic fixtures and golden output.
 
 Add regression coverage for a parser, security, or compatibility fix. At an untrusted-data boundary, test malformed and unsafe input as well as success.
+
+OpenVEX changes must pass `make openvex-interop`. The nested Go module pins the official implementation used by that check.
 
 ## Documentation
 
@@ -131,6 +138,7 @@ uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
 uv run --frozen ruff check src tests scripts/*.py docs/conf.py
 uv run --frozen mypy src
 make workflow-lint
+make openvex-interop
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs
 uv build --clear --no-create-gitignore --no-sources

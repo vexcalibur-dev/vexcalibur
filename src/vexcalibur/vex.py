@@ -22,12 +22,10 @@ from cyclonedx.output import make_outputter
 from cyclonedx.schema import OutputFormat, SchemaVersion
 
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.render import VexRenderError as VexRenderError
 
 _FindingGroupKey = tuple[str, str, str, VexAnalysisState, str]
-
-
-class VexRenderError(ValueError):
-    """Raised when domain findings cannot be rendered as a valid VEX document."""
+_CycloneDxFindingKey = tuple[str, str, str, str, str, str, str, str]
 
 
 def render_cyclonedx_vex_json(
@@ -68,6 +66,24 @@ def render_cyclonedx_vex_json(
         schema_version=SchemaVersion.V1_6,
     )
     return _canonical_json(outputter.output_as_string())
+
+
+class CycloneDxJsonRenderer:
+    """Render CycloneDX 1.6 VEX JSON."""
+
+    def render(
+        self,
+        *,
+        components: tuple[ComponentIdentity, ...],
+        findings: tuple[VulnerabilityFinding, ...],
+        timestamp: datetime | None = None,
+    ) -> str:
+        """Return deterministic CycloneDX 1.6 VEX JSON."""
+        return render_cyclonedx_vex_json(
+            components=components,
+            findings=findings,
+            timestamp=timestamp,
+        )
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -220,22 +236,22 @@ def _serial_number(
 def _canonical_findings(
     findings: tuple[VulnerabilityFinding, ...],
 ) -> tuple[VulnerabilityFinding, ...]:
-    return tuple(
-        dict.fromkeys(
-            sorted(
-                findings,
-                key=lambda finding: (
-                    finding.id,
-                    finding.source_name,
-                    finding.source_url,
-                    finding.analysis_state.value,
-                    finding.analysis_detail,
-                    finding.component_ref,
-                    finding.purl,
-                    finding.modified.isoformat() if finding.modified else "",
-                ),
-            )
-        )
+    canonical: dict[_CycloneDxFindingKey, VulnerabilityFinding] = {}
+    for finding in sorted(findings, key=_cyclonedx_finding_key):
+        canonical.setdefault(_cyclonedx_finding_key(finding), finding)
+    return tuple(canonical.values())
+
+
+def _cyclonedx_finding_key(finding: VulnerabilityFinding) -> _CycloneDxFindingKey:
+    return (
+        finding.id,
+        finding.source_name,
+        finding.source_url,
+        finding.analysis_state.value,
+        finding.analysis_detail,
+        finding.component_ref,
+        finding.purl,
+        finding.modified.isoformat() if finding.modified else "",
     )
 
 

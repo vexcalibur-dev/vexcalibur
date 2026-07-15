@@ -43,9 +43,16 @@ The method receives the complete normalized component tuple and returns zero or 
 | `purl` | `str` | Required | Canonical serialized package URL for that component. This is a string, unlike `ComponentIdentity.purl`. |
 | `modified` | `datetime \| None` | `None` | Source update time. |
 | `analysis_state` | `VexAnalysisState` | `VexAnalysisState.IN_TRIAGE` | VEX disposition for the component and vulnerability. |
-| `analysis_detail` | `str` | `Detected by vulnerability source; manual exploitability analysis required.` | Human-readable basis or next action. |
+| `analysis_detail` | `str` | `Detected by vulnerability source; manual exploitability analysis required.` | Human-readable analysis basis. |
+| `action_statement` | `str \| None` | `None` | Remediation or mitigation guidance. OpenVEX requires it only for `exploitable` findings. |
+| `impact_statement` | `str \| None` | `None` | Deployment impact. OpenVEX requires it only for `false_positive` and `not_affected` findings. |
+| `fixed_version` | `str \| None` | `None` | Confirmed fixed product version. OpenVEX requires it only for `resolved` findings. It must match the emitted product package URL version. |
 
 `component_ref` must equal a reference in the input component tuple. The renderer rejects an unknown reference.
+
+OpenVEX rejects each evidence field on states where it is not required. It also rejects nonidentical assertions for one vulnerability and emitted product. CycloneDX ignores all three evidence fields.
+
+An OpenVEX product must have a version in its package URL or component version field. The renderer rejects an assertion that would identify every package version.
 
 ## Errors
 
@@ -76,9 +83,9 @@ Provider code belongs under `vexcalibur.sources`.
 2. Map `ComponentIdentity` values to provider queries or lookup keys.
 3. Validate each response or local document.
 4. Return `VulnerabilityFinding` values in stable order.
-5. Leave grouping and serialization to `vexcalibur.vex`.
+5. Leave grouping and serialization to a `VexRenderer`.
 
-Do not duplicate CycloneDX rendering rules in a provider.
+Do not duplicate output-format rules in a provider. A renderer owns state mapping, grouping, required fields, and format-specific loss.
 
 ## Tests
 

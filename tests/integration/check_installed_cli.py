@@ -23,6 +23,13 @@ EXPECTED_ANALYSIS_STATES = [
     "false_positive",
     "not_affected",
 ]
+EXPECTED_OPENVEX_STATUSES = [
+    "fixed",
+    "affected",
+    "under_investigation",
+    "not_affected",
+    "not_affected",
+]
 
 
 def main() -> None:
@@ -105,6 +112,45 @@ def main() -> None:
         stderr_equals="",
     )
     _assert_generated_vex_shape(generated.stdout)
+
+    openvex_generated = _expect(
+        [
+            str(vexcalibur),
+            "generate",
+            str(FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml"),
+            "--findings-file",
+            str(FIXTURE_ROOT / "findings" / "all-analysis-states.json"),
+            "--offline",
+            "--format",
+            "openvex",
+            "--author",
+            "Vexcalibur installed CLI test",
+            "--author-role",
+            "Test producer",
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+        returncode=0,
+        stdout_contains=['"@context": "https://openvex.dev/ns/v0.2.0"'],
+        stderr_equals="",
+    )
+    _assert_generated_openvex_shape(openvex_generated.stdout)
+
+    _expect(
+        [
+            str(vexcalibur),
+            "generate",
+            str(FIXTURE_ROOT / "sbom" / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FIXTURE_ROOT / "findings" / "all-analysis-states.json"),
+            "--offline",
+            "--format",
+            "openvex",
+        ],
+        returncode=1,
+        stdout_equals="",
+        stderr_contains=["--author is required with --format openvex"],
+    )
 
     vexy_generated = _expect(
         [
@@ -280,6 +326,34 @@ def _assert_generated_vex_shape(generated: str) -> None:
         print(
             "Generated VEX did not preserve expected local finding analysis states.",
             file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def _assert_generated_openvex_shape(generated: str) -> None:
+    document = json.loads(generated)
+    statements = document["statements"]
+    if document["@context"] != "https://openvex.dev/ns/v0.2.0":
+        print("Generated document did not use OpenVEX 0.2.0 output.", file=sys.stderr)
+        raise SystemExit(1)
+    if [statement["status"] for statement in statements] != EXPECTED_OPENVEX_STATUSES:
+        print("Generated OpenVEX did not map expected analysis states.", file=sys.stderr)
+        raise SystemExit(1)
+    if not all(statement["products"] for statement in statements):
+        print("Generated OpenVEX statement did not identify a product.", file=sys.stderr)
+        raise SystemExit(1)
+    if "action_statement" not in statements[1]:
+        print("Generated affected OpenVEX statement did not include an action.", file=sys.stderr)
+        raise SystemExit(1)
+    if "Confirmed fixed product version: 1.2" not in statements[0]["status_notes"]:
+        print(
+            "Generated fixed OpenVEX statement did not confirm its version.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not all("impact_statement" in statements[index] for index in (3, 4)):
+        print(
+            "Generated not-affected OpenVEX statement did not explain its impact.", file=sys.stderr
         )
         raise SystemExit(1)
 

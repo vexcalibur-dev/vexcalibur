@@ -20,6 +20,8 @@ from vexcalibur.github_sbom import (
     GithubSbomError,
     resolve_github_token,
 )
+from vexcalibur.openvex import OpenVexJsonRenderer
+from vexcalibur.render import VexOutputFormat, VexRenderer
 from vexcalibur.sbom import SbomError
 from vexcalibur.source_options import (
     GenerateSourceOptionError,
@@ -35,7 +37,7 @@ from vexcalibur.sources.osv import (
     ensure_osv_url_allowed,
     osv_client_for_url,
 )
-from vexcalibur.vex import parse_timestamp
+from vexcalibur.vex import VexRenderError, parse_timestamp
 
 app = typer.Typer(
     name="vexcalibur",
@@ -111,6 +113,27 @@ def generate(
         str | None,
         typer.Option("--timestamp", help="ISO-8601 timestamp to use for deterministic output."),
     ] = None,
+    output_format: Annotated[
+        VexOutputFormat,
+        typer.Option(
+            "--format",
+            help="VEX output format.",
+        ),
+    ] = VexOutputFormat.CYCLONEDX,
+    author: Annotated[
+        str | None,
+        typer.Option(
+            "--author",
+            help="OpenVEX document author. Required with --format openvex.",
+        ),
+    ] = None,
+    author_role: Annotated[
+        str | None,
+        typer.Option(
+            "--author-role",
+            help="Optional OpenVEX document author role.",
+        ),
+    ] = None,
     findings_file: Annotated[
         Path | None,
         typer.Option(
@@ -175,7 +198,7 @@ def generate(
         ),
     ] = True,
 ) -> None:
-    """Generate CycloneDX VEX JSON from local or GitHub-hosted SBOM input."""
+    """Generate VEX JSON from local or GitHub-hosted SBOM input."""
     parsed_timestamp = None
     if timestamp is not None:
         try:
@@ -189,6 +212,11 @@ def generate(
             input_file=input_file,
             github_repo=github_repo,
             offline=offline,
+        )
+        renderer = _renderer_from_generate_options(
+            output_format=output_format,
+            author=author,
+            author_role=author_role,
         )
         source_options = resolve_generate_source_options(
             findings_file=findings_file,
@@ -204,6 +232,7 @@ def generate(
                 use_gh_auth=use_gh_auth,
                 source_options=source_options,
                 timestamp=parsed_timestamp,
+                renderer=renderer,
             )
         elif source_options.findings_file is None:
             if input_file is None:
@@ -217,6 +246,7 @@ def generate(
                     else source_options.osv_url
                 ),
                 allow_public_osv=source_options.allow_public_osv,
+                renderer=renderer,
             )
         else:
             if input_file is None:
@@ -225,6 +255,7 @@ def generate(
                 input_file=input_file,
                 findings_file=source_options.findings_file,
                 timestamp=parsed_timestamp,
+                renderer=renderer,
             )
     except GenerateSourceOptionError as exc:
         typer.echo(f"Invalid generate options: {exc}", err=True)
@@ -243,6 +274,9 @@ def generate(
         raise typer.Exit(code=1) from exc
     except OsvClientError as exc:
         typer.echo(f"OSV query failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except VexRenderError as exc:
+        typer.echo(f"VEX generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     if output_file is None:
@@ -276,6 +310,23 @@ def _validate_generate_input_options(
         raise GenerateSourceOptionError(msg)
 
 
+def _renderer_from_generate_options(
+    *,
+    output_format: VexOutputFormat,
+    author: str | None,
+    author_role: str | None,
+) -> VexRenderer | None:
+    if output_format is VexOutputFormat.OPENVEX:
+        if author is None:
+            msg = "--author is required with --format openvex"
+            raise GenerateSourceOptionError(msg)
+        return OpenVexJsonRenderer(author=author, role=author_role)
+    if author is not None or author_role is not None:
+        msg = "--author and --author-role require --format openvex"
+        raise GenerateSourceOptionError(msg)
+    return None
+
+
 def _generate_vex_from_github_input(
     *,
     repository: str,
@@ -284,6 +335,7 @@ def _generate_vex_from_github_input(
     use_gh_auth: bool,
     source_options: GenerateSourceOptions,
     timestamp: datetime | None,
+    renderer: VexRenderer | None,
 ) -> str:
     if source_options.findings_file is None:
         ensure_osv_url_allowed(
@@ -303,6 +355,7 @@ def _generate_vex_from_github_input(
         components=components,
         source=_vulnerability_source_from_options(source_options),
         timestamp=timestamp,
+        renderer=renderer,
     )
 
 

@@ -59,7 +59,9 @@ Live IDs and ordering may change.
 
 ## `vexcalibur generate`
 
-Generates CycloneDX 1.6 VEX JSON.
+Generates CycloneDX 1.6 or OpenVEX 0.2.0 JSON.
+
+The OpenVEX flags in this section describe the current source tree. Published version 0.1.1 generates CycloneDX only. OpenVEX will enter the published package in the next release.
 
 ```text
 vexcalibur generate [OPTIONS] [INPUT_FILE]
@@ -96,7 +98,7 @@ Choose one source mode:
 
 OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, or GitHub SPDX `versionInfo`. The command fails instead of treating an empty query set as authoritative.
 
-An explicit empty local findings array is valid and produces an empty VEX document.
+An explicit empty local findings array is valid for CycloneDX output. OpenVEX rejects it because a standalone document requires at least one statement.
 
 ### Options
 
@@ -104,6 +106,9 @@ An explicit empty local findings array is valid and produces an empty VEX docume
 | --- | --- | --- |
 | `--output PATH`, `-o PATH` | Standard output | Write VEX JSON to a file. |
 | `--timestamp TEXT` | Current UTC time | ISO-8601 document timestamp. |
+| `--format cyclonedx\|openvex` | `cyclonedx` | Select the output format. |
+| `--author TEXT` | — | OpenVEX document author; required for OpenVEX. |
+| `--author-role TEXT` | — | Optional OpenVEX document author role. |
 | `--findings-file PATH` | — | Local findings JSON. |
 | `--offline` | Off | Disable network finding sources; requires local findings. |
 | `--osv-url TEXT` | Public OSV when no local findings are selected | OSV-compatible base URL. |
@@ -122,13 +127,17 @@ Public repositories may work anonymously. Token-backed requests need repository 
 
 `--github-repo` cannot be combined with `--offline` because fetching the SBOM uses the network. Public OSV consent remains separate.
 
+`--author` and `--author-role` are valid only with `--format openvex`. Format metadata is checked before Vexcalibur fetches a GitHub SBOM or queries OSV.
+
 ### Output
 
 Without `--output`, JSON goes to standard output. With it, the command writes the file and prints no success message.
 
 `--output` overwrites an existing file without prompting. Its parent directory must already exist, and there is no `--force` or atomic-write option. The `vexy` compatibility command differs: it refuses an existing file unless `--force` is present.
 
-OSV-derived entries use analysis state `in_triage`. Local findings may set any supported CycloneDX VEX analysis state. See the [output reference](cyclonedx-vex-output.md).
+OSV-derived entries use analysis state `in_triage`. Local findings may set any supported domain state.
+
+CycloneDX output preserves those state names. OpenVEX maps them to its four-status model and requires state-specific evidence. It also rejects nonidentical assertions for one vulnerability and product. Read the [CycloneDX](cyclonedx-vex-output.md) or [OpenVEX](openvex-output.md) output reference for the exact contract.
 
 ### Exit behavior
 
@@ -142,6 +151,7 @@ OSV-derived entries use analysis state `in_triage`. Local findings may set any s
 | Invalid local findings | `1` | `Local findings ingest failed:` |
 | Public OSV without consent or invalid OSV URL | `1` | `VEX generation failed:` |
 | OSV request or response failure | `1` | `OSV query failed:` |
+| Findings cannot form the selected VEX format | `1` | `VEX generation failed:` |
 | Output write failure | `1` | `Could not write VEX output` |
 
 ### Network limits
