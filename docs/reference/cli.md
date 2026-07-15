@@ -59,7 +59,7 @@ Live IDs and ordering may change.
 
 ## `vexcalibur generate`
 
-Generates CycloneDX 1.6 or OpenVEX 0.2.0 JSON.
+Generates CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 VEX JSON.
 
 ```text
 vexcalibur generate [OPTIONS] [INPUT_FILE]
@@ -96,7 +96,9 @@ Choose one source mode:
 
 OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, or GitHub SPDX `versionInfo`. The command fails instead of treating an empty query set as authoritative.
 
-An explicit empty local findings array is valid for CycloneDX output. OpenVEX rejects it because a standalone document requires at least one statement.
+An explicit empty local findings array is valid for CycloneDX output. OpenVEX
+and CSAF reject it because their standalone VEX documents need at least one
+statement or vulnerability assertion.
 
 ### Options
 
@@ -104,9 +106,16 @@ An explicit empty local findings array is valid for CycloneDX output. OpenVEX re
 | --- | --- | --- |
 | `--output PATH`, `-o PATH` | Standard output | Write VEX JSON to a file. |
 | `--timestamp TEXT` | Current UTC time | ISO-8601 document timestamp. |
-| `--format cyclonedx\|openvex` | `cyclonedx` | Select the output format. |
+| `--format cyclonedx\|openvex\|csaf` | `cyclonedx` | Select the output format. |
 | `--author TEXT` | — | OpenVEX document author; required for OpenVEX. |
 | `--author-role TEXT` | — | Optional OpenVEX document author role. |
+| `--csaf-version TEXT` | `2.0` | CSAF version; only `2.0` is accepted. |
+| `--csaf-document-id TEXT` | — | CSAF tracking ID; required for CSAF. |
+| `--csaf-document-title TEXT` | — | CSAF document title; required for CSAF. |
+| `--csaf-publisher-name TEXT` | — | CSAF publisher name; required for CSAF. |
+| `--csaf-publisher-namespace TEXT` | — | Normalized absolute HTTP(S) publisher URL; required for CSAF. |
+| `--csaf-publisher-category TEXT` | — | CSAF publisher category; required for CSAF. |
+| `--csaf-document-status TEXT` | `draft` | CSAF status: `draft`, `final`, or `interim`. |
 | `--findings-file PATH` | — | Local findings JSON. |
 | `--offline` | Off | Disable network finding sources; requires local findings. |
 | `--osv-url TEXT` | Public OSV when no local findings are selected | OSV-compatible base URL. |
@@ -125,17 +134,44 @@ Public repositories may work anonymously. Token-backed requests need repository 
 
 `--github-repo` cannot be combined with `--offline` because fetching the SBOM uses the network. Public OSV consent remains separate.
 
-`--author` and `--author-role` are valid only with `--format openvex`. Format metadata is checked before Vexcalibur fetches a GitHub SBOM or queries OSV.
+`--author` and `--author-role` are valid only with `--format openvex`.
+
+The `--csaf-*` options are valid only with `--format csaf`. CSAF requires the
+document ID, title, publisher name, publisher namespace, and publisher
+category. The namespace must be an absolute normalized HTTP(S) URL controlled
+by the publisher. Use ASCII RFC 3986 syntax, with IDNA for internationalized
+hosts and percent encoding for non-ASCII path characters. Publisher category
+accepts `coordinator`, `discoverer`, `other`, `user`, or `vendor`; `translator`
+is not supported. Document IDs cannot contain line terminators.
+
+Format metadata is checked before Vexcalibur fetches a GitHub SBOM or queries
+OSV.
 
 ### Output
 
 Without `--output`, JSON goes to standard output. With it, the command writes the file and prints no success message.
 
-`--output` overwrites an existing file without prompting. Its parent directory must already exist, and there is no `--force` or atomic-write option. The `vexy` compatibility command differs: it refuses an existing file unless `--force` is present.
+`--output` overwrites an existing file without prompting. Its parent directory
+must already exist, and there is no `--force` or atomic-write option. The
+`vexy` compatibility command differs: it refuses an existing file unless
+`--force` is present.
+
+CSAF file output also enforces the standard basename derived from the document
+ID. Lowercase the ID, replace each run matching `[^+\-a-z0-9]+` with one
+underscore, and append `.json`. For example, `ACME VEX:2026/001` requires
+`acme_vex_2026_001.json`. The rule does not apply to standard output.
 
 OSV-derived entries use analysis state `in_triage`. Local findings may set any supported domain state.
 
-CycloneDX output preserves those state names. OpenVEX maps them to its four-status model and requires state-specific evidence. It also rejects nonidentical assertions for one vulnerability and product. Read the [CycloneDX](cyclonedx-vex-output.md) or [OpenVEX](openvex-output.md) output reference for the exact contract.
+CycloneDX output preserves those state names. OpenVEX maps them to its
+four-status model and requires state-specific evidence. CSAF maps them to
+product-status lists and requires product-scoped remediation or impact
+evidence where the VEX profile calls for it. OpenVEX rejects nonidentical
+assertions for one vulnerability and product. CSAF can group same-status
+provenance and evidence, but rejects contradictory effective statuses for that
+pair. Read the
+[CycloneDX](cyclonedx-vex-output.md), [OpenVEX](openvex-output.md), or
+[CSAF](csaf-output.md) output reference for the exact contract.
 
 ### Exit behavior
 

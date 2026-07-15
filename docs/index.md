@@ -1,6 +1,9 @@
 # Vexcalibur
 
-Vexcalibur turns SBOM package inventories and vulnerability findings into VEX documents. Published version 0.2.0 reads CycloneDX files or a GitHub Dependency Graph SBOM. It collects findings from OSV-compatible services or local JSON. It writes CycloneDX 1.6 or OpenVEX 0.2.0 JSON.
+Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
+documents. Version 0.3.0 reads CycloneDX files or a GitHub Dependency Graph
+SBOM. It collects findings from OSV-compatible services or local JSON. It
+writes CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
 
 Public OSV access fails closed. Vexcalibur sends package URLs and versions to `https://api.osv.dev` only when a command includes `--allow-public-osv`.
 
@@ -15,6 +18,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
 - [Generate OpenVEX](how-to/generate-openvex.md)
+- [Generate CSAF VEX](how-to/generate-csaf.md)
 - [Use a private OSV mirror](how-to/use-private-osv-mirror.md)
 - [Publish Vexcalibur to PyPI](how-to/publish-to-pypi.md)
 
@@ -23,6 +27,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 - [Command-line interface](reference/cli.md)
 - [CycloneDX VEX output](reference/cyclonedx-vex-output.md)
 - [OpenVEX output](reference/openvex-output.md)
+- [CSAF output](reference/csaf-output.md)
 - [Local findings format](reference/local-findings.md)
 - [Vulnerability-source provider contract](reference/provider-contract.md)
 - [Python API](reference/python-api.rst)
@@ -46,11 +51,13 @@ tutorials/quickstart
 tutorials/offline-local-findings
 how-to/generate-cyclonedx-vex
 how-to/generate-openvex
+how-to/generate-csaf
 how-to/use-private-osv-mirror
 how-to/publish-to-pypi
 reference/cli
 reference/cyclonedx-vex-output
 reference/openvex-output
+reference/csaf-output
 reference/provider-contract
 reference/python-api
 reference/local-findings

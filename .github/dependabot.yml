@@ -21,3 +21,14 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: npm
+    directory: /tests/integration/csaf-validator
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+    groups:
+      csaf-validator-dependencies:
+        patterns:
+          - "*"

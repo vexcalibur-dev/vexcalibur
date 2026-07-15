@@ -34,12 +34,13 @@ CycloneDX JSON/XML file       GitHub Dependency Graph SBOM
                   |          VexDocument
                   |      atomic assertions
                   |               |
-                  |       +-------+-------+
-                  |       |               |
-                  |       v               v
-                  |  CycloneDX 1.6   OpenVEX 0.2.0
-                  |       \               /
-                  +--------+-------------+
+                  |       +-------+-------+-------+
+                  |       |               |       |
+                  |       v               v       v
+                  |  CycloneDX 1.6   OpenVEX   CSAF 2.0
+                  |                   0.2.0      VEX
+                  |       \               |       /
+                  +--------+--------------+------+
                            |
                            v
                     VEX JSON document
@@ -93,7 +94,10 @@ Fetching a GitHub SBOM is a separate choice. `--github-repo` permits that input 
 
 The built-in renderers also implement `VexDocumentRenderer`. Their compatibility method creates the atomic document, then delegates to the document renderer.
 
-In version 0.2.0, `vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders OpenVEX 0.2.0 JSON. Each renderer owns grouping, required metadata, validation, and state mapping.
+`vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders
+OpenVEX 0.2.0 JSON. `vexcalibur.csaf` renders CSAF 2.0 JSON with the VEX
+profile. Each renderer owns grouping, required metadata, validation, and state
+mapping.
 
 OSV says that a vulnerability matches a package version; it does not decide exploitability for a particular deployment. OSV findings therefore enter VEX as `in_triage`. A local finding can carry a reviewed state such as `not_affected` or `exploitable`.
 
@@ -101,14 +105,34 @@ The atomic document boundary is where another output format can fit. A new forma
 
 Format conversion should expose any loss or default instead of hiding it in serialization code.
 
-OpenVEX demonstrates this rule. It collapses `false_positive` into `not_affected` and records the original state in notes. It emits `resolved` as `fixed` only when `fixed_version` matches the identified product.
+OpenVEX demonstrates this rule. It collapses `false_positive` into
+`not_affected` and records the original state in notes. It emits `resolved` as
+`fixed` only when `fixed_version` matches the identified product.
 
-The renderer requires explicit action and impact statements for the states that need them. It also rejects competing assertions for one vulnerability and product.
+CSAF makes a different set of tradeoffs. It collapses `false_positive` and
+`not_affected` into `known_not_affected`, then preserves the narrower state and
+applicable product IDs in notes. An `exploitable` assertion needs both action
+text and a machine-readable remediation category before it can become
+`known_affected`. A not-affected assertion needs an impact statement. The
+renderer places that evidence in product-scoped remediation and threat
+objects.
 
-Source `modified` timestamps describe upstream records. The OpenVEX renderer does not claim they are statement revision times. The CycloneDX renderer can place them in vulnerability `updated` because that field describes the vulnerability record.
+The OpenVEX renderer requires explicit action and impact statements for the
+states that need them. It also rejects nonidentical assertions for one
+vulnerability and product. CSAF can group same-status provenance and evidence,
+but rejects contradictory effective statuses for that pair.
+
+Source `modified` timestamps describe upstream records. The OpenVEX renderer
+does not claim they are statement revision times. CSAF likewise keeps them in
+vulnerability notes rather than document tracking dates. The CycloneDX
+renderer can place them in vulnerability `updated` because that field describes
+the vulnerability record.
 
 ## Legacy command boundary
 
 The `vexy` executable maps a small legacy command surface to the same loaders, sources, and renderer. It does not parse legacy credentials or revive OSS Index. Keeping the adapter thin preserves Vexcalibur's source validation and public-service policy.
 
-See the [provider contract](../reference/provider-contract.md) for source extension rules. Read the [CycloneDX](../reference/cyclonedx-vex-output.md) and [OpenVEX](../reference/openvex-output.md) references for renderer contracts.
+See the [provider contract](../reference/provider-contract.md) for source
+extension rules. Read the [CycloneDX](../reference/cyclonedx-vex-output.md),
+[OpenVEX](../reference/openvex-output.md), and
+[CSAF](../reference/csaf-output.md) references for renderer contracts.

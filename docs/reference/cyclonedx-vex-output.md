@@ -65,7 +65,10 @@ Local findings accept these states:
 
 The local default state is `in_triage`. Its default detail is `Provided by local findings file; manual exploitability analysis required.`
 
-CycloneDX ignores the OpenVEX-only `action_statement`, `impact_statement`, and `fixed_version` fields. They do not change grouping, serialized content, or the document serial number.
+CycloneDX ignores the format-specific `action_statement`, `impact_statement`,
+`fixed_version`, and `remediation_category` evidence fields. They do not change
+grouping, serialized content, or the document serial number. OpenVEX and CSAF
+use selected fields under their stricter state mappings.
 
 OSV findings use source name `OSV` and URL `https://osv.dev/`. Local findings default to source name `Local` and URL `https://vexcalibur.dev/sources/local`.
 

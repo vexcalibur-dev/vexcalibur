@@ -101,4 +101,7 @@ OpenVEX is still evolving. Vexcalibur pins the context, schema commit, and Go co
 
 The tagged 0.2.0 prose shows an unversioned context in places. The current official Go implementation emits the versioned context used here.
 
-Future OpenVEX changes stay inside `OpenVexJsonRenderer`. CSAF can use another renderer without changing source adapters or the default CycloneDX contract.
+Future OpenVEX changes stay inside `OpenVexJsonRenderer`. The current source's
+CSAF support uses a separate `Csaf20VexJsonRenderer` over the same atomic
+document boundary, without changing source adapters or the default CycloneDX
+contract.

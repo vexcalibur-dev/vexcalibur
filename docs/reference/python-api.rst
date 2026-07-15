@@ -78,6 +78,32 @@ Generation helpers use CycloneDX when ``renderer`` is omitted. Pass an
        ),
    )
 
+``Csaf20VexJsonRenderer`` accepts explicit tracking and publisher metadata::
+
+   from pathlib import Path
+
+   from vexcalibur.csaf import (
+       Csaf20DocumentMetadata,
+       Csaf20VexJsonRenderer,
+       CsafDocumentStatus,
+       CsafPublisherCategory,
+   )
+   from vexcalibur.generate import generate_vex_from_local_findings
+
+   metadata = Csaf20DocumentMetadata(
+       document_id="ACME-VEX-2026-001",
+       title="ACME component exploitability assessment",
+       publisher_name="ACME Product Security",
+       publisher_namespace="https://security.example.test",
+       publisher_category=CsafPublisherCategory.VENDOR,
+       status=CsafDocumentStatus.FINAL,
+   )
+   document = generate_vex_from_local_findings(
+       input_file=Path("sbom.json"),
+       findings_file=Path("findings.json"),
+       renderer=Csaf20VexJsonRenderer(metadata),
+   )
+
 .. automodule:: vexcalibur.generate
    :members: generate_vex_from_components, generate_vex_from_source, generate_vex_from_sbom, generate_vex_from_github_sbom, generate_vex_from_local_findings
 
@@ -85,17 +111,21 @@ VEX rendering
 -------------
 
 ``VexRenderer`` is the format boundary used by generation helpers.
-``CycloneDxJsonRenderer`` is the default. ``OpenVexJsonRenderer`` stores the
-required document metadata and delegates to the native OpenVEX serializer.
+``CycloneDxJsonRenderer`` is the default. ``OpenVexJsonRenderer`` and
+``Csaf20VexJsonRenderer`` store their required document metadata and delegate
+to native format serializers.
 
 .. automodule:: vexcalibur.render
-   :members: VexOutputFormat, VexRenderer, VexRenderError
+   :members: VexOutputFormat, VexRenderer, VexDocumentRenderer, VexRenderError
 
 .. automodule:: vexcalibur.vex
    :members: CycloneDxJsonRenderer, parse_timestamp, render_cyclonedx_vex_json
 
 .. automodule:: vexcalibur.openvex
    :members: OpenVexJsonRenderer, OpenVexRenderError, render_openvex_json
+
+.. automodule:: vexcalibur.csaf
+   :members: Csaf20DocumentMetadata, Csaf20VexJsonRenderer, CsafDocumentStatus, CsafPublisherCategory, CsafRenderError, csaf_filename, render_csaf20_vex_json
 
 OSV source
 ----------

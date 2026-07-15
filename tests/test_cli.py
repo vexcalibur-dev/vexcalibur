@@ -6,6 +6,7 @@ import pytest
 from packageurl import PackageURL
 from typer.testing import CliRunner
 
+import vexcalibur.csaf as csaf_module
 import vexcalibur.sources.osv as osv_module
 from vexcalibur import cli
 from vexcalibur.compat import vexy
@@ -1343,6 +1344,351 @@ def test_generate_openvex_rejects_affected_finding_without_action(
     assert "Traceback" not in result.output
 
 
+def test_generate_csaf_matches_golden(monkeypatch) -> None:
+    monkeypatch.setattr(csaf_module, "__version__", "0.3.0")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(namespace="https://security.example.com", status="final"),
+            "--timestamp",
+            "2026-07-15T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == (GOLDEN_ROOT / "csaf-vex-all-analysis-states.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_documented_csaf_local_example_executes(tmp_path: Path) -> None:
+    output_path = tmp_path / "acme-vex-2026-001.json"
+    args = _documented_generate_args(
+        DOCS_ROOT / "how-to" / "generate-csaf.md",
+        "csaf-local-example",
+    )
+    args = [str(output_path) if arg.endswith("/acme-vex-2026-001.json") else arg for arg in args]
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+    document = json.loads(output_path.read_text(encoding="utf-8"))
+    assert document["document"]["category"] == "csaf_vex"
+    assert document["document"]["tracking"]["id"] == "ACME-VEX-2026-001"
+    assert len(document["vulnerabilities"]) == 5
+
+
+def test_generate_csaf_lists_every_missing_required_option_before_network(monkeypatch) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before CSAF option validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "csaf",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    for option in (
+        "--csaf-document-id",
+        "--csaf-document-title",
+        "--csaf-publisher-name",
+        "--csaf-publisher-namespace",
+        "--csaf-publisher-category",
+    ):
+        assert option in result.output
+    assert "required with --format csaf" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_csaf_defaults_to_version_2_and_draft_status() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(),
+            "--timestamp",
+            "2026-07-15T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    document = json.loads(result.output)
+    assert document["document"]["csaf_version"] == "2.0"
+    assert document["document"]["tracking"]["status"] == "draft"
+
+
+def test_generate_csaf_rejects_unsupported_version_before_network(monkeypatch) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before CSAF option validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(),
+            "--csaf-version",
+            "2.1",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--csaf-version must be 2.0" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    (
+        ("--csaf-document-status", "withdrawn"),
+        ("--csaf-publisher-category", "translator"),
+    ),
+)
+def test_generate_csaf_rejects_unsupported_metadata_enum(
+    option: str,
+    value: str,
+) -> None:
+    args = [
+        "generate",
+        str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        "--format",
+        "csaf",
+        *_csaf_metadata_args(),
+        option,
+        value,
+    ]
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code != 0
+    assert value in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    "namespace",
+    (
+        "ftp://security.example.test",
+        "https://exa mple.test",
+        "https://security.example.test/%zz",
+        "https://sécurity.example.test",
+        "https://security.example.test/\x7f",
+        "https://security.example.test/path|value",
+    ),
+)
+def test_generate_csaf_rejects_invalid_namespace_before_network(
+    monkeypatch,
+    namespace: str,
+) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before CSAF option validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(namespace=namespace),
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "publisher_namespace" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("output_format", ("cyclonedx", "openvex"))
+def test_generate_rejects_csaf_metadata_with_other_formats_before_network(
+    monkeypatch,
+    output_format: str,
+) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before format option validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    args = [
+        "generate",
+        "--github-repo",
+        "vexcalibur-dev/vexcalibur",
+        "--format",
+        output_format,
+        "--csaf-document-id",
+        "ACME-VEX-2026-001",
+        "--allow-public-osv",
+    ]
+    if output_format == "openvex":
+        args.extend(("--author", "Example Security Team"))
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 1
+    assert "--csaf-document-id require --format csaf" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("author_option", ("--author", "--author-role"))
+def test_generate_csaf_rejects_openvex_metadata_before_network(
+    monkeypatch,
+    author_option: str,
+) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before format option validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(),
+            author_option,
+            "Document producer",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--author and --author-role require --format openvex" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_csaf_enforces_output_filename_before_network(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before filename validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    output_path = tmp_path / "wrong-name.json"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(),
+            "--output",
+            str(output_path),
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "basename must be 'acme-vex-2026-001.json'" in result.output
+    assert not output_path.exists()
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("line_terminator", ("\n", "\r", "\u2028", "\u2029"))
+def test_generate_csaf_rejects_document_id_line_terminators_before_filename_and_network(
+    monkeypatch,
+    tmp_path: Path,
+    line_terminator: str,
+) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before CSAF ID validation")
+
+    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    output_path = tmp_path / "acme_vex.json"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(document_id=f"ACME{line_terminator}VEX"),
+            "--output",
+            str(output_path),
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "document_id must not contain line terminators" in result.output
+    assert not output_path.exists()
+    assert "Traceback" not in result.output
+
+
+def test_generate_csaf_accepts_the_derived_output_filename(tmp_path: Path) -> None:
+    output_path = tmp_path / "acme-vex-2026-001.json"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--format",
+            "csaf",
+            *_csaf_metadata_args(),
+            "--timestamp",
+            "2026-07-15T00:00:00Z",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == ""
+    assert json.loads(output_path.read_text(encoding="utf-8"))["document"]["category"] == "csaf_vex"
+
+
 def test_vexy_compat_root_shows_help_without_args() -> None:
     result = runner.invoke(vexy.app, ["--help"])
 
@@ -1380,6 +1726,29 @@ def _documented_vexcalibur_generate_args(marker: str) -> list[str]:
         DOCS_ROOT / "how-to" / "generate-cyclonedx-vex.md",
         marker,
     )
+
+
+def _csaf_metadata_args(
+    *,
+    document_id: str = "ACME-VEX-2026-001",
+    namespace: str = "https://security.example.test",
+    status: str | None = None,
+) -> list[str]:
+    args = [
+        "--csaf-document-id",
+        document_id,
+        "--csaf-document-title",
+        "ACME component exploitability assessment",
+        "--csaf-publisher-name",
+        "ACME Product Security",
+        "--csaf-publisher-namespace",
+        namespace,
+        "--csaf-publisher-category",
+        "vendor",
+    ]
+    if status is not None:
+        args.extend(("--csaf-document-status", status))
+    return args
 
 
 def _documented_generate_args(path: Path, marker: str) -> list[str]:

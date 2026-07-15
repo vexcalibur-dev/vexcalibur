@@ -9,7 +9,8 @@
 
 Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
-Published version 0.2.0 writes CycloneDX 1.6 and OpenVEX 0.2.0 JSON.
+Version 0.3.0 writes CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
+output uses the `csaf_vex` profile.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
@@ -19,7 +20,7 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 | --- | --- |
 | SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
-| VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON |
+| VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile |
 | Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |
 | Migration | A narrow `vexy` command-line compatibility layer |
 | Python | 3.10–3.14 |
@@ -30,7 +31,7 @@ Create an environment and pin the package version:
 
 ```bash
 python -m venv .venv
-.venv/bin/python -m pip install "vexcalibur==0.2.0"
+.venv/bin/python -m pip install "vexcalibur==0.3.0"
 .venv/bin/vexcalibur --help
 ```
 
@@ -74,7 +75,13 @@ PY
 
 See the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html) for the guided version of this example.
 
-CycloneDX remains the default output. Add `--format openvex` and identify the document author to create OpenVEX. Follow the [OpenVEX guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html) for a runnable example and its stricter finding rules.
+CycloneDX remains the default output. Add `--format openvex` and identify the
+document author to create OpenVEX. Add `--format csaf` and the required
+document and publisher metadata to create a CSAF 2.0 VEX document. Follow the [OpenVEX
+guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html)
+or [CSAF
+guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html)
+for a runnable example and the format's evidence rules.
 
 ## Choose a finding source
 
@@ -93,9 +100,9 @@ The default public endpoint fails closed without that flag. Fetching an SBOM fro
 ## Documentation
 
 - Start with the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html).
-- Follow the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html) or [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html) generation guide.
+- Follow the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html) generation guide.
 - Use the [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html) for flags and failure behavior.
-- Read the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html) or [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html) output contract before consuming generated files.
+- Read the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/reference/csaf-output.html) output contract before consuming generated files.
 - Read the [architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html) before adding a source or output format.
 - Check [project status](https://vexcalibur-dev.github.io/vexcalibur/explanation/project-status.html) for current limits.
 

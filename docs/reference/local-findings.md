@@ -25,7 +25,7 @@ The top-level value is an object with one required `findings` array. Unknown fie
 
 | Field | Required | Type | Description |
 | --- | --- | --- | --- |
-| `findings` | Yes | Array | Zero to 10,000 finding objects. CycloneDX accepts an empty array, but OpenVEX output rejects it. |
+| `findings` | Yes | Array | Zero to 10,000 finding objects. CycloneDX accepts an empty array, but OpenVEX and CSAF output reject it. |
 
 ## Finding fields
 
@@ -35,14 +35,14 @@ The top-level value is an object with one required `findings` array. Unknown fie
 | `component_ref` | One selector required | — | Non-empty component reference from the parsed SBOM. |
 | `purl` | One selector required | — | Valid package URL that matches exactly one parsed component. |
 | `source_name` | No | `Local` | Non-empty string. |
-| `source_url` | No | `https://vexcalibur.dev/sources/local` | HTTP or HTTPS URL with a host. |
+| `source_url` | No | `https://vexcalibur.dev/sources/local` | HTTP or HTTPS URL with a host. CSAF output also requires ASCII RFC 3986 syntax. |
 | `modified` | No | Omitted | ISO-8601 timestamp string. Naive values are treated as UTC. |
 | `analysis_state` | No | `in_triage` | One of the states listed below. |
 | `analysis_detail` | No | `Provided by local findings file; manual exploitability analysis required.` | Non-empty human-readable analysis. |
-| `action_statement` | No | Omitted | Non-empty remediation or mitigation text. OpenVEX requires it for `exploitable` and rejects it for other states. |
-| `impact_statement` | No | Omitted | Non-empty impact text. OpenVEX requires it for `false_positive` and `not_affected`. It rejects the field for other states. |
-| `fixed_version` | No | Omitted | Non-empty version text. OpenVEX requires it for `resolved` and rejects it for other states. It must match the emitted product package URL version. |
-| `remediation_category` | No | Omitted | One of the remediation categories listed below. Reserved for output formats that represent a machine-readable remediation kind. |
+| `action_statement` | No | Omitted | Non-empty remediation or mitigation text. OpenVEX and CSAF require it for `exploitable` and reject it for other states. |
+| `impact_statement` | No | Omitted | Non-empty impact text. OpenVEX and CSAF require it for `false_positive` and `not_affected`. They reject the field for other states. |
+| `fixed_version` | No | Omitted | Non-empty version text. OpenVEX and CSAF require it for `resolved` and reject it for other states. It must match the emitted product package URL version. |
+| `remediation_category` | No | Omitted | One of the remediation categories listed below. CSAF requires it for `exploitable` and rejects it for other states. |
 
 Supported `analysis_state` values are `resolved`, `exploitable`, `in_triage`, `false_positive`, and `not_affected`.
 
@@ -50,13 +50,30 @@ Supported `remediation_category` values are `mitigation`, `no_fix_planned`, `non
 
 CycloneDX output ignores `action_statement`, `impact_statement`, `fixed_version`, and `remediation_category`. These fields do not change CycloneDX grouping, content, or document identity.
 
-OpenVEX ignores `remediation_category`. It does not change OpenVEX grouping, content, or document identity.
+OpenVEX ignores `remediation_category`. It does not change OpenVEX grouping,
+content, or document identity. CSAF emits the category with a product-scoped
+remediation and will not infer one from `action_statement` or
+`analysis_detail`.
 
-OpenVEX rejects nonidentical assertions for the same vulnerability ID and emitted product package URL. Differences in source, state, analysis detail, action statement, impact statement, fixed version, or modification time make assertions nonidentical.
+OpenVEX rejects nonidentical assertions for the same vulnerability ID and
+emitted product package URL. Differences in source, state, analysis detail,
+action statement, impact statement, fixed version, or modification time make
+OpenVEX assertions nonidentical. CSAF groups provenance and evidence when the
+effective product status agrees, including multiple action or impact objects,
+but rejects contradictory effective statuses for the pair.
 
-`modified` describes the source record. CycloneDX maps it to vulnerability `updated`; OpenVEX keeps it in `status_notes` to avoid mislabeling it as a statement revision time.
+`modified` describes the source record. CycloneDX maps it to vulnerability
+`updated`; OpenVEX keeps it in `status_notes`. CSAF keeps it in vulnerability
+notes. Neither output treats it as a document or statement revision time.
 
-OpenVEX requires a version in the emitted product package URL. It uses the component's separate version when the package URL is unversioned. It rejects the assertion when both are unversioned.
+OpenVEX and CSAF require a version in the emitted product package URL. They use
+the component's separate version when the package URL is unversioned and reject
+the assertion when both are unversioned.
+
+CSAF maps `false_positive` and `not_affected` to the same
+`known_not_affected` product status. It preserves the original state in notes
+so consumers can see the lossy mapping. Read the [CSAF output
+contract](csaf-output.md) for all state and evidence mappings.
 
 ## Component matching
 

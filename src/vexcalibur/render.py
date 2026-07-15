@@ -18,6 +18,7 @@ class VexOutputFormat(str, Enum):
 
     CYCLONEDX = "cyclonedx"
     OPENVEX = "openvex"
+    CSAF = "csaf"
 
 
 class VexRenderer(Protocol):

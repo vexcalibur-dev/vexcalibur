@@ -1,10 +1,15 @@
-.PHONY: help install install-docs test test-live installed-cli-check openvex-interop lint workflow-lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop lint workflow-lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 UV := uv
 PACKAGE := vexcalibur
 SECRETS_BASELINE_REF ?= origin/main
 ACTIONLINT ?= actionlint
 SHELLCHECK ?= shellcheck
+NODE ?= node
+NPM ?= npm
+CSAF_VALIDATOR_DIR := tests/integration/csaf-validator
+CSAF_SCHEMA := tests/fixtures/schemas/csaf-2.0.schema.json
+CSAF_SCHEMA_SHA256 := 29c114b35b0a30831f1674f2ab8b3ed9b2890cfeaa63b924ac6ed9d70ef44262
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -24,8 +29,20 @@ test-live: ## Run live compatibility tests against external services
 installed-cli-check: ## Build, install, and test console scripts from the wheel
 	scripts/check-installed-cli.sh
 
+installed-csaf-check: csaf-schema-check ## Generate and validate CSAF with an installed wheel
+	scripts/check-installed-csaf.sh
+
 openvex-interop: ## Parse the OpenVEX golden with the pinned official Go implementation
 	go -C tests/integration/openvex-go run . ../../golden/openvex-vex-all-analysis-states.json
+
+csaf-validator-install: ## Install the pinned CI-only CSAF validator
+	$(NPM) --prefix $(CSAF_VALIDATOR_DIR) ci --ignore-scripts --no-audit --no-fund
+
+csaf-schema-check: ## Verify the vendored OASIS CSAF 2.0 schema checksum
+	@echo "$(CSAF_SCHEMA_SHA256)  $(CSAF_SCHEMA)" | sha256sum --check
+
+csaf-interop: csaf-schema-check ## Validate the CSAF golden with all pinned mandatory tests
+	$(NODE) $(CSAF_VALIDATOR_DIR)/validate.mjs tests/golden/csaf-vex-all-analysis-states.json
 
 lint: ## Run ruff checks
 	$(UV) run --frozen ruff check src tests scripts/*.py docs/conf.py
@@ -72,5 +89,5 @@ secrets-baseline: ## Refresh detect-secrets baseline
 clean: ## Remove generated local artifacts
 	rm -rf build dist *.egg-info src/*.egg-info .coverage .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
 	rm -f src/$(PACKAGE)/_version.py
-	rm -rf docs/_build
+	rm -rf docs/_build $(CSAF_VALIDATOR_DIR)/node_modules
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

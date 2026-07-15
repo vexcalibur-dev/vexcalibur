@@ -1,0 +1,14 @@
+{
+  "name": "vexcalibur-csaf-validator",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "validate": "node validate.mjs"
+  },
+  "devDependencies": {
+    "@secvisogram/csaf-validator-lib": "2.0.27"
+  }
+}
