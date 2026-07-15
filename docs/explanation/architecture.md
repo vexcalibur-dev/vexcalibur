@@ -1,104 +1,78 @@
-# Architecture
+# Architecture and trust boundaries
 
-Vexcalibur separates package inventory parsing, vulnerability source access, provider-neutral finding data, and VEX rendering.
+Vexcalibur separates package inventory, source access, normalized findings, and VEX rendering. Provider rules stay out of the output writer. Format rules stay out of network clients.
 
-## Current Flow
-
-The generation path separates untrusted SBOM parsing, vulnerability source
-access, provider-neutral findings, and CycloneDX rendering:
+## Generation flow
 
 ```text
 CycloneDX JSON/XML file       GitHub Dependency Graph SBOM
         |                                 |
         v                                 v
-vexcalibur.sbom              vexcalibur.github_sbom
+   sbom loader                    GitHub SBOM client
         |                                 |
         +----------------+----------------+
                          |
                          v
-ComponentIdentity values with package URLs
-        |
-        v
-Selected VulnerabilitySource
-        |                         |
-        | public opt-in or        | no network
-        | private mirror          |
-        v                         v
-OSV-compatible API          Local findings JSON
-        |                         |
-        +------------+------------+
-                     |
-                     v
-          VulnerabilityFinding values
-                     |
-                     v
-              vexcalibur.vex
-                     |
-                     v
-          CycloneDX 1.6 VEX JSON
+              ComponentIdentity values
+                         |
+                         v
+           one VulnerabilitySource adapter
+                  /                 \
+                 v                   v
+       OSV-compatible API      local findings JSON
+                  \                 /
+                   v               v
+              VulnerabilityFinding values
+                         |
+                         v
+              CycloneDX 1.6 renderer
+                         |
+                         v
+                  VEX JSON document
 ```
 
-In text form: Vexcalibur parses a local CycloneDX SBOM or fetches a GitHub
-Dependency Graph SBOM, converts that package inventory into component
-identities, collects provider-neutral findings from one selected source, then
-renders a CycloneDX 1.6 VEX JSON document.
+The two inventory paths meet at `ComponentIdentity`. The two finding paths meet at `VulnerabilityFinding`. The renderer receives the same value types from every path.
 
-1. `vexcalibur generate` accepts either a CycloneDX JSON/XML SBOM path or
-   `--github-repo OWNER/REPO`.
-2. `vexcalibur.sbom` validates the raw document shape, parses CycloneDX JSON with `cyclonedx-python-lib`, parses CycloneDX XML with `defusedxml`, and extracts component identities with package URLs.
-3. `vexcalibur.github_sbom` requests, polls, and downloads a GitHub Dependency
-   Graph SPDX JSON report when `--github-repo` is selected, then extracts
-   package URL references from that response into the same component identity
-   shape.
-4. The selected `VulnerabilitySource` produces provider-neutral `VulnerabilityFinding` objects:
-   - `vexcalibur.sources.osv.OsvSource` converts versioned component identities into OSV package queries, then maps OSV responses into findings.
-   - `vexcalibur.sources.local.LocalFindingsSource` reads local findings JSON and maps each finding to a normalized component reference or unique package URL.
-5. `vexcalibur.vex` renders deterministic CycloneDX 1.6 VEX JSON.
+## Inventory boundary
 
-## Trust Boundary
+`vexcalibur.sbom` handles local CycloneDX JSON and XML. It applies file-size, nesting, component-count, package URL, duplicate-reference, and XML hardening checks before it returns components.
 
-SBOMs can disclose internal package names, versions, ecosystem choices, and dependency graph details. Vexcalibur therefore treats public vulnerability services as an explicit trust boundary.
+`vexcalibur.github_sbom` handles GitHub's asynchronous Dependency Graph API. It requests the SPDX 2.3 JSON report and waits for the download. It then validates the response and extracts package URL references. Both loaders produce the same component shape.
 
-Commands that would send package URLs or SBOM-derived inventories to
-`https://api.osv.dev` fail unless the caller passes `--allow-public-osv`.
-Private mirrors use `--osv-url`. Offline workflows use `--findings-file` and do
-not construct an OSV client.
+Components without package URLs do not cross this boundary. Source adapters need package identity, and a VEX `affects` entry needs a stable component reference.
 
-Fetching an SBOM from GitHub is also a network operation, but it is an input
-source decision rather than permission to send the resulting package inventory
-to a public vulnerability service. `--github-repo` cannot be combined with
-`--offline`, and public OSV still requires `--allow-public-osv` after a GitHub
-SBOM has been fetched.
+## Finding-source boundary
 
-The same policy applies to library callers that use `OsvSource` or inject an `OsvClient`: Vexcalibur checks the client's effective base URL when it is knowable and rejects public OSV unless the caller opted in.
+A `VulnerabilitySource` receives all normalized components and returns `VulnerabilityFinding` values.
 
-## Source Providers
+`OsvSource` builds version-specific OSV queries and maps matches to findings. `LocalFindingsSource` validates a JSON file. It matches each item by component reference or unique package URL.
 
-Provider-specific code belongs under `vexcalibur.sources`. Provider clients should handle source-specific request formats, response validation, pagination, and policy checks. Source adapters implement the provider-neutral `VulnerabilitySource` protocol from `vexcalibur.domain` and return shared `VulnerabilityFinding` objects. Workflow modules should orchestrate providers through that protocol rather than duplicating provider parsing or source policy.
+Provider-specific request and parsing logic stays inside the adapter.
 
-Sources use `VulnerabilitySourceInputError` for component-shape problems that prevent a query from being built; generation surfaces those as SBOM input errors. Provider-specific configuration, network, parsing, and local-file failures should subclass `VulnerabilitySourceError` while keeping their more specific exception types so CLI and action callers can report accurate categories.
+`VulnerabilitySourceInputError` means the inventory cannot form valid provider input. Other source failures inherit from `VulnerabilitySourceError`, with provider-specific subclasses for useful error categories.
 
-OSV is the first network provider because it has a maintained public API and can also be mirrored internally. Local findings are the first offline provider. The architecture should leave room for additional sources without making Vexcalibur Python-specific or OSV-specific.
+## Network boundary
 
-## VEX Rendering
+An SBOM can expose internal package names, exact versions, and dependency choices. Vexcalibur does not treat a vulnerability lookup as harmless metadata access.
 
-The current renderer emits CycloneDX 1.6 JSON. It groups findings by vulnerability ID, source, analysis state, and analysis detail, then references affected components by their normalized component refs.
+Public OSV fails closed until the caller passes `--allow-public-osv`. A private mirror uses `--osv-url`. Local findings do not create an OSV client.
 
-Findings are marked `in_triage` by default. That default means "detected by a source and awaiting manual exploitability analysis"; it does not claim that a component is exploitable.
+Library helpers perform the same public-endpoint check when they can identify the client's effective URL.
 
-See [CycloneDX VEX output](../reference/cyclonedx-vex-output.md) for the output
-contract.
+Fetching a GitHub SBOM is a separate choice. `--github-repo` permits that input request, but it does not permit a later public OSV query. This is also why `--github-repo` and `--offline` conflict.
 
-## Compatibility
+## Rendering boundary
 
-The package installs a `vexy` executable for selected legacy workflow
-compatibility. That compatibility layer maps supported legacy-style input and
-output flags onto the same generation workflow described above, so source-mode
-validation and the public OSV opt-in boundary stay shared with the primary
-`vexcalibur generate` command.
+`vexcalibur.vex` is currently a CycloneDX 1.6 JSON renderer. It groups findings by vulnerability, source, state, and detail. Each group points at the component references it assesses.
 
-The supported compatibility subset emits CycloneDX 1.6 JSON VEX. It accepts the
-legacy `-c/--config` flag for command-line compatibility, but it does not parse
-legacy data-source credentials or re-enable OSS Index. Legacy CycloneDX XML VEX
-output and CycloneDX `1.4` VEX output are intentionally outside the current
-compatibility contract.
+OSV says that a vulnerability matches a package version; it does not decide exploitability for a particular deployment. OSV findings therefore enter VEX as `in_triage`. A local finding can carry a reviewed state such as `not_affected` or `exploitable`.
+
+The normalized finding boundary is also where another VEX renderer can fit. A new format still needs an explicit semantic mapping. Similar field names do not guarantee that states, products, provenance, or timestamps mean the same thing.
+
+Format conversion should expose any loss or default instead of hiding it in serialization code.
+
+## Legacy command boundary
+
+The `vexy` executable maps a small legacy command surface to the same loaders, sources, and renderer. It does not parse legacy credentials or revive OSS Index. Keeping the adapter thin preserves Vexcalibur's source validation and public-service policy.
+
+See the [provider contract](../reference/provider-contract.md) for extension rules and the [output reference](../reference/cyclonedx-vex-output.md) for the current rendering contract.

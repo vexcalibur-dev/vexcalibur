@@ -1,83 +1,95 @@
-# No-Network Local Findings Tutorial
+# Write and use a local findings file
 
-This tutorial generates CycloneDX 1.6 VEX JSON from committed fixture files
-without contacting OSV or any other vulnerability service.
+The quickstart used a ready-made findings file. In this tutorial, we'll write one finding. We'll use it to generate VEX and confirm that our analysis reached the output.
 
-Use this path when you are evaluating Vexcalibur from a private environment, or
-when another trusted process already produced vulnerability and exploitability
-findings.
+## Set up the project
 
-## Prerequisites
+You need:
 
-- Python 3.10 or newer
-- uv 0.11.17
-- Dependency installation access through PyPI, an internal package index, a
-  populated uv cache, or a prebuilt environment.
+- Git.
+- Python 3.10 or newer.
+- `uv` 0.11.17.
+- A POSIX-style shell.
 
-Install the project and development dependencies from the repository root:
+Clone the source and enter its root:
+
+```bash
+git clone https://github.com/vexcalibur-dev/vexcalibur.git
+cd vexcalibur
+```
+
+Install the locked dependencies:
 
 ```bash
 uv sync
 ```
 
-After dependencies are installed, the generation command in this tutorial does
-not contact OSV or any other vulnerability service.
+Dependency installation may contact your configured package index. The later generation step uses only the local SBOM and findings file.
 
-Confirm that the CLI starts:
+We'll reuse `tests/fixtures/sbom/cyclonedx-json-simple.json`. Its Django component has the reference `component:django`.
+
+## Describe the finding
+
+Create `/tmp/vexcalibur-findings.json`:
 
 ```bash
-uv run --frozen vexcalibur --help
+cat >/tmp/vexcalibur-findings.json <<'JSON'
+{
+  "findings": [
+    {
+      "id": "CVE-2026-0001",
+      "component_ref": "component:django",
+      "source_name": "Internal Review",
+      "source_url": "https://security.example.test/reviews/CVE-2026-0001",
+      "modified": "2026-07-01T12:00:00Z",
+      "analysis_state": "not_affected",
+      "analysis_detail": "The application does not enable the affected feature."
+    }
+  ]
+}
+JSON
 ```
 
-## Generate VEX Offline
+The component reference connects the finding to the SBOM. The state and detail record the result of our exploitability review.
 
-Run `generate` with the fixture SBOM and fixture findings file:
+## Generate VEX
+
+Run the generator without a network source:
 
 ```bash
 uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
-  --timestamp 2026-06-23T00:00:00Z \
-  --output /tmp/vexcalibur-offline-vex.json
+  --findings-file /tmp/vexcalibur-findings.json \
+  --timestamp 2026-07-01T12:00:00Z \
+  --output /tmp/vexcalibur-local-vex.json
 ```
 
-Expected success signal: the command exits with status `0` and writes
-`/tmp/vexcalibur-offline-vex.json`.
+The command should exit without output and create `/tmp/vexcalibur-local-vex.json`.
 
-## Verify The Output
+## Check the analysis
 
-Inspect the generated document:
-
-```bash
-python -m json.tool /tmp/vexcalibur-offline-vex.json | sed -n '1,120p'
-```
-
-Verify stable fields and the expected fixture vulnerability count:
+Read the generated vulnerability entry:
 
 ```bash
 python - <<'PY'
 import json
 from pathlib import Path
 
-vex = json.loads(Path("/tmp/vexcalibur-offline-vex.json").read_text())
-assert vex["bomFormat"] == "CycloneDX"
-assert vex["specVersion"] == "1.6"
-assert vex["metadata"]["timestamp"] == "2026-06-23T00:00:00+00:00"
-assert len(vex["vulnerabilities"]) == 5
-print("generated offline CycloneDX VEX")
+vex = json.loads(Path("/tmp/vexcalibur-local-vex.json").read_text())
+finding = vex["vulnerabilities"][0]
+assert finding["id"] == "CVE-2026-0001"
+assert finding["analysis"]["state"] == "not_affected"
+assert finding["analysis"]["detail"] == (
+    "The application does not enable the affected feature."
+)
+assert finding["affects"][0]["ref"] == "component:django"
+print("preserved local exploitability analysis")
 PY
 ```
 
-Expected success signal: the Python verification command prints
-`generated offline CycloneDX VEX`.
+You should see `preserved local exploitability analysis`.
 
-## What The Command Did
+Vexcalibur validated the local JSON. It matched `component:django`. It copied the review state into CycloneDX VEX. It did not create an OSV client.
 
-`--offline --findings-file` selects the local findings source. Vexcalibur parses
-the SBOM locally, matches each finding to an SBOM component by `component_ref` or
-unique package URL, and renders CycloneDX VEX. It does not construct an OSV
-client or send package data to a network provider.
-
-Use the [local findings reference](../reference/local-findings.md) when writing
-your own findings file.
+Use the [local findings reference](../reference/local-findings.md) for every field, default, size limit, and matching rule.

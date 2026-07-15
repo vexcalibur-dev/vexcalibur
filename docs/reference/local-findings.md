@@ -1,8 +1,8 @@
-# Local Findings Reference
+# Local findings format
 
-Local findings let `vexcalibur generate` build VEX without contacting a vulnerability service. Use this format for offline workflows, private review outputs, or CI jobs that already have vulnerability and analysis data from another trusted source.
+A local findings file supplies vulnerability and exploitability data without a network provider. The file must be UTF-8 JSON no larger than 5 MiB.
 
-The file is UTF-8 JSON. The top-level value must be an object, the `findings` array is required, and unknown fields are rejected. Files larger than 5 MiB or documents with more than 10,000 findings are rejected.
+The top-level value is an object with one required `findings` array. Unknown fields are rejected. The array may contain at most 10,000 items and may be empty.
 
 ```json
 {
@@ -14,42 +14,37 @@ The file is UTF-8 JSON. The top-level value must be an object, the `findings` ar
       "source_url": "https://security.example.test/vulns/CVE-2026-0001",
       "modified": "2026-01-01T00:00:00Z",
       "analysis_state": "not_affected",
-      "analysis_detail": "Reviewed and not affected in this deployment."
+      "analysis_detail": "The affected feature is disabled in this deployment."
     }
   ]
 }
 ```
 
-## Document Fields
+## Top-level field
 
-- `findings`: required array of finding objects. Use an explicit empty array when the caller intentionally wants a no-finding VEX document from local data only.
+| Field | Required | Type | Description |
+| --- | --- | --- | --- |
+| `findings` | Yes | Array | Zero to 10,000 finding objects. An empty array records that the local source supplied no findings. |
 
-## Finding Fields
+## Finding fields
 
-- `id`: required non-empty vulnerability identifier.
-- `component_ref`: non-empty Vexcalibur component reference. Required unless
-  `purl` is provided. For local CycloneDX input this is the component
-  `bom-ref`. For GitHub Dependency Graph SBOM input this is the package
-  `SPDXID` when present, otherwise the package URL.
-- `purl`: non-empty package URL from the SBOM. Required unless `component_ref` is provided. If a package URL matches more than one SBOM component, use `component_ref`.
-- `source_name`: non-empty finding source name. Defaults to `Local`.
-- `source_url`: HTTP(S) source URL with a host. Defaults to `https://vexcalibur.dev/sources/local`.
-- `modified`: optional ISO-8601 timestamp for the vulnerability update time. Naive timestamps are treated as UTC.
-- `analysis_state`: CycloneDX VEX state. Defaults to `in_triage`.
-- `analysis_detail`: non-empty human-readable analysis detail. Defaults to `Provided by local findings file; manual exploitability analysis required.`
+| Field | Required | Default | Rules |
+| --- | --- | --- | --- |
+| `id` | Yes | — | Non-empty vulnerability identifier. |
+| `component_ref` | One selector required | — | Non-empty component reference from the parsed SBOM. |
+| `purl` | One selector required | — | Valid package URL that matches exactly one parsed component. |
+| `source_name` | No | `Local` | Non-empty string. |
+| `source_url` | No | `https://vexcalibur.dev/sources/local` | HTTP or HTTPS URL with a host. |
+| `modified` | No | Omitted | ISO-8601 timestamp string. Naive values are treated as UTC. |
+| `analysis_state` | No | `in_triage` | One of the states listed below. |
+| `analysis_detail` | No | `Provided by local findings file; manual exploitability analysis required.` | Non-empty string. |
 
-Supported `analysis_state` values:
+Supported `analysis_state` values are `resolved`, `exploitable`, `in_triage`, `false_positive`, and `not_affected`.
 
-- `resolved`
-- `exploitable`
-- `in_triage`
-- `false_positive`
-- `not_affected`
+## Component matching
 
-## Matching Rules
+At least one of `component_ref` and `purl` is required.
 
-`component_ref` is preferred because VEX `affects` entries refer to normalized
-component identities by ref. When both `component_ref` and `purl` are provided,
-they must identify the same SBOM component.
+For local CycloneDX input, `component_ref` is the component's `bom-ref`. For GitHub SPDX input, it is the package `SPDXID` when present and otherwise the package URL.
 
-`purl` matching is allowed when the package URL identifies exactly one SBOM component. If the same package URL appears under multiple component refs, Vexcalibur rejects the finding and asks for `component_ref`.
+When both selectors appear, they must identify the same component. A package URL that appears under more than one component reference is ambiguous and rejected; use `component_ref` in that case.

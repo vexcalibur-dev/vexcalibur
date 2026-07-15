@@ -1,26 +1,40 @@
-# Vexcalibur Documentation
+# Vexcalibur
 
-Vexcalibur is a general-purpose toolkit for producing and transforming Vulnerability Exploitability eXchange documents from SBOMs and vulnerability data sources.
+Vexcalibur turns SBOM package inventories and vulnerability findings into VEX documents. The current release reads CycloneDX files or a GitHub Dependency Graph SBOM. It collects findings from OSV-compatible services or local JSON. It writes CycloneDX 1.6 VEX JSON.
 
-The current implementation supports CycloneDX JSON and XML SBOM ingest, GitHub Dependency Graph SBOM input, OSV-compatible finding discovery, local no-network findings, CycloneDX 1.6 VEX JSON output, and a narrow `vexy` compatibility command. Public OSV access is fail-closed: commands must opt in with `--allow-public-osv` before package URLs, versions, or SBOM-derived inventories are sent to `https://api.osv.dev`.
+Public OSV access fails closed. Vexcalibur sends package URLs and versions to `https://api.osv.dev` only when a command includes `--allow-public-osv`.
 
-Vexcalibur is usable for those workflows today, but public contracts remain unstable before 1.0. CLI flags, Python APIs, and output details can change until the project publishes a stable compatibility policy.
+Vexcalibur is pre-1.0. Pin an exact release and review the [project status](explanation/project-status.md) before depending on a public contract.
 
-## Start Here
+## Tutorials
 
-- [Quickstart tutorial](tutorials/quickstart.md) walks through generating a VEX document from the repository's public fixture SBOM.
-- [No-network local findings tutorial](tutorials/offline-local-findings.md) walks through generating VEX without contacting a public service.
-- [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md) covers task-oriented generation commands and source configuration.
-- [Use a private OSV mirror](how-to/use-private-osv-mirror.md) shows how to keep private SBOM inventories away from public OSV.
-- [Publish to PyPI](how-to/publish-to-pypi.md) is the release runbook for tag-derived package publishing.
-- [CLI reference](reference/cli.md) lists the current command surface.
-- [CycloneDX VEX output reference](reference/cyclonedx-vex-output.md) describes generated document shape and determinism.
-- [Provider contract reference](reference/provider-contract.md) documents the extension contract for vulnerability sources.
-- [Python API reference](reference/python-api.rst) is generated from source docstrings.
-- [Local findings reference](reference/local-findings.md) defines the offline findings JSON format.
-- [Architecture](explanation/architecture.md) explains the current trust boundary and processing flow.
-- [Project status](explanation/project-status.md) explains what is usable now and what is still unstable before 1.0.
-- [CI and recurring checks](development/ci.md) describes scheduled security gates and live-service check handling.
+- [Generate your first VEX document](tutorials/quickstart.md)
+- [Write and use a local findings file](tutorials/offline-local-findings.md)
+
+## How-to guides
+
+- [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
+- [Use a private OSV mirror](how-to/use-private-osv-mirror.md)
+- [Publish Vexcalibur to PyPI](how-to/publish-to-pypi.md)
+
+## Reference
+
+- [Command-line interface](reference/cli.md)
+- [CycloneDX VEX output](reference/cyclonedx-vex-output.md)
+- [Local findings format](reference/local-findings.md)
+- [Vulnerability-source provider contract](reference/provider-contract.md)
+- [Python API](reference/python-api.rst)
+
+## Explanation
+
+- [Architecture and trust boundaries](explanation/architecture.md)
+- [Project status and compatibility](explanation/project-status.md)
+
+## Contributor documentation
+
+- [CI, releases, and recurring checks](development/ci.md)
+- [Python style policy](development/python-style.md)
+- [Vendored external documents](external/README.md)
 
 ```{toctree}
 :hidden:

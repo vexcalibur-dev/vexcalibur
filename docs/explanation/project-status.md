@@ -1,49 +1,40 @@
-# Project Status
+# Project status and compatibility
 
-Vexcalibur is usable for documented SBOM-to-VEX workflows, but it has not
-published a stable 1.0 compatibility policy. Treat command names, flags, Python
-imports, and detailed output shapes as changeable until a release notes page or
-compatibility policy says otherwise.
+Vexcalibur has published releases and supports the workflows in this manual. It has not reached 1.0, so those releases do not yet promise a stable CLI or Python API.
 
-## Usable Now
+Pin exact package and action versions in automation. Do not use a mutable branch for a production workflow.
 
-The current implementation supports:
+## Available now
 
-- CycloneDX JSON and XML SBOM ingest for CycloneDX `1.4`, `1.5`, and `1.6`.
-- GitHub Dependency Graph SBOM input with `--github-repo OWNER/REPO`.
-- Public OSV queries when the caller explicitly opts in with
-  `--allow-public-osv`.
-- Private OSV-compatible endpoints with `--osv-url`.
-- No-network local findings with `--offline --findings-file`.
-- CycloneDX 1.6 VEX JSON output.
-- Deterministic metadata and serial numbers when `--timestamp` and controlled
-  finding inputs are used.
-- A narrow `vexy` compatibility executable for CycloneDX JSON VEX generation
-  from supported SBOM inputs and explicit Vexcalibur source modes.
-- CI quality gates for tests, typing, linting, package build, installed CLI
-  checks, documentation build, secret scanning, dependency audit, CodeQL,
-  dependency review, and OpenSSF Scorecard.
+- CycloneDX JSON and XML SBOM input for versions 1.4, 1.5, and 1.6
+- GitHub Dependency Graph SBOM input through `--github-repo OWNER/REPO`
+- public OSV queries with `--allow-public-osv`
+- private OSV-compatible endpoints through `--osv-url`
+- local findings with `--offline --findings-file`
+- CycloneDX 1.6 VEX JSON output
+- repeatable serialization when the SBOM, findings, and timestamp are controlled
+- a limited `vexy` compatibility executable
+- a released companion GitHub Action
 
-## Compatibility Limits
+The repository also checks supported Python versions, typing, lint, package installation, documentation, dependencies, secrets, CodeQL, dependency changes, and OpenSSF Scorecard.
 
-Before 1.0, these surfaces can still change:
+## Unstable before 1.0
 
-- CLI command names, flags, defaults, and exit behavior.
-- Python import paths, type shapes, and exception classes.
-- Generated VEX details beyond the documented CycloneDX 1.6 output contract.
-- Provider configuration and extension hooks.
-- GitHub SBOM token resolution and GitHub Enterprise configuration.
-- GitHub Action release tags and package compatibility tables.
+These surfaces may change between releases:
 
-Pin exact package and action versions once releases begin. Do not use mutable
-branches for production workflows.
+- command names, flags, defaults, messages, and exit behavior.
+- Python imports, signatures, types, and exceptions.
+- output details outside the documented CycloneDX contract.
+- provider configuration and extension hooks.
+- GitHub token lookup and Enterprise configuration.
+- compatibility pairings between the package and its integrations.
 
-## Deferred Work
+Read release notes before upgrading, even across patch releases.
 
-The `vexy` compatibility executable does not support legacy CycloneDX XML VEX
-output, CycloneDX `1.4` VEX output, or legacy OSS Index data-source behavior.
-Those paths are intentionally not part of the current compatibility subset.
+## Not implemented
 
-Policy-driven VEX state selection for OSV-derived findings is also deferred.
-OSV-derived findings currently use `in_triage` with an analysis detail that
-requires manual exploitability analysis.
+Vexcalibur does not currently read or write OpenVEX or CSAF. Its only VEX output is CycloneDX 1.6 JSON.
+
+OSV findings do not yet pass through a policy engine that can decide deployment-specific exploitability. They use `in_triage` and require review.
+
+The `vexy` adapter does not support legacy CycloneDX XML VEX output, CycloneDX 1.4 VEX output, or OSS Index credentials and queries.

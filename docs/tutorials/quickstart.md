@@ -1,47 +1,63 @@
-# Quickstart
+# Generate your first VEX document
 
-This tutorial generates CycloneDX 1.6 VEX JSON from the public fixture SBOM included in the repository.
+In this tutorial, we'll turn two committed example files into CycloneDX 1.6 VEX JSON. The generation step uses only local inputs, so no package inventory leaves the repository.
 
-The example intentionally calls the public OSV API. Use it only with the fixture SBOM or another package inventory you are allowed to send to a public service. For private SBOMs, use a private OSV mirror with `--osv-url` instead.
+## Set up Vexcalibur
 
-## Prerequisites
+You need:
 
-- Python 3.10 or newer
-- uv 0.11.17
+- Git.
+- Python 3.10 or newer.
+- `uv` 0.11.17.
+- A POSIX-style shell.
 
-Install the project and development dependencies from the repository root:
+Clone the source and enter its root:
+
+```bash
+git clone https://github.com/vexcalibur-dev/vexcalibur.git
+cd vexcalibur
+```
+
+Install the locked dependencies:
 
 ```bash
 uv sync
 ```
 
-Confirm that the CLI starts:
+This setup step may contact your configured package index. Once the dependencies are installed, the rest of the tutorial does not need a network finding source.
+
+Check that the command starts:
 
 ```bash
 uv run --frozen vexcalibur --help
 ```
 
-## Generate VEX
+You should see the `query-osv` and `generate` commands.
 
-Run `generate` against the fixture SBOM. The `--allow-public-osv` flag is required because this command sends fixture package URLs and versions to `https://api.osv.dev`.
+## Generate the document
 
-This step requires internet access. OSV data can change, so the number of vulnerability entries can vary over time.
+Run Vexcalibur with the example SBOM and findings file:
 
 ```bash
 uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
-  --allow-public-osv \
+  --offline \
+  --findings-file tests/fixtures/findings/all-analysis-states.json \
   --timestamp 2026-06-23T00:00:00Z \
   --output /tmp/vexcalibur-vex.json
 ```
 
-Inspect the generated document:
+The command should exit without output and create `/tmp/vexcalibur-vex.json`.
+
+## Inspect the result
+
+Print the first part of the document:
 
 ```bash
 python -m json.tool /tmp/vexcalibur-vex.json | sed -n '1,80p'
 ```
 
-Verify the stable document metadata:
+Now check the fields this tutorial expects:
 
 ```bash
 python - <<'PY'
@@ -52,28 +68,15 @@ vex = json.loads(Path("/tmp/vexcalibur-vex.json").read_text())
 assert vex["bomFormat"] == "CycloneDX"
 assert vex["specVersion"] == "1.6"
 assert vex["metadata"]["timestamp"] == "2026-06-23T00:00:00+00:00"
-print("generated CycloneDX VEX")
+assert len(vex["vulnerabilities"]) == 5
+print("generated offline CycloneDX VEX")
 PY
 ```
 
-The output is a CycloneDX 1.6 document with VEX vulnerability entries for OSV matches. OSV-derived findings are currently marked `in_triage` because Vexcalibur has not yet implemented policy-driven VEX state selection for OSV results.
+You should see `generated offline CycloneDX VEX`.
 
-## Use A Private OSV Mirror
+Vexcalibur read component identities from the SBOM. It matched the local findings to those components, then rendered the result. `--offline` prevented network finding sources. The fixed timestamp made the metadata and generated identifiers stable.
 
-For private SBOMs or sensitive inventories, omit `--allow-public-osv` and point Vexcalibur at an internal OSV-compatible endpoint:
+## Keep going
 
-```bash
-uv run --frozen vexcalibur generate \
-  path/to/private-sbom.json \
-  --osv-url https://osv.internal.example \
-  --output /tmp/vexcalibur-vex.json
-```
-
-Replace `https://osv.internal.example` with your mirror URL. Vexcalibur treats that URL as the source of OSV-compatible query responses.
-
-## Next Steps
-
-- Use [Generate CycloneDX VEX](../how-to/generate-cyclonedx-vex.md) for command recipes.
-- Use the [CLI reference](../reference/cli.md) for current flags and behavior.
-- Use `--github-repo OWNER/REPO` when the package inventory should come from a GitHub Dependency Graph SBOM instead of a local SBOM file.
-- Read [Architecture](../explanation/architecture.md) before changing provider behavior or public-service policy.
+Next, [write your own local findings file](offline-local-findings.md). When you need a network source, use the [generation how-to](../how-to/generate-cyclonedx-vex.md) and choose either a private OSV mirror or an explicitly approved public OSV query.

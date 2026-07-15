@@ -1,41 +1,25 @@
-# Publish To PyPI
+# Publish Vexcalibur to PyPI
 
-Use this runbook to publish Vexcalibur from the automated release workflow. Do
-not upload Vexcalibur with a local API token or password.
+Use the automated release path. Do not upload Vexcalibur with a local PyPI password or API token.
 
-## Prerequisites
+## Check release access
 
-- You are on `main`, and `main` contains the commit to release.
-- The release tag uses `vMAJOR.MINOR.PATCH`, for example `v0.1.0`.
-- The `vexcalibur-dev` organization has the `AUTOMATION_CLIENT_ID` variable and
-  `AUTOMATION_SECRET` secret available to this repository. These identify a
-  GitHub App named `vexcalibur-dev-automation`, installed on
-  `vexcalibur-dev/vexcalibur` with Contents read/write permission so the release
-  workflow can create tags and GitHub Releases. PyPI publishing verifies that
-  GitHub Releases are authored by `vexcalibur-dev-automation[bot]`.
-- Anyone who can manually dispatch the `Release` workflow is trusted to publish
-  a GitHub Release and trigger the PyPI publishing workflow.
-- If the GitHub `pypi` environment is protected, you can approve or request the
-  required approval for that environment.
-- You have PyPI maintainer or owner rights for configuring Trusted Publishing
-  and yanking a bad release.
-- The PyPI project or pending publisher is configured for:
-  - project `vexcalibur`
-  - repository `vexcalibur-dev/vexcalibur`
-  - workflow `pypi.yml`
-  - environment `pypi`
-- The GitHub `pypi` environment exists. It should not contain a PyPI token; the
-  workflow uses PyPI Trusted Publishing.
-- Local release preflight requires `uv`, `actionlint`, and `shellcheck` on
-  `PATH`. Their versions are pinned in `.tool-versions`; install or activate
-  them with a `.tool-versions`-compatible tool manager such as `mise` or `asdf`,
-  or with direct package installs that provide the pinned versions.
+Before starting, confirm:
 
-PyPI can create a project from a pending Trusted Publisher on the first publish.
-A pending publisher does not reserve the project name until the first upload
-succeeds.
+- `main` contains the commit to release.
+- the `vexcalibur-dev-automation` GitHub App is installed on the repository with Contents read/write permission.
+- the repository has `AUTOMATION_CLIENT_ID` and `AUTOMATION_SECRET` configured for that app.
+- the GitHub `pypi` environment exists and contains no PyPI token.
+- PyPI Trusted Publishing names project `vexcalibur`, repository `vexcalibur-dev/vexcalibur`, workflow `pypi.yml`, and environment `pypi`.
+- you have the PyPI project access needed to yank a release if necessary.
 
-## Preflight
+Anyone who can dispatch the `Release` workflow can cause a GitHub Release and PyPI publication. Treat that permission as release access.
+
+The `pypi` environment currently has no protection rules or required reviewers. Publication does not pause for an environment approval.
+
+For local checks, install the `uv`, `actionlint`, and `shellcheck` versions from `.tool-versions`.
+
+## Run the preflight
 
 Start from a clean, current checkout:
 
@@ -44,9 +28,12 @@ git fetch origin main --tags
 git switch main
 git pull --ff-only origin main
 git status --short
+test -z "$(git status --porcelain)"
 ```
 
-Run the local gates:
+Stop if `git status --short` prints any tracked or untracked path, or if the final command fails.
+
+Run the same classes of checks used by release validation:
 
 ```bash
 actionlint -version
@@ -63,9 +50,7 @@ uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
 make secrets
 ```
 
-Build and inspect the release artifacts with a temporary local tag. Delete the
-temporary tag before creating the real release tag. Use the release script output
-so the local preflight checks the same version the workflow will publish.
+Build with the version that automation would select. The temporary local tag gives `setuptools-scm` the same version context as the release workflow:
 
 ```bash
 release_metadata="$(scripts/next-release-tag.sh)"
@@ -104,85 +89,67 @@ uv run --frozen twine check "$DIST_DIR"/*
 VEXCALIBUR_WHEEL="$(find "$DIST_DIR" -maxdepth 1 -type f -name '*.whl')" \
   VEXCALIBUR_EXPECTED_VERSION="$RELEASE_VERSION" \
   make installed-cli-check
+
 if [ "$TEMP_TAG_CREATED" = "true" ]; then
   git tag --delete "$RELEASE_TAG"
   trap - EXIT
 fi
 ```
 
-If the release tag already exists on `HEAD`, this preflight checks that tag
-instead of recreating it. That matches the automation recovery path for an
-existing tag whose GitHub Release was not created. Do not continue if any command
-fails or if `git status --short` shows an unexpected tracked change.
+If the tag already points to `HEAD`, the script checks that existing tag. This is the recovery path for a tag whose GitHub Release was not created.
 
-## Publish
+## Start the release
 
-The preferred path is the `Release` workflow. It runs after pushes to `main`,
-computes the next `vMAJOR.MINOR.PATCH` tag from Conventional Commits, runs
-release quality gates against the exact release commit, creates an annotated tag
-with the automation GitHub App, and publishes a GitHub Release. The first
-automatic release is `v0.1.0`.
+Push the releasable commit to `main`. The `Release` workflow computes the next `vMAJOR.MINOR.PATCH` tag from Conventional Commits and validates the exact commit. It scans generated release notes before the automation app creates an annotated tag and GitHub Release.
 
-The workflow can also be started manually from GitHub Actions. Leave `version`
-empty to compute the next version, or provide an explicit `MAJOR.MINOR.PATCH`
-version such as `0.1.0`.
+You may also dispatch the workflow. Leave `version` empty to compute it, or enter `MAJOR.MINOR.PATCH` to choose it explicitly.
 
-Automatic version bumps use these rules:
+Automatic version selection follows these rules:
 
-- `BREAKING CHANGE:` or a `!` marker in the Conventional Commit type creates a
-  major release.
-- `feat:` creates a minor release.
-- `fix:`, `perf:`, `refactor:`, `deps:`, `build(deps):`, and `chore(deps):`
-  create a patch release.
-- `docs:`, `test:`, `ci:`, and ordinary `chore:` commits do not create a release
-  by themselves after the first tag exists.
-- `[skip release]` and `[release skip]` in the head commit skip automatic
-  release creation.
+| Commit | Release change |
+| --- | --- |
+| `BREAKING CHANGE:`, `BREAKING-CHANGE:`, or a `!` marker | Major |
+| `feat:` | Minor |
+| `fix:`, `perf:`, `refactor:`, `deps:`, `revert:`, `build(deps):`, `chore(deps):`, or Git's `Revert "..."` | Patch |
+| `docs:`, `test:`, `ci:`, ordinary `chore:` | No release by itself |
+| Head commit containing `[skip release]` or `[release skip]` | Skip |
 
-The release workflow publishes the GitHub Release with generated release notes
-after scanning those notes with `detect-secrets`. That release triggers
-`.github/workflows/pypi.yml`. The PyPI workflow validates that the release was
-created by the `vexcalibur-dev-automation` GitHub App, validates the tag format,
-confirms the GitHub Release is not marked as a prerelease, confirms the tag
-points at current `origin/main`, re-runs the quality, workflow lint, shell lint,
-security, test, documentation, package build, and installed-wheel gates, verifies
-both distribution metadata records match the tag, and publishes through the
-`pypi` environment.
+Automatic selection examines all commit messages since the latest release and uses the highest matching bump.
 
-Pushing a tag alone does not publish to PyPI. Manually creating a GitHub Release
-does not publish to PyPI because the publishing workflow rejects releases not
-created by the automation app.
+A manual version may have a leading `v`, but otherwise must use `MAJOR.MINOR.PATCH` without leading zeros. Each component must be at most `999999`, and the version must be higher than the latest release. If the latest tag already points to current `main`, leave the manual version empty; the resolver returns that existing tag for recovery.
 
-## Verify
+The GitHub Release triggers `.github/workflows/pypi.yml`. That workflow accepts only a non-prerelease release authored by `vexcalibur-dev-automation[bot]`. Its SemVer tag must point to current `origin/main`.
 
-After the `PyPI` workflow succeeds:
+The workflow reuses release validation and checks both distribution metadata records. It tests the installed wheel on the minimum and maximum Python versions, then publishes through Trusted Publishing.
+
+Pushing a tag alone does not publish. A manually authored GitHub Release is also rejected.
+
+## Verify the publication
+
+After the `PyPI` workflow succeeds, install the exact release in a fresh environment:
 
 ```bash
-RELEASE_VERSION=0.1.0
+RELEASE_VERSION=0.1.1
 python -m venv /tmp/vexcalibur-release-check
 /tmp/vexcalibur-release-check/bin/python -m pip install "vexcalibur==$RELEASE_VERSION"
 /tmp/vexcalibur-release-check/bin/python - <<'PY'
 import importlib.metadata
 import vexcalibur
 
-print(importlib.metadata.version("vexcalibur"))
-print(vexcalibur.__version__)
+distribution_version = importlib.metadata.version("vexcalibur")
+assert distribution_version == vexcalibur.__version__
+print(distribution_version)
 PY
 ```
 
-Both printed versions must match the released version. Also check the PyPI
-project page and the GitHub Release assets or workflow artifacts before
-announcing the release.
+Set `RELEASE_VERSION` to the release you published. Confirm that the printed version matches, then inspect the PyPI page and GitHub Release artifacts before announcing it.
 
-## Mitigate A Bad Release
+## Yank a bad release
 
-If a bad release was uploaded, prefer yanking the release instead of deleting it.
-Yanking is PyPI's non-destructive mitigation for broken, incompatible, or
-vulnerable releases.
+Prefer a yank to deletion. A yank preserves the release record while steering normal dependency resolution away from the bad version.
 
-1. Open `https://pypi.org/manage/project/vexcalibur/releases/`.
-2. Open the bad version's `Options` menu.
-3. Select `Yank`.
-4. Enter a reason that downstream users can act on.
-5. Confirm the release shows as yanked on PyPI.
-6. Fix the problem and publish a higher version.
+1. Open the Vexcalibur releases page in PyPI's project management interface.
+2. Open the bad version's **Options** menu and select **Yank**.
+3. Give downstream users a useful reason.
+4. Confirm that PyPI marks the version as yanked.
+5. Fix the problem and publish a higher version.

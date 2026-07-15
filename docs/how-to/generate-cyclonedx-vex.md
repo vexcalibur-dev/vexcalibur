@@ -1,10 +1,58 @@
 # Generate CycloneDX VEX
 
-Use `vexcalibur generate` when you have a supported CycloneDX JSON or XML SBOM, or when you want to fetch package inventory from a GitHub Dependency Graph SBOM, and need CycloneDX 1.6 VEX JSON based on OSV-compatible vulnerability findings.
+Use `vexcalibur generate` to write CycloneDX 1.6 VEX JSON from a local CycloneDX SBOM or a GitHub Dependency Graph SBOM.
 
-## Generate From A Public Fixture
+The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync`. When using an installed release, run `vexcalibur` directly and substitute your own file paths.
 
-The repository fixture is safe to use in public-service examples. The command must still opt in before contacting the public OSV API:
+Choose one inventory input and one finding source:
+
+| Input | Option |
+| --- | --- |
+| Local CycloneDX JSON or XML | Positional `INPUT_FILE` |
+| GitHub Dependency Graph SBOM | `--github-repo OWNER/REPO` |
+
+| Finding source | Option |
+| --- | --- |
+| Local findings JSON | `--findings-file PATH`; add `--offline` for a local SBOM |
+| Private OSV-compatible service | `--osv-url URL` |
+| Public OSV | `--allow-public-osv` |
+
+## Use local findings
+
+Pass a findings file when vulnerability or exploitability analysis already exists locally:
+
+```bash
+uv run --frozen vexcalibur generate \
+  path/to/sbom.json \
+  --offline \
+  --findings-file path/to/findings.json \
+  --output /tmp/vexcalibur-vex.json
+```
+
+This mode does not contact OSV. A finding must identify an SBOM component by `component_ref` or by a package URL that occurs only once. See the [local findings format](../reference/local-findings.md).
+
+When the inventory comes from `--github-repo`, omit `--offline` because fetching the SBOM uses the network. `--findings-file` still selects local findings and prevents an OSV request.
+
+## Use a private OSV mirror
+
+Point `--osv-url` at the mirror's base URL:
+
+```bash
+uv run --frozen vexcalibur generate \
+  path/to/private-sbom.json \
+  --osv-url https://osv.internal.example \
+  --output /tmp/vexcalibur-vex.json
+```
+
+The endpoint must provide the OSV `/v1/querybatch` API used by Vexcalibur. See [Use a private OSV mirror](use-private-osv-mirror.md) for URL rules and failure handling.
+
+## Use public OSV
+
+```{warning}
+The next command sends SBOM package URLs and versions to `https://api.osv.dev`. Use it only for an inventory approved for public disclosure.
+```
+
+Pass the explicit consent flag:
 
 ```bash
 uv run --frozen vexcalibur generate \
@@ -13,7 +61,7 @@ uv run --frozen vexcalibur generate \
   --output /tmp/vexcalibur-vex.json
 ```
 
-Live OSV results can change. Add `--timestamp` when tests or review steps need deterministic document metadata:
+Live OSV results change. Add a timestamp when the document metadata must stay stable:
 
 ```bash
 uv run --frozen vexcalibur generate \
@@ -23,23 +71,11 @@ uv run --frozen vexcalibur generate \
   --output /tmp/vexcalibur-vex.json
 ```
 
-## Generate With A Private OSV Mirror
+A fixed timestamp does not freeze live vulnerability data.
 
-Use `--osv-url` for private mirrors. Do not pass `--allow-public-osv` for private SBOMs:
+## Fetch an SBOM from GitHub
 
-```bash
-uv run --frozen vexcalibur generate \
-  path/to/sbom.json \
-  --osv-url https://osv.internal.example \
-  --output /tmp/vexcalibur-vex.json
-```
-
-The configured endpoint must implement the OSV query API shape used by Vexcalibur's provider client.
-
-## Generate From A GitHub Repository SBOM
-
-Use `--github-repo OWNER/REPO` when the package inventory should come from
-GitHub Dependency Graph instead of a local SBOM file:
+Pass `--github-repo` instead of a local input path:
 
 <!-- github-repo-public-example:start -->
 ```bash
@@ -50,24 +86,19 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- github-repo-public-example:end -->
 
-Vexcalibur requests an SPDX JSON report from GitHub's asynchronous SBOM API,
-polls until the report is ready, downloads it, and extracts package URL
-references from that SPDX document. It then uses the same vulnerability source
-and CycloneDX VEX rendering pipeline as local CycloneDX input.
+Vexcalibur requests GitHub's asynchronous SPDX 2.3 JSON report. It waits until the report is ready. It downloads the report and extracts package URL references. The resulting components use the same finding and rendering path as a local SBOM.
 
-Token resolution for `--github-repo` is designed to work in local shells and CI:
+Fetching the SBOM and querying a vulnerability service are separate network decisions. `--github-repo` does not grant permission to send the inventory to public OSV.
 
-- Public repositories can be requested without a token, subject to GitHub API
-  rate limits.
-- `--github-token-env NAME` reads a token from the named environment variable.
-- Without `--github-token-env`, Vexcalibur checks `GH_TOKEN` and
-  `GITHUB_TOKEN` for `https://api.github.com`.
-- For non-default GitHub API hosts, pass `--github-token-env NAME` explicitly
-  or rely on the `gh auth token` fallback for that host.
-- If no token environment variable is set, Vexcalibur tries `gh auth token`.
-  Pass `--no-gh-auth` to disable that fallback.
+Vexcalibur resolves GitHub credentials in this order:
 
-Use `--github-api-url` for GitHub Enterprise API hosts:
+1. the variable named by `--github-token-env`.
+2. `GH_TOKEN` or `GITHUB_TOKEN` for `https://api.github.com`.
+3. `gh auth token --hostname HOST`, unless `--no-gh-auth` is set.
+
+Public repositories may work without a token, subject to rate limits. A token-backed request needs repository `Contents: read` permission.
+
+For GitHub Enterprise, pass both the API base URL and an explicit token variable:
 
 <!-- github-repo-enterprise-example:start -->
 ```bash
@@ -80,8 +111,7 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- github-repo-enterprise-example:end -->
 
-In GitHub Actions, grant `contents: read` and pass the workflow token. This is
-a step excerpt that assumes Vexcalibur is already installed in the job:
+If Vexcalibur is already installed in a GitHub Actions job, grant `contents: read` and use this step excerpt to pass the workflow token:
 
 ```yaml
 permissions:
@@ -98,16 +128,16 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-When using the companion action, pass the same CLI arguments through `args`:
+The companion action accepts the same command arguments:
 
 ```yaml
 permissions:
   contents: read
 
 steps:
-  - uses: vexcalibur-dev/vexcalibur-action@d9967565ac550fd5a22feb8f64ca966e51444cc5
+  - uses: vexcalibur-dev/vexcalibur-action@6a028a18b4b7fc15cd5e83056e0013ed0928a483 # v0.2.0
     with:
-      package-spec: vexcalibur==0.1.0
+      package-spec: vexcalibur==0.1.1
       args: |
         generate
         --github-repo
@@ -117,93 +147,50 @@ steps:
         --osv-url
         https://osv.internal.example
         --output
-        vex.json
+        ${{ runner.temp }}/vex.json
     env:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-Fetching an SBOM from GitHub is a network operation. Passing that SBOM-derived
-package inventory to public OSV is a separate network boundary and still
-requires `--allow-public-osv`.
+## Read XML input
 
-## Generate Offline From Local Findings
-
-Use `--findings-file` when another trusted process has already produced vulnerability findings or exploitability analysis. This mode never contacts OSV.
+Pass a CycloneDX XML file in the same position as JSON:
 
 ```bash
 uv run --frozen vexcalibur generate \
-  path/to/sbom.json \
+  tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml \
   --offline \
-  --findings-file path/to/findings.json \
+  --findings-file tests/fixtures/findings/all-analysis-states.json \
   --output /tmp/vexcalibur-vex.json
 ```
 
-The findings file uses Vexcalibur's [local findings JSON format](../reference/local-findings.md). Local findings must identify SBOM components by `component_ref` or by a package URL that appears exactly once in the SBOM.
+## Write to standard output
 
-## Choose A Source Mode For CI
-
-Use exactly one vulnerability source mode in automated jobs:
-
-- Public fixture or intentionally public package inventory: use `--allow-public-osv`.
-- Private SBOM with an internal OSV-compatible service: use `--osv-url https://osv.internal.example`.
-- Offline or pre-reviewed vulnerability data from a local SBOM file: use
-  `--offline --findings-file path/to/findings.json`.
-- GitHub-hosted package inventory: use `--github-repo OWNER/REPO` and choose one
-  vulnerability source mode.
-
-Do not pass `--allow-public-osv` for private SBOMs. Do not combine `--findings-file` with `--allow-public-osv` or `--osv-url`; local findings mode is the no-network path.
-
-## Write To Standard Output
-
-Omit `--output` to write the VEX JSON to standard output:
+Omit `--output`:
 
 ```bash
 uv run --frozen vexcalibur generate \
   tests/fixtures/sbom/cyclonedx-json-simple.json \
-  --allow-public-osv
+  --offline \
+  --findings-file tests/fixtures/findings/all-analysis-states.json
 ```
 
-## Generate From XML Input
+## Check basic output fields
 
-Use the same command for CycloneDX XML SBOM input:
+Parse the file and check its format discriminators:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-xml-simple.xml \
-  --allow-public-osv \
-  --output /tmp/vexcalibur-vex.json
+python - <<'PY'
+import json
+from pathlib import Path
+
+vex = json.loads(Path("/tmp/vexcalibur-vex.json").read_text())
+assert vex["bomFormat"] == "CycloneDX"
+assert vex["specVersion"] == "1.6"
+print(f"found {len(vex.get('vulnerabilities', []))} VEX entries")
+PY
 ```
 
-## Supported Input
+This is a sanity check, not validation against the full CycloneDX JSON schema.
 
-All `generate` source modes currently support:
-
-- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; JSON input must be UTF-8.
-- CycloneDX XML SBOMs rooted at `bom` in the `http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace; XML may use parser-detected XML encodings such as UTF-8 or UTF-16, and DTD, entity, and external-reference declarations are rejected.
-- GitHub Dependency Graph SBOM input from `--github-repo OWNER/REPO`; GitHub
-  generates an SPDX JSON report and Vexcalibur extracts package URL references
-  from package `externalRefs`.
-- GitHub API URLs must use HTTPS and must not include userinfo, query strings,
-  or fragments. For GitHub Enterprise Server, use the API base URL such as
-  `https://github.example.test/api/v3`.
-- Token-backed GitHub SBOM requests need repository `Contents: read`
-  permission. Public repositories can be requested without a token, subject to
-  GitHub API rate limits.
-- Local SBOM files and GitHub SBOM report downloads up to 10 MiB.
-- Up to 10,000 components.
-- Component nesting up to 50 levels.
-- Unique component refs for components with package URLs.
-
-OSV-backed generation also requires components with package URLs and versions from either the PURL, CycloneDX `version` field, or GitHub SPDX `versionInfo`. It intentionally fails when no precise query set can be built. That is safer than producing an empty VEX document that could look authoritative.
-
-Local findings mode can produce an empty VEX document when the findings file explicitly contains no findings.
-
-## Current Limitations
-
-The current generator does not yet support:
-
-- Policy-driven VEX state selection for OSV-derived findings.
-- Legacy `vexy` XML output or CycloneDX `1.4` VEX output.
-
-See the [CycloneDX VEX output reference](../reference/cyclonedx-vex-output.md)
-for the generated document contract.
+See the [CLI reference](../reference/cli.md) for accepted SBOM versions, size limits, option conflicts, token behavior, and exit messages. See the [output reference](../reference/cyclonedx-vex-output.md) for grouping and determinism rules.
