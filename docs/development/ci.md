@@ -28,7 +28,11 @@ requirements include hashes for every locked dependency and the SHA-256 digest
 of the wheel under test, so these jobs do not resolve unconstrained runtime
 versions.
 
-The `CI result` job combines the normal required results into one status that can be selected by branch protection. The current `main` ruleset does not require a status check, so CI success is not enforced as a merge rule. CodeQL, dependency review, OpenSSF Scorecard, and pre-commit run in dedicated workflows.
+The `CI result` job combines the normal required results into one status selected
+by the protected `main` ruleset. That ruleset also requires the dedicated
+CodeQL, dependency-review, and pre-commit checks, with strict up-to-date branch
+enforcement. See [Verify GitHub governance](github-governance.md) for the
+cross-repository policy and drift check.
 
 A normal manual run executes the same job set as a pull request or push. Its secret scan uses the current branch baseline, while a pull request uses the exact base-commit baseline. Set `run_live_services` to add live compatibility tests. Set `run_scheduled_profile` to run only the scheduled profile: repository security checks plus live-service tests.
 

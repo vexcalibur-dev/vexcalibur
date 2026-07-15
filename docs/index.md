@@ -40,6 +40,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 ## Contributor documentation
 
 - [CI, releases, and recurring checks](development/ci.md)
+- [Verify GitHub governance](development/github-governance.md)
 - [Python style policy](development/python-style.md)
 - [Vendored external documents](external/README.md)
 
@@ -64,6 +65,7 @@ reference/local-findings
 explanation/architecture
 explanation/project-status
 development/ci
+development/github-governance
 development/python-style
 external/README
 ```

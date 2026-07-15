@@ -1,0 +1,14 @@
+# Danny Sauer is the primary maintainer for the complete Vexcalibur codebase.
+* @dannysauer
+
+# These paths control CI, releases, publication, and the policy used to detect drift.
+/.github/CODEOWNERS @dannysauer
+/.github/dependabot.yml @dannysauer
+/.github/workflows/ @dannysauer
+/scripts/check_github_governance.py @dannysauer
+/scripts/next-release-tag.sh @dannysauer
+/tests/fixtures/governance/ @dannysauer
+/tests/test_github_governance.py @dannysauer
+/docs/development/github-governance.md @dannysauer
+/pyproject.toml @dannysauer
+/uv.lock @dannysauer
