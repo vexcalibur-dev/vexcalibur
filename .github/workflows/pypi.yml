@@ -94,5 +94,48 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Re-resolve validated release tag
+        env:
+          EXPECTED_SHA: ${{ needs.validation.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          read -r object_type object_sha < <(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+              --jq '[.object.type, .object.sha] | @tsv'
+          )
+
+          tag_depth=0
+          while [[ "${object_type}" == "tag" ]]; do
+            tag_depth=$((tag_depth + 1))
+            if ((tag_depth > 8)); then
+              echo "::error::Release tag ${RELEASE_TAG} has excessive indirection."
+              exit 1
+            fi
+            read -r object_type object_sha < <(
+              gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object_sha}" \
+                --jq '[.object.type, .object.sha] | @tsv'
+            )
+          done
+
+          if [[ "${object_type}" != "commit" ]]; then
+            echo "::error::Release tag ${RELEASE_TAG} does not resolve to a commit."
+            exit 1
+          fi
+
+          current_main_sha="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha'
+          )"
+          if [[ "${object_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Release tag ${RELEASE_TAG} moved after validation."
+            exit 1
+          fi
+          if [[ "${current_main_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Main moved after release validation."
+            exit 1
+          fi
+
       - name: Publish distributions
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
