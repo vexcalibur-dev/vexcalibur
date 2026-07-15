@@ -68,10 +68,19 @@ Before gaining write access, the workflow calls `release-validation.yml` against
 
 Release validation also runs the OpenVEX and CSAF interoperability gates. The
 CSAF gate checks source-tree and installed-wheel output with the same pinned
-schema and mandatory suite. The release job then creates a short-lived
-installation token for the `vexcalibur-dev-automation` GitHub App.
+schema and mandatory suite.
 
-The write-capable job confirms that `main` still points to the validated commit. It generates release notes and scans them for secrets. It then creates an annotated tag and publishes the GitHub Release.
+Release notes cross three fresh runners. The first uses a short-lived
+`vexcalibur-dev-automation` token only to ask GitHub to generate the notes, then
+uploads them with a SHA-256 digest. A credentialless runner downloads that exact
+artifact, verifies its digest, and scans it for secrets with the frozen
+dependency lock. The publisher downloads the original artifact on another clean
+runner and proves that its digest matches both earlier jobs before it creates a
+new write token. Scanner dependencies, caches, and executable paths therefore do
+not carry into publication.
+
+The write-capable job also confirms that `main` still points to the validated
+commit. It then creates the annotated tag and publishes the GitHub Release.
 
 An existing tag or release is accepted only when it already points to the same commit.
 
@@ -88,6 +97,12 @@ Publishing begins only from a published GitHub Release. `.github/workflows/pypi.
 - successful shared release validation.
 
 The workflow publishes through PyPI Trusted Publishing from the `pypi` environment. It has `id-token: write` only in the publish job and uses no stored PyPI password.
+
+Immediately before the Trusted Publishing action, the publish job resolves the
+release tag through the GitHub API again, follows annotated-tag objects to their
+commit, and requires both the tag and current `main` to match the SHA that passed
+release validation. A moved or replaced tag therefore fails before the OIDC
+publication step.
 
 The Trusted Publisher identity is:
 

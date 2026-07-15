@@ -100,7 +100,7 @@ If the tag already points to `HEAD`, the script checks that existing tag. This i
 
 ## Start the release
 
-Push the releasable commit to `main`. The `Release` workflow computes the next `vMAJOR.MINOR.PATCH` tag from Conventional Commits and validates the exact commit. It scans generated release notes before the automation app creates an annotated tag and GitHub Release.
+Push the releasable commit to `main`. The `Release` workflow computes the next `vMAJOR.MINOR.PATCH` tag from Conventional Commits and validates the exact commit. It generates, digest-checks, and scans release notes on separate runners. Only the final clean publisher receives the automation app's write token to create the annotated tag and GitHub Release.
 
 You may also dispatch the workflow. Leave `version` empty to compute it, or enter `MAJOR.MINOR.PATCH` to choose it explicitly.
 
@@ -120,7 +120,7 @@ A manual version may have a leading `v`, but otherwise must use `MAJOR.MINOR.PAT
 
 The GitHub Release triggers `.github/workflows/pypi.yml`. That workflow accepts only a non-prerelease release authored by `vexcalibur-dev-automation[bot]`. Its SemVer tag must point to current `origin/main`.
 
-The workflow reuses release validation and checks both distribution metadata records. It tests the installed wheel on the minimum and maximum Python versions, then publishes through Trusted Publishing.
+The workflow reuses release validation and checks both distribution metadata records. It tests the installed wheel on the minimum and maximum Python versions, then resolves the release tag and current `main` again immediately before publishing through Trusted Publishing. Any change after validation stops the publication.
 
 Pushing a tag alone does not publish. A manually authored GitHub Release is also rejected.
 

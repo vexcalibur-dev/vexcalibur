@@ -84,8 +84,8 @@ jobs:
       release-tag: ${{ needs.resolve.outputs.tag }}
       release-version: ${{ needs.resolve.outputs.version }}
 
-  publish-release:
-    name: Publish GitHub Release
+  generate-release-notes:
+    name: Generate release notes
     runs-on: ubuntu-latest
     needs:
       - resolve
@@ -93,6 +93,8 @@ jobs:
     if: needs.resolve.outputs.skip != 'true'
     permissions:
       contents: read
+    outputs:
+      notes-sha256: ${{ steps.notes.outputs.sha256 }}
     steps:
       - name: Generate app token
         id: app-token
@@ -104,6 +106,113 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
 
+      - name: Generate release notes
+        id: notes
+        env:
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+          PREVIOUS_TAG: ${{ needs.resolve.outputs.previous_tag }}
+          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          notes_dir="${RUNNER_TEMP}/release-notes"
+          notes_path="${notes_dir}/vexcalibur-release-notes.md"
+          mkdir -p "${notes_dir}"
+
+          args=(
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes"
+            -f "tag_name=${RELEASE_TAG}"
+            -f "target_commitish=${RELEASE_SHA}"
+          )
+          if [[ -n "${PREVIOUS_TAG}" ]]; then
+            args+=(-f "previous_tag_name=${PREVIOUS_TAG}")
+          fi
+
+          gh api "${args[@]}" --jq .body > "${notes_path}"
+          notes_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
+          printf 'sha256=%s\n' "${notes_sha256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes-${{ needs.validation.outputs.sha }}
+          path: ${{ runner.temp }}/release-notes/vexcalibur-release-notes.md
+          if-no-files-found: error
+          retention-days: 1
+
+  scan-release-notes:
+    name: Scan release notes
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - validation
+      - generate-release-notes
+    if: needs.resolve.outputs.skip != 'true'
+    permissions:
+      contents: read
+    outputs:
+      notes-sha256: ${{ steps.verify-notes.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ needs.validation.outputs.sha }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version-file: .tool-versions
+          enable-cache: false
+          python-version: ${{ env.MAX_PYTHON }}
+
+      - name: Install locked scanner
+        run: uv sync --frozen
+
+      - name: Download release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-notes-${{ needs.validation.outputs.sha }}
+          path: ${{ runner.temp }}/release-notes
+
+      - name: Verify and scan release notes
+        id: verify-notes
+        env:
+          EXPECTED_NOTES_SHA256: ${{ needs.generate-release-notes.outputs.notes-sha256 }}
+        run: |
+          set -euo pipefail
+
+          notes_path="${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
+          if [[ ! "${EXPECTED_NOTES_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Generated release-note digest is malformed." >&2
+            exit 1
+          fi
+
+          actual_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
+          if [[ "${actual_sha256}" != "${EXPECTED_NOTES_SHA256}" ]]; then
+            echo "Downloaded release notes do not match the generated digest." >&2
+            exit 1
+          fi
+
+          uv run --frozen detect-secrets-hook \
+            --baseline .secrets.baseline \
+            -- "${notes_path}"
+          printf 'sha256=%s\n' "${actual_sha256}" >> "${GITHUB_OUTPUT}"
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - validation
+      - generate-release-notes
+      - scan-release-notes
+    if: needs.resolve.outputs.skip != 'true'
+    permissions:
+      contents: read
+    steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -113,7 +222,7 @@ jobs:
 
       - name: Require current main tip
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.validation.outputs.sha }}
         run: |
           set -euo pipefail
@@ -126,38 +235,44 @@ jobs:
             exit 1
           fi
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Download scanned release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          version-file: .tool-versions
-          enable-cache: true
-          python-version: ${{ env.MAX_PYTHON }}
+          name: release-notes-${{ needs.validation.outputs.sha }}
+          path: ${{ runner.temp }}/release-notes
 
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Generate and scan release notes
+      - name: Verify scanned release notes
         env:
-          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
-          PREVIOUS_TAG: ${{ needs.resolve.outputs.previous_tag }}
-          RELEASE_SHA: ${{ needs.validation.outputs.sha }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GENERATED_NOTES_SHA256: ${{ needs.generate-release-notes.outputs.notes-sha256 }}
+          SCANNED_NOTES_SHA256: ${{ needs.scan-release-notes.outputs.notes-sha256 }}
         run: |
           set -euo pipefail
 
-          args=(
-            "repos/${GITHUB_REPOSITORY}/releases/generate-notes"
-            -f "tag_name=${RELEASE_TAG}"
-            -f "target_commitish=${RELEASE_SHA}"
-          )
-          if [[ -n "${PREVIOUS_TAG}" ]]; then
-            args+=(-f "previous_tag_name=${PREVIOUS_TAG}")
+          if [[ ! "${SCANNED_NOTES_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Scanned release-note digest is malformed." >&2
+            exit 1
+          fi
+          if [[ "${GENERATED_NOTES_SHA256}" != "${SCANNED_NOTES_SHA256}" ]]; then
+            echo "Generated and scanned release-note digests disagree." >&2
+            exit 1
           fi
 
-          gh api "${args[@]}" --jq .body > /tmp/vexcalibur-release-notes.md
-          uv run --frozen detect-secrets-hook \
-            --baseline .secrets.baseline \
-            -- /tmp/vexcalibur-release-notes.md
+          notes_path="${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
+          actual_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
+          if [[ "${actual_sha256}" != "${SCANNED_NOTES_SHA256}" ]]; then
+            echo "Publisher release notes do not match the scanned digest." >&2
+            exit 1
+          fi
+
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
 
       - name: Create release tag
         env:
@@ -205,7 +320,7 @@ jobs:
             --verify-tag
             --target "${RELEASE_SHA}"
             --title "${RELEASE_TAG}"
-            --notes-file /tmp/vexcalibur-release-notes.md
+            --notes-file "${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
           )
 
           gh "${args[@]}"
