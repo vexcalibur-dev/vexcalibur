@@ -7,130 +7,57 @@
 [![OpenSSF Scorecard](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
 [![Dependency Review](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
 
-Vexcalibur is a general-purpose VEX toolkit for vulnerability exploitability workflows across SBOM, package URL, and vulnerability data ecosystems.
+Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. Today it reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file. The current renderer writes CycloneDX 1.6 VEX JSON.
 
-Vexcalibur currently ingests CycloneDX JSON and XML SBOM files, can fetch GitHub Dependency Graph SBOMs, collects findings from OSV-compatible APIs or local findings files, and renders CycloneDX 1.6 VEX JSON. It is intended to replace legacy `vexy` usage over time while staying provider-neutral and ecosystem-neutral.
+The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
-## Status
+## What works today
 
-Usable for the workflows listed below, with unstable public contracts before the first 1.0 release.
-
-| Area | Current status |
+| Area | Support |
 | --- | --- |
-| SBOM ingest | Supports CycloneDX JSON/XML files for CycloneDX `1.4`, `1.5`, and `1.6`, plus GitHub Dependency Graph SBOM input from repository SPDX JSON. |
-| Vulnerability sources | Supports public OSV with explicit opt-in, private OSV-compatible endpoints, and no-network local findings files. |
-| VEX output | Emits CycloneDX 1.6 VEX JSON with deterministic output when `--timestamp` is provided. |
-| GitHub Actions | Use [vexcalibur-action](https://github.com/vexcalibur-dev/vexcalibur-action) for CI workflows. |
-| Legacy `vexy` compatibility | Supports a narrow `vexy` CLI subset for CycloneDX JSON VEX generation while preserving the public OSV opt-in boundary. |
-| Stability | CLI flags, Python APIs, and output details can change before 1.0. Pin exact versions after releases begin. |
+| SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
+| Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
+| VEX output | CycloneDX 1.6 JSON |
+| Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |
+| Migration | A narrow `vexy` command-line compatibility layer |
+| Python | 3.10–3.14 |
 
-Current workflows:
+## Install a release
 
-- Query OSV-compatible APIs for one or more package URLs with `vexcalibur query-osv`.
-- Generate CycloneDX 1.6 VEX JSON from CycloneDX JSON/XML SBOM files or GitHub Dependency Graph SBOM input with `vexcalibur generate`.
-- Generate VEX from local findings without contacting a vulnerability service.
-- Run selected legacy `vexy` commands through the compatibility executable.
-- Run Vexcalibur from GitHub Actions through the companion action.
+Create an environment and pin the package version:
 
-## Development
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install "vexcalibur==0.1.1"
+.venv/bin/vexcalibur --help
+```
 
-Prerequisites:
+On Windows, use `.venv\Scripts\python` and `.venv\Scripts\vexcalibur`.
 
-- Python 3.10 or newer
-- uv 0.11.17
+## Try local generation
 
-Install dependencies:
+Clone the repository, then install its locked dependencies:
 
 ```bash
 uv sync
 ```
 
-Run offline tests:
+Dependency installation may contact the configured package index. The generation command below uses only local inputs and does not contact a vulnerability service.
+
+Generate a VEX document from the committed example files:
 
 ```bash
-uv run --frozen pytest -m "not live" --cov-fail-under=75
+uv run --frozen vexcalibur generate \
+  tests/fixtures/sbom/cyclonedx-json-simple.json \
+  --offline \
+  --findings-file tests/fixtures/findings/all-analysis-states.json \
+  --timestamp 2026-06-23T00:00:00Z \
+  --output /tmp/vexcalibur-vex.json
 ```
 
-Run live compatibility smoke tests only when you intentionally want to call the
-covered public services:
+Check the result:
 
 ```bash
-uv run --frozen pytest -m live -q
-```
-
-Run static checks:
-
-```bash
-uv run --frozen ruff check src tests docs/conf.py
-uv run --frozen mypy src
-```
-
-Build the documentation:
-
-```bash
-uv sync --extra docs
-make docs
-```
-
-The canonical generated documentation is available on the
-[Vexcalibur documentation site][vexcalibur-docs].
-
-Try the CLI:
-
-```bash
-uv run --frozen vexcalibur --help
-```
-
-Query OSV for a package URL:
-
-```bash
-uv run --frozen vexcalibur query-osv pkg:pypi/django@1.2 --allow-public-osv
-```
-
-Expected result: the command prints the submitted package URL and any OSV vulnerability IDs returned by `https://api.osv.dev`.
-
-Like `generate`, `query-osv` requires `--allow-public-osv` for the public OSV API and accepts `--osv-url` for private mirrors.
-
-Generate CycloneDX VEX JSON from a CycloneDX SBOM:
-
-`generate` refuses to send package URLs or component versions to the public OSV API unless you pass `--allow-public-osv`. Do not use that flag with private SBOMs or sensitive package inventories. Use `--osv-url` for a private OSV mirror. Library callers that inject an OSV client must also provide the matching `osv_base_url`; the same public-OSV opt-in check is enforced before the client is used.
-
-```bash
-uv run --frozen vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --output /tmp/vexcalibur-vex.json
-```
-
-Illustrative private-mirror command, replacing the URL with your internal OSV endpoint:
-
-```bash
-uv run --frozen vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --osv-url https://osv.internal.example --output /tmp/vexcalibur-vex.json
-```
-
-Generate from a GitHub repository's Dependency Graph SBOM. This fetches the SBOM from GitHub, then still requires an explicit opt-in before sending the resulting package inventory to public OSV:
-
-```bash
-uv run --frozen vexcalibur generate --github-repo vexcalibur-dev/vexcalibur --allow-public-osv --output /tmp/vexcalibur-vex.json
-```
-
-Offline command using local findings, replacing the file paths with your SBOM and findings JSON:
-
-```bash
-uv run --frozen vexcalibur generate path/to/sbom.json --offline --findings-file path/to/findings.json --output /tmp/vexcalibur-vex.json
-```
-
-Legacy `vexy` compatibility command using the same no-network findings source:
-
-```bash
-uv run --frozen vexy -c tests/fixtures/vexy/legacy-config.yml -i tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml --format json --schema-version 1.6 --output - --offline --findings-file tests/fixtures/findings/all-analysis-states.json --timestamp 2026-06-23T00:00:00Z
-```
-
-The compatibility command accepts `-c/--config` for argument compatibility but
-does not read legacy data-source credentials. Select a Vexcalibur source mode
-with `--findings-file`, `--osv-url`, or `--allow-public-osv`.
-
-For a deterministic document timestamp, provide `--timestamp`. Live OSV data can change over time, so identical inputs can still produce different vulnerability findings unless OSV responses are controlled.
-
-```bash
-uv run --frozen vexcalibur generate tests/fixtures/sbom/cyclonedx-json-simple.json --allow-public-osv --timestamp 2026-06-23T00:00:00Z --output /tmp/vexcalibur-vex.json
 python - <<'PY'
 import json
 from pathlib import Path
@@ -138,47 +65,58 @@ from pathlib import Path
 vex = json.loads(Path("/tmp/vexcalibur-vex.json").read_text())
 assert vex["bomFormat"] == "CycloneDX"
 assert vex["specVersion"] == "1.6"
-assert vex["metadata"]["timestamp"] == "2026-06-23T00:00:00+00:00"
-print(f"validated {len(vex.get('vulnerabilities', []))} generated VEX findings")
+assert len(vex["vulnerabilities"]) == 5
+print("generated CycloneDX VEX")
 PY
 ```
 
-The OSV-backed generator queries OSV for versioned components with package URLs, emits CycloneDX vulnerability entries for OSV matches, and marks findings `in_triage` by default. Local findings can provide explicit VEX analysis states and details.
+See the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html) for the guided version of this example.
 
-Supported input for all `generate` source modes:
+## Choose a finding source
 
-- CycloneDX JSON SBOMs with `specVersion` `1.4`, `1.5`, or `1.6`; JSON input must be UTF-8.
-- CycloneDX XML SBOMs rooted at `bom` in the `http://cyclonedx.org/schema/bom/1.4`, `/1.5`, or `/1.6` namespace; XML may use parser-detected XML encodings such as UTF-8 or UTF-16, and DTD, entity, and external-reference declarations are rejected.
-- GitHub Dependency Graph SBOM input with `--github-repo OWNER/REPO`; Vexcalibur requests an SPDX JSON report from GitHub's asynchronous SBOM API and extracts package URL references.
-- Local SBOM files and GitHub SBOM report downloads up to 10 MiB, up to 10,000 components, and component nesting up to 50 levels.
-- Unique component refs for components with package URLs. Duplicate queried component refs are rejected because VEX `affects` entries refer to components by ref.
-- Explicit source configuration. Public OSV requires `--allow-public-osv`; private mirrors use `--osv-url`; offline local findings use `--findings-file`.
+Vexcalibur requires one finding source for each generation run.
 
-Additional OSV-backed requirements:
+| Inventory and trust boundary | Use |
+| --- | --- |
+| Findings already exist locally | Use `--findings-file findings.json`. Add `--offline` for a local SBOM. |
+| Inventory may go to an internal service | `--osv-url https://osv.internal.example` |
+| Inventory is approved for public OSV | `--allow-public-osv` |
 
-- Components need package URLs and either a PURL version, a CycloneDX component `version`, or GitHub SPDX `versionInfo`; unversioned components are not queried.
-- The OSV query set must be non-empty. If no component can be queried precisely, the command fails instead of producing an empty VEX that looks authoritative.
+> [!WARNING]
+> `--allow-public-osv` sends package URLs and versions to `https://api.osv.dev`. Do not use it with a private SBOM or sensitive package inventory unless that disclosure is approved.
 
-Local findings mode can produce an empty VEX document when the findings file explicitly contains `"findings": []`.
+The default public endpoint fails closed without that flag. Fetching an SBOM from GitHub is a separate network boundary and does not grant permission to send the resulting inventory to public OSV.
 
-## Project Links
+## Documentation
 
-- [Documentation][vexcalibur-docs]
-- [Documentation source](https://github.com/vexcalibur-dev/vexcalibur/tree/main/docs)
-- [Quickstart tutorial](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html)
-- [No-network local findings tutorial](https://vexcalibur-dev.github.io/vexcalibur/tutorials/offline-local-findings.html)
-- [Generate CycloneDX VEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html)
-- [Use a private OSV mirror](https://vexcalibur-dev.github.io/vexcalibur/how-to/use-private-osv-mirror.html)
-- [CI and recurring checks](https://vexcalibur-dev.github.io/vexcalibur/development/ci.html)
-- [Project status](https://vexcalibur-dev.github.io/vexcalibur/explanation/project-status.html)
-- [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html)
-- [CycloneDX VEX output reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html)
-- [Provider contract reference](https://vexcalibur-dev.github.io/vexcalibur/reference/provider-contract.html)
-- [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
-- [Security policy](SECURITY.md)
-- [Contributing](CONTRIBUTING.md)
-- [Python style policy](https://vexcalibur-dev.github.io/vexcalibur/development/python-style.html)
-- [AI agent and style guidance](AGENTS.md)
-- [License](LICENSE)
+- Start with the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html).
+- Follow [generation recipes](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html) for local files, GitHub SBOMs, private mirrors, and public OSV.
+- Use the [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html) for flags and failure behavior.
+- Read the [output contract](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html) before consuming generated files in automation.
+- Read the [architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html) before adding a source or output format.
+- Check [project status](https://vexcalibur-dev.github.io/vexcalibur/explanation/project-status.html) for current limits.
+
+The complete manual is at [vexcalibur-dev.github.io/vexcalibur][vexcalibur-docs].
+
+## Contributing
+
+Run the local quality gate:
+
+```bash
+make check
+```
+
+Documentation changes must also build without warnings:
+
+```bash
+uv sync --extra docs
+make docs
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), the [security policy](SECURITY.md), and the [Python style policy](https://vexcalibur-dev.github.io/vexcalibur/development/python-style.html) before opening a pull request.
+
+Use the [issue forms](https://github.com/vexcalibur-dev/vexcalibur/issues) for questions, bugs, and feature requests. The organization [support policy](https://github.com/vexcalibur-dev/.github/blob/main/SUPPORT.md) explains which public route to use, and the [code of conduct](https://github.com/vexcalibur-dev/.github/blob/main/CODE_OF_CONDUCT.md) applies to project spaces.
+
+Vexcalibur is licensed under the [Apache License 2.0](LICENSE).
 
 [vexcalibur-docs]: https://vexcalibur-dev.github.io/vexcalibur/

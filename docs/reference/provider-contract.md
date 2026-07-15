@@ -1,13 +1,12 @@
-# Provider Contract Reference
+# Vulnerability-source provider contract
 
-Vulnerability providers convert SBOM component identities into
-provider-neutral `VulnerabilityFinding` objects. The `vexcalibur generate`
-workflow can then render those findings as CycloneDX VEX without knowing the
-provider's request or file format.
+A provider turns normalized SBOM components into `VulnerabilityFinding` values. Generation then renders those values without knowing the provider's request or storage format.
 
-## Interface
+The Python contract is pre-1.0 and may change between releases.
 
-A provider implements `vexcalibur.domain.VulnerabilitySource`:
+## Protocol
+
+A source implements `vexcalibur.domain.VulnerabilitySource`:
 
 ```python
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
@@ -21,104 +20,74 @@ class ExampleSource:
         ...
 ```
 
-`components` is the tuple returned by the package inventory loader. Each
-component includes:
+The method receives the complete normalized component tuple and returns zero or more immutable findings.
 
-- `ref`: Vexcalibur component reference. Local CycloneDX input uses the
-  CycloneDX `bom-ref`; GitHub Dependency Graph SBOM input uses the SPDX package
-  `SPDXID` when present, otherwise the package URL.
-- `name`: component name.
-- `version`: component version, or `None`.
-- `purl`: parsed `packageurl.PackageURL`.
-- `type`: CycloneDX component type string, defaulting to `library`.
+## Component identity
 
-The method returns zero or more `VulnerabilityFinding` objects.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `ref` | `str` | CycloneDX `bom-ref`, GitHub SPDX `SPDXID`, or a package URL fallback |
+| `name` | `str` | Component name |
+| `version` | `str \| None` | Component version when supplied |
+| `purl` | `packageurl.PackageURL` | Parsed package URL |
+| `type` | `str` | CycloneDX component type; defaults to `library` |
 
-## Finding Fields
+## Vulnerability finding
 
-Each finding must include:
+| Field | Type | Required or default | Meaning |
+| --- | --- | --- | --- |
+| `id` | `str` | Required | Vulnerability identifier. |
+| `source_name` | `str` | Required | Provider or assessment source name. |
+| `source_url` | `str` | Required | Provider or advisory URL accepted by the target renderer. |
+| `component_ref` | `str` | Required | Reference copied from an input `ComponentIdentity`. |
+| `purl` | `str` | Required | Canonical serialized package URL for that component. This is a string, unlike `ComponentIdentity.purl`. |
+| `modified` | `datetime \| None` | `None` | Source update time. |
+| `analysis_state` | `VexAnalysisState` | `VexAnalysisState.IN_TRIAGE` | VEX disposition for the component and vulnerability. |
+| `analysis_detail` | `str` | `Detected by vulnerability source; manual exploitability analysis required.` | Human-readable basis or next action. |
 
-- `id`: vulnerability identifier.
-- `source_name`: provider or analysis source name.
-- `source_url`: provider or advisory URL.
-- `component_ref`: `ref` from the parsed component identity.
-- `purl`: package URL string for the affected component.
-
-Optional fields:
-
-- `modified`: vulnerability update timestamp.
-- `analysis_state`: CycloneDX VEX state. Defaults to `in_triage`.
-- `analysis_detail`: human-readable analysis detail. Defaults to
-  `Detected by vulnerability source; manual exploitability analysis required.`
-
-The renderer rejects findings whose `component_ref` is not present in the
-parsed component set.
+`component_ref` must equal a reference in the input component tuple. The renderer rejects an unknown reference.
 
 ## Errors
 
-Use the shared error hierarchy so the CLI can report useful categories:
+Raise `VulnerabilitySourceInputError` when the component inventory cannot form valid provider queries or matches. The shared generation path reports this as an SBOM input error.
 
-- Raise `VulnerabilitySourceInputError` when the SBOM components cannot produce
-  provider-specific queries or matches. `generate` reports this as an SBOM
-  ingest failure because the source cannot operate on the provided inventory.
-- Raise a `VulnerabilitySourceError` subclass for provider configuration,
-  network, response-shape, parsing, or local-file failures.
-- Keep provider-specific subclasses when callers need to distinguish failures.
+Raise a `VulnerabilitySourceError` subclass for configuration, network, response, parsing, or local-file failures. Keep a narrower provider exception when callers need to distinguish the failure.
 
-Do not leak provider stack traces to normal CLI users. The CLI catches known
-source errors and prints category-prefixed failure messages.
+Expected CLI failures should not expose Python tracebacks.
 
-## Trust Boundary
+## Network boundary
 
-Network providers must make data sharing explicit. The OSV provider fails
-closed for `https://api.osv.dev` unless the caller passes
-`--allow-public-osv`, and it accepts private mirrors through `--osv-url`.
+A network source must make public data sharing explicit. At minimum, it should:
 
-New public network providers should follow the same pattern:
+- identify its public endpoint.
+- require consent before sending package URLs, versions, or an SBOM-derived inventory there.
+- accept a private endpoint when the upstream API can be mirrored.
+- document the data that leaves the runner.
 
-- Identify the public default endpoint.
-- Require an explicit opt-in before sending package URLs, versions, or
-  SBOM-derived inventories to that endpoint.
-- Support private or internal endpoints when the provider API can be mirrored.
-- Document what package data leaves the local environment.
+The OSV source implements this policy with `--allow-public-osv` and `--osv-url`. A custom source passed to `generate_vex_from_source` owns its own network policy.
 
-Offline providers should avoid constructing network clients and should make
-local-file size, schema, and matching limits explicit.
+An offline source should not create a network client. It should define limits for local data and reject ambiguous component matches.
 
-## Provider Mapping
+## Implementation shape
 
-Provider-specific code belongs under `vexcalibur.sources`.
+Provider code belongs under `vexcalibur.sources`.
 
-Recommended provider shape:
+1. Validate configuration before I/O.
+2. Map `ComponentIdentity` values to provider queries or lookup keys.
+3. Validate each response or local document.
+4. Return `VulnerabilityFinding` values in stable order.
+5. Leave grouping and serialization to `vexcalibur.vex`.
 
-1. Validate provider configuration before sending requests or reading large
-   files.
-2. Convert `ComponentIdentity` values into provider-specific queries or lookup
-   keys.
-3. Validate provider responses or local documents before mapping findings.
-4. Return sorted, immutable tuples when practical.
-5. Let the shared renderer handle CycloneDX grouping, affected components, and
-   VEX JSON formatting.
-
-Avoid duplicating CycloneDX output rules in provider code. Providers should
-produce `VulnerabilityFinding` objects and leave rendering to `vexcalibur.vex`.
+Do not duplicate CycloneDX rendering rules in a provider.
 
 ## Tests
 
-Provider changes should include focused tests for:
+Cover configuration, trust-boundary enforcement, parsing, invalid shapes, mapping, and CLI error reporting. A paginated network source also needs repeated-token and page-limit tests.
 
-- configuration validation and fail-closed public-service policy;
-- request or document parsing;
-- pagination or repeated-token failures for network providers;
-- invalid response or file shapes;
-- mapping into `VulnerabilityFinding`;
-- CLI error messages when the provider is reachable from a command.
-
-Run the normal offline test suite before opening a provider pull request:
+Run offline tests before opening a pull request:
 
 ```bash
 uv run --frozen python -m pytest -m "not live"
 ```
 
-Run live tests only when the provider's public-service boundary has been
-reviewed and the package data used by the test is safe to send.
+Run live tests only with data approved for the provider's public endpoint.

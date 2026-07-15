@@ -1,28 +1,81 @@
-# CycloneDX VEX Output Reference
+# CycloneDX VEX output
 
-`vexcalibur generate` emits CycloneDX 1.6 JSON. The renderer builds the document
-from SBOM component identities and provider-neutral vulnerability findings.
+`vexcalibur generate` writes CycloneDX 1.6 JSON. The renderer consumes normalized component identities and provider-neutral findings.
 
-## Document Shape
+## Document fields
 
-The output includes:
+| Field | Value |
+| --- | --- |
+| `$schema` | `http://cyclonedx.org/schema/bom-1.6.schema.json` |
+| `bomFormat` | `CycloneDX` |
+| `specVersion` | `1.6` |
+| `serialNumber` | A `urn:uuid:` value derived from referenced components, findings, and the document timestamp |
+| `version` | `1` |
+| `metadata.timestamp` | `--timestamp`, normalized to UTC; otherwise the current UTC time |
+| `components` | Only components referenced by at least one finding |
+| `dependencies` | Reference-only dependency records for emitted components |
+| `vulnerabilities` | Findings grouped into CycloneDX vulnerability entries |
 
-- `bomFormat: "CycloneDX"`
-- `specVersion: "1.6"`
-- `serialNumber`: a deterministic UUID when the component set, finding set, and
-  timestamp are unchanged.
-- `metadata.timestamp`: the provided `--timestamp` value normalized to UTC, or
-  the current UTC time when no timestamp is provided.
-- `components`: affected SBOM components only.
-- `vulnerabilities`: VEX vulnerability entries grouped from findings.
+JSON keys are sorted. Indentation is two spaces. The file ends with a newline.
 
-The JSON is canonicalized with sorted keys, two-space indentation, and a final
-newline.
+## Vulnerability grouping
 
-## Determinism
+One output entry represents findings that share all five values:
 
-Use `--timestamp` when tests, pull request reviews, or repeatable artifacts need
-stable output:
+- vulnerability ID.
+- source name.
+- source URL.
+- analysis state.
+- analysis detail.
+
+The entry's `affects` array contains the sorted, unique component references from that group. The same vulnerability ID produces separate entries when its source, state, or detail differs.
+
+Each entry contains `id`, `bom-ref`, `source`, `references`, `analysis`, and `affects`. It includes `updated` when the source supplied a modified time.
+
+The `references` array repeats the vulnerability ID and source. `bom-ref` is derived from the five grouping values.
+
+## Referenced components
+
+The `components` array contains components referenced by at least one finding. Each item carries its normalized identity fields when available. These include `bom-ref`, `type`, `name`, `version`, and package URL.
+
+Every finding must refer to a component from the parsed SBOM.
+
+An explicit empty local findings array produces empty `components` and `vulnerabilities` arrays. An unknown component reference stops rendering with `VexRenderError`.
+
+## Analysis fields
+
+OSV findings use:
+
+```json
+{
+  "analysis": {
+    "detail": "Detected by OSV; manual exploitability analysis required.",
+    "state": "in_triage"
+  }
+}
+```
+
+Local findings accept these states:
+
+- `resolved`
+- `exploitable`
+- `in_triage`
+- `false_positive`
+- `not_affected`
+
+The local default state is `in_triage`. Its default detail is `Provided by local findings file; manual exploitability analysis required.`
+
+OSV findings use source name `OSV` and URL `https://osv.dev/`. Local findings default to source name `Local` and URL `https://vexcalibur.dev/sources/local`.
+
+## Updated time
+
+When a group contains `modified` timestamps, `updated` is the latest one. The field is omitted when none of the group's findings has a timestamp.
+
+Naive local timestamps are interpreted as UTC. A trailing `Z` is normalized to a `+00:00` offset.
+
+## Deterministic output
+
+Pass `--timestamp` and control the finding input when repeatable output matters:
 
 ```bash
 uv run --frozen vexcalibur generate \
@@ -33,82 +86,6 @@ uv run --frozen vexcalibur generate \
   --output /tmp/vexcalibur-vex.json
 ```
 
-With the same SBOM, findings, and timestamp, the renderer emits the same
-`serialNumber`, vulnerability `bom-ref` values, field ordering, and JSON
-formatting.
+The same SBOM, findings, and timestamp produce the same serialized JSON. The document UUID is stable for those inputs. The vulnerability references are stable for those inputs.
 
-Live OSV data can change over time. A fixed timestamp does not make public OSV
-results immutable unless the OSV responses are also controlled.
-
-## Vulnerability Grouping
-
-Vexcalibur groups findings into one CycloneDX vulnerability entry by this key:
-
-- vulnerability ID
-- source name
-- source URL
-- analysis state
-- analysis detail
-
-Findings with the same key share one vulnerability entry. The entry `affects`
-array contains the sorted unique component refs for the grouped findings.
-
-Findings with the same vulnerability ID but a different source, state, or detail
-produce separate vulnerability entries. Their `bom-ref` values are derived from
-the grouped vulnerability metadata.
-
-## Affected Components
-
-The output `components` array contains only components referenced by at least
-one finding. A VEX document generated from an explicit empty local findings file
-can therefore contain an empty `components` array and an empty
-`vulnerabilities` array.
-
-Every finding must reference a component from the parsed SBOM. Rendering fails
-when a finding uses an unknown component ref.
-
-## Analysis State And Detail
-
-OSV-derived findings currently use:
-
-- `analysis.state: "in_triage"`
-- `analysis.detail: "Detected by OSV; manual exploitability analysis required."`
-
-Local findings can provide these CycloneDX VEX states:
-
-- `resolved`
-- `exploitable`
-- `in_triage`
-- `false_positive`
-- `not_affected`
-
-When local findings omit `analysis_state`, Vexcalibur uses `in_triage`. When
-they omit `analysis_detail`, Vexcalibur uses
-`Provided by local findings file; manual exploitability analysis required.`
-
-## Source Fields
-
-Each vulnerability entry includes a CycloneDX `source` object and a matching
-single-item `references` array.
-
-OSV-derived findings use:
-
-- `source.name: "OSV"`
-- `source.url: "https://osv.dev/"`
-
-Local findings default to:
-
-- `source.name: "Local"`
-- `source.url: "https://vexcalibur.dev/sources/local"`
-
-Local findings files can override both fields with a non-empty source name and
-an HTTP(S) source URL with a host.
-
-## Updated Timestamp
-
-When grouped findings include `modified` values, the vulnerability entry
-`updated` field is the latest modified timestamp in that group. If no grouped
-finding has a modified timestamp, the vulnerability entry omits `updated`.
-
-Naive local findings timestamps are treated as UTC. Timestamp strings ending in
-`Z` are normalized to `+00:00`.
+A fixed timestamp does not make live OSV data stable. The responses must also be controlled.

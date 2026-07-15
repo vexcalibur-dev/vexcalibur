@@ -1,36 +1,33 @@
-# AGENTS.md
+# Vexcalibur agent guidance
 
-This file gives AI agents and automated contributors repo-specific guidance for Vexcalibur.
+This file gives automated contributors the repository rules needed to work safely.
 
-## Project Overview
+## Project state
 
-Vexcalibur is a usable-but-unstable VEX toolkit for workflows around SBOMs, package URLs, vulnerability sources, and VEX documents. It is intended to replace legacy `vexy` usage over time while remaining a general-purpose VEX tool, not a Python-only vulnerability tool.
+Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services or local JSON. The current renderer writes CycloneDX 1.6 VEX JSON.
 
-The current implementation is Python, but product and domain decisions should stay ecosystem-neutral unless an issue explicitly narrows the scope.
+The implementation is Python, but domain and product decisions should remain ecosystem-neutral unless an issue narrows the scope. Do not present a planned input, provider, or output format as available.
 
-## Non-Negotiables
+## Non-negotiable rules
 
-- Do not send SBOM contents, package URLs, component versions, or project inventories to public services unless the user, command, test, or issue explicitly opts in.
-- Public OSV access requires `--allow-public-osv`; use fixtures, fakes, or private mirror URLs for normal tests and examples.
-- Offline VEX generation uses `--findings-file` and must not construct or query an OSV client.
-- Keep changes focused. Avoid broad refactors unless the active issue requires them.
-- Preserve public API and output compatibility notes in PR descriptions when behavior changes.
-- Treat documentation as product surface. Keep docs accurate for the current supported workflows and pre-1.0 compatibility limits.
-- Do not revert unrelated local changes. Work with them or ask if they block the task.
+- Never send SBOM content, package URLs, versions, or project inventory to a public service without explicit consent.
+- Require `--allow-public-osv` for public OSV. Use fixtures, fakes, private mirrors, or local findings for normal tests and examples.
+- Do not construct or query an OSV client in local-findings mode.
+- Preserve unrelated user changes and keep each change within the active task.
+- Document changes to a CLI, Python API, output contract, provider, or trust boundary.
+- Treat documentation as a tested product surface.
 
-## Technology Stack
+## Toolchain
 
-- Language: Python 3.10+
-- Packaging: uv with `pyproject.toml` and `uv.lock`
-- CLI: Typer
-- HTTP: httpx
-- Data modeling: Pydantic where structured validation is needed
-- SBOM/VEX domain: CycloneDX JSON first, with room for more formats
-- CI: GitHub Actions across Python 3.10 through 3.14
-- Quality: Ruff, MyPy strict mode, pytest, pytest-cov, actionlint, shellcheck,
-  pip-audit, detect-secrets
+- Python 3.10–3.14
+- `uv` with `pyproject.toml` and `uv.lock`
+- Typer, HTTPX, Pydantic, and `cyclonedx-python-lib`
+- Ruff, strict MyPy, Pytest, `actionlint`, `shellcheck`, `pip-audit`, and `detect-secrets`
+- Sphinx and MyST for the manual
 
-## Common Commands
+Pinned tool versions are in `.tool-versions`.
+
+## Common commands
 
 Install dependencies:
 
@@ -38,157 +35,108 @@ Install dependencies:
 uv sync
 ```
 
-Install documentation dependencies:
-
-```bash
-uv sync --extra docs
-```
-
-Run the usual local gate:
+Run the local gate:
 
 ```bash
 make check
 ```
 
-Run individual checks:
+Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`, `make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`, `make build`, and `make pre-commit`.
 
-```bash
-make lint
-make workflow-lint
-make typecheck
-make test
-make docs
-make audit
-make secrets
-make secrets-pr
-make build
-make pre-commit
-```
+`make workflow-lint` needs `actionlint` and `shellcheck` on `PATH`.
 
-`make workflow-lint` requires `actionlint` and `shellcheck` on `PATH`. Their
-versions are pinned in `.tool-versions`; install or activate those tools with a
-`.tool-versions`-compatible manager such as `mise` or `asdf`.
-
-Run live OSV compatibility only when the change intentionally exercises the public OSV service:
+Run public-service tests only when the fixture data may leave the runner:
 
 ```bash
 make test-live
 ```
 
-If a sandboxed agent cannot write uv or pip cache files under the home directory, use a
-`/tmp` uv cache:
+If the home cache is read-only, use one cache path for setup and later commands:
 
 ```bash
-UV_CACHE_DIR=/tmp/vexcalibur-uv-cache \
-uv sync
+UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv sync
+UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv run --frozen pytest -m "not live"
 ```
 
-Use the same `UV_CACHE_DIR` value on subsequent `uv run --frozen ...` commands in that
-session.
-
-## Architecture
+## Code boundaries
 
 Core modules live under `src/vexcalibur/`:
 
-- `cli.py`: Typer commands and user-facing error handling.
-- `generate.py`: SBOM-to-VEX workflow orchestration.
-- `sbom.py`: SBOM parsing and component identity extraction.
-- `vex.py`: CycloneDX VEX rendering and timestamp handling.
-- `sources/osv.py`: OSV client, OSV response parsing, source policy checks, and OSV-to-domain mapping.
-- `sources/local.py`: Local findings parsing for offline VEX generation.
-- `domain.py`: Shared domain objects.
-- `compat/vexy.py`: Legacy command entrypoint. Vexy compatibility is intentionally lower priority than core VEX engine work.
+| Module | Responsibility |
+| --- | --- |
+| `cli.py` | Typer commands and user-facing errors |
+| `generate.py` | Workflow orchestration |
+| `sbom.py` | Local CycloneDX parsing and component extraction |
+| `github_sbom.py` | GitHub Dependency Graph SBOM access and SPDX extraction |
+| `domain.py` | Provider-neutral components, findings, and source protocol |
+| `sources/osv.py` | OSV policy, client, parsing, and domain mapping |
+| `sources/local.py` | Local findings validation and matching |
+| `vex.py` | CycloneDX 1.6 rendering |
+| `compat/vexy.py` | Limited legacy command adapter |
 
-Keep source-provider concerns in `sources/`. Workflow modules should orchestrate providers, not duplicate provider policy or parsing details.
+Keep provider code in `sources/`. A provider returns domain findings and does not render a VEX format. A renderer consumes domain values and does not query a source.
 
-## Public Data Policy
+## Public data policy
 
-Vexcalibur must fail closed for public vulnerability services.
+Public vulnerability services fail closed.
 
-- `query-osv` and `generate` must not query `https://api.osv.dev` unless `--allow-public-osv` is present.
-- Private mirrors should use `--osv-url`.
-- Tests that verify public OSV behavior should use fakes unless marked `live`.
-- Host checks must handle public OSV aliases that resolve through case folding, trailing dots, or IDNA dot normalization.
-- Injected source clients should still be checked against their effective base URL when that URL is knowable.
+- `query-osv` and `generate` require `--allow-public-osv` for `https://api.osv.dev`.
+- Private OSV-compatible services use `--osv-url`.
+- Tests use fake clients unless marked `live`.
+- Host checks account for case, trailing dots, and IDNA dot normalization.
+- An injected client remains subject to public-endpoint checks when its URL is knowable.
+- Fetching a GitHub SBOM does not grant consent for a later public OSV query.
 
-## Code Style
+## Style and tests
 
-Use the project-owned [Python style policy](docs/development/python-style.md) as the canonical style contract. The vendored [Google Python Style Guide](docs/external/google-python-style-guide.md) is background reference material only; do not treat conflicting upstream rules as enforceable Vexcalibur policy.
+Follow [docs/development/python-style.md](docs/development/python-style.md) and `pyproject.toml`. The vendored Google Python guide is reference material, not the local contract.
 
-## Testing
+Put tests under `tests/`. Mark external calls with `@pytest.mark.live`. Prefer deterministic fixtures and golden output.
 
-- Put unit and integration tests under `tests/`.
-- Keep external-service tests marked with `@pytest.mark.live`.
-- Use deterministic fixtures and golden files for VEX output.
-- Add regression tests for security and compatibility fixes.
-- For SBOM and VEX changes, test both successful behavior and malformed/unsafe input.
-- Maintain the configured coverage floor unless a PR intentionally adjusts the quality policy.
+Add regression coverage for a parser, security, or compatibility fix. At an untrusted-data boundary, test malformed and unsafe input as well as success.
 
 ## Documentation
 
-Docs should grow deliberately using Diataxis categories:
+Keep the README a concise front door. Put guided learning in tutorials, task recipes in how-to guides, contracts in reference, and design context in explanation.
 
-- Tutorials for guided first-use workflows.
-- How-to guides for task-oriented recipes.
-- Reference for CLI, action inputs, schemas, and APIs.
-- Explanation for architecture, trust boundaries, source-provider behavior, and VEX semantics.
+Do not promise planned behavior. Verify commands against the current CLI and build Sphinx with warnings treated as errors:
 
-The README should stay accurate and concise for the current release state. Avoid promising features that are only planned. When docs change, run a documentation-focused review before merge; use the scorched-earth documentation review skill when available.
+```bash
+uv sync --extra docs
+make docs
+```
 
-Sphinx documentation lives under `docs/` and builds with `make docs`. Keep conceptual documentation in Diataxis sections, but keep API details close to code through docstrings and `docs/reference/python-api.rst` autodoc pages.
+For a substantial documentation change, use the scorched-earth documentation review and Green Thumb prose pass when those skills are available.
 
-## Versioning And Publishing
+## Versions and releases
 
-Never commit a real package version number. `pyproject.toml` uses
-`dynamic = ["version"]`, and `setuptools-scm` derives package versions from Git
-tags.
+`setuptools-scm` derives versions from `vMAJOR.MINOR.PATCH` tags. Do not add a literal project version or commit generated `src/vexcalibur/_version.py`.
 
-- Release tags use `vMAJOR.MINOR.PATCH`, for example `v0.1.0`.
-- The first PyPI release should be tag `v0.1.0`.
-- Do not replace `dynamic = ["version"]` with a committed `[project].version`.
-- `setuptools-scm` may generate `src/vexcalibur/_version.py` while building
-  distributions. It is ignored and must not be committed.
-- `.github/workflows/release.yml` creates release tags and GitHub Releases from
-  pushes to `main` using the `vexcalibur-dev` automation GitHub App. It derives
-  automatic bumps from Conventional Commits, runs release gates before creating
-  public release artifacts, and supports manual `workflow_dispatch` with an
-  explicit version.
-- Publishing uses `.github/workflows/pypi.yml` and the `pypi` GitHub
-  environment for PyPI trusted publishing. An automation-created GitHub Release
-  for a matching tag on the current `main` tip triggers PyPI publishing; do not
-  add manual publishing paths without a security review.
-- Follow `docs/how-to/publish-to-pypi.md` for release preflight, publishing,
-  verification, and mitigation steps.
-- Release builds must fetch tags with full Git history before building
-  distributions.
+`.github/workflows/release.yml` derives a version from Conventional Commits and validates the exact `main` commit. The `vexcalibur-dev-automation` GitHub App creates the tag and GitHub Release.
 
-## PR Expectations
+`.github/workflows/pypi.yml` accepts only an automation-authored release at current `main`. It publishes through Trusted Publishing.
 
-Use conventional commit style for branch commits and PR titles. PRs should be ready for review unless the user explicitly asks for a draft.
+Follow [docs/how-to/publish-to-pypi.md](docs/how-to/publish-to-pypi.md) for release work. Do not add a manual upload path without a security review.
 
-Before merging meaningful changes, run or confirm:
+## Pull requests
+
+Use a conventional commit style for branch commits and pull request titles. Open pull requests ready for review unless the user asks for a draft.
+
+Before merging a meaningful change, run or confirm:
 
 ```bash
 uv lock --check
-uv sync --frozen
+uv sync --frozen --extra docs
 uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
 uv run --frozen ruff check src tests scripts/*.py docs/conf.py
 uv run --frozen mypy src
-actionlint -shellcheck shellcheck .github/workflows/*.yml
-shellcheck scripts/*.sh
+make workflow-lint
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs
 uv build --clear --no-create-gitignore --no-sources
 uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
-git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline .secrets.baseline --
-git show origin/main:.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
-git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
+make secrets
+make secrets-pr
 ```
 
-Use `make secrets` for current-branch baseline enforcement, `make secrets-pr` for PR-mode
-base-baseline enforcement, and `make secrets-baseline` only for an intentional, separately
-reviewed baseline refresh.
-
-Run `uv run --frozen pytest -m live -q` only when the change intentionally validates public OSV compatibility.
-
-For new PRs, run separate review passes for security, code correctness, QA, and code quality when subagent review is available. Run thermonuclear code review for substantive code changes and scorched-earth documentation review for substantive documentation changes.
+Use `make secrets-baseline` only for a separate, reviewed baseline update. Run live tests only when the change and test data are approved for public-service access.

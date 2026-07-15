@@ -1,20 +1,14 @@
-# Use A Private OSV Mirror
+# Use a private OSV mirror
 
-Use a private OSV-compatible endpoint when your SBOM includes package names,
-versions, or dependency inventory that should not be sent to the public OSV
-service.
+Use an internal OSV-compatible endpoint when package names, versions, or dependency inventory must not go to public OSV.
 
-## Prerequisites
+The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync`. When using an installed release, run `vexcalibur` directly.
 
-- A local CycloneDX JSON/XML SBOM supported by Vexcalibur, or a GitHub
-  repository whose Dependency Graph SBOM should be used as the package
-  inventory.
-- An internal endpoint that implements the OSV `/v1/querybatch` response shape.
-- Network access from the runner to that endpoint.
+You need an endpoint that implements OSV `/v1/querybatch` and a runner that can reach it.
 
-## Generate VEX With The Mirror
+## Generate VEX through the mirror
 
-Pass the mirror base URL with `--osv-url`:
+Pass the mirror's base URL:
 
 ```bash
 uv run --frozen vexcalibur generate \
@@ -23,35 +17,28 @@ uv run --frozen vexcalibur generate \
   --output /tmp/vexcalibur-vex.json
 ```
 
-Do not pass `--allow-public-osv` for private inventories. That flag is only for
-workflows where sending package URLs and versions to `https://api.osv.dev` is
-explicitly approved.
+Do not add `--allow-public-osv`. That flag is consent to send inventory to `https://api.osv.dev`; it is not needed for a private endpoint.
 
-Private mirror URLs must be absolute `https://` URLs with a hostname. Cleartext
-`http://` is accepted only for loopback hosts such as `http://127.0.0.1:8080`
-when testing a local OSV-compatible service.
+The command should exit with status `0` and write CycloneDX 1.6 VEX JSON.
 
-Expected success signal: the command exits with status `0` and writes
-CycloneDX 1.6 VEX JSON to `/tmp/vexcalibur-vex.json`.
+## Use a GitHub-hosted inventory
 
-Use the same mirror when the package inventory comes from GitHub Dependency
-Graph:
+Keep the mirror selected when the SBOM comes from GitHub:
 
 ```bash
 uv run --frozen vexcalibur generate \
   --github-repo internal/example \
-  --github-token-env GH_ENTERPRISE_TOKEN \
   --github-api-url https://github.example.test/api/v3 \
+  --github-token-env GH_ENTERPRISE_TOKEN \
   --osv-url https://osv.internal.example \
   --output /tmp/vexcalibur-vex.json
 ```
 
-Fetching the SBOM from GitHub is separate from querying OSV. Keep using
-`--osv-url` to avoid sending the GitHub-derived package inventory to public OSV.
+This command contacts GitHub for the SBOM and the private mirror for findings. It does not send the GitHub-derived inventory to public OSV.
 
-## Query A Package URL With The Mirror
+## Query one package URL
 
-Use the same `--osv-url` option for direct package URL checks:
+Use the mirror with `query-osv`:
 
 ```bash
 uv run --frozen vexcalibur query-osv \
@@ -59,15 +46,18 @@ uv run --frozen vexcalibur query-osv \
   --osv-url https://osv.internal.example
 ```
 
-Expected success signal: the command exits with status `0` and prints one line
-for the submitted package URL.
+The command prints one line for the submitted package URL.
 
-## Failure Modes
+## Meet the URL rules
 
-Vexcalibur treats OSV-compatible providers as source systems, not as trusted
-local data. It fails the command when the mirror returns invalid JSON, a
-non-object response, a mismatched batch response shape, repeated pagination
-tokens, or too many pages.
+Use an absolute HTTPS URL with a hostname. Do not include credentials, a query string, or a fragment in the URL.
 
-If a private mirror is unavailable, either fix the mirror before generating VEX
-or use [local findings](../reference/local-findings.md) with `--offline`.
+Vexcalibur accepts cleartext HTTP only for loopback hosts such as `localhost`, `127.0.0.1`, and `::1`. This exception supports local test servers; it is not for a remote mirror.
+
+The CLI has no option for a bearer token or custom HTTP header, and credentials in `--osv-url` are rejected. A CLI-accessible mirror must accept requests through the runner's existing network or gateway authentication. Python callers that need application headers can inject a configured `httpx.Client` into `OsvClient`, then use that client through `OsvSource`; keep the source and client base URLs identical.
+
+## Handle mirror failures
+
+Vexcalibur rejects invalid JSON, non-object responses, mismatched batch results, repeated pagination tokens, and excessive page counts. Treat these errors as a broken or incompatible source response.
+
+Repair the mirror before publishing its result. If the service cannot be restored, use reviewed [local findings](../reference/local-findings.md) with `--offline` instead.
