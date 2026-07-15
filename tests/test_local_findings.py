@@ -30,7 +30,8 @@ def test_load_local_findings_maps_component_ref_to_vex_finding(tmp_path: Path) -
               "source_url": "https://security.example.test/vulns/CVE-2026-0001",
               "modified": "2026-01-01T00:00:00-05:00",
               "analysis_state": "not_affected",
-              "analysis_detail": "Django is not reachable in this deployment."
+              "analysis_detail": "Django is not reachable in this deployment.",
+              "impact_statement": "The vulnerable code is not reachable."
             }
           ]
         }
@@ -53,6 +54,7 @@ def test_load_local_findings_maps_component_ref_to_vex_finding(tmp_path: Path) -
     assert finding.modified == parse_timestamp("2026-01-01T05:00:00Z")
     assert finding.analysis_state is VexAnalysisState.NOT_AFFECTED
     assert finding.analysis_detail == "Django is not reachable in this deployment."
+    assert finding.impact_statement == "The vulnerable code is not reachable."
 
 
 def test_load_local_findings_maps_unique_purl_to_vex_finding(tmp_path: Path) -> None:

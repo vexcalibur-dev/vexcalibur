@@ -1,4 +1,4 @@
-.PHONY: help install install-docs test test-live installed-cli-check lint workflow-lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live installed-cli-check openvex-interop lint workflow-lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 UV := uv
 PACKAGE := vexcalibur
@@ -23,6 +23,9 @@ test-live: ## Run live compatibility tests against external services
 
 installed-cli-check: ## Build, install, and test console scripts from the wheel
 	scripts/check-installed-cli.sh
+
+openvex-interop: ## Parse the OpenVEX golden with the pinned official Go implementation
+	go -C tests/integration/openvex-go run . ../../golden/openvex-vex-all-analysis-states.json
 
 lint: ## Run ruff checks
 	$(UV) run --frozen ruff check src tests scripts/*.py docs/conf.py

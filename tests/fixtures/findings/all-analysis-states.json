@@ -7,7 +7,8 @@
       "source_url": "https://security.example.test/vulns/CVE-2026-0005",
       "modified": "2026-01-05T00:00:00Z",
       "analysis_state": "not_affected",
-      "analysis_detail": "The deployment does not enable the affected configuration."
+      "analysis_detail": "The deployment does not enable the affected configuration.",
+      "impact_statement": "The deployment does not enable the affected configuration."
     },
     {
       "id": "CVE-2026-0002",
@@ -16,7 +17,8 @@
       "source_url": "https://security.example.test/vulns/CVE-2026-0002",
       "modified": "2026-01-02T00:00:00Z",
       "analysis_state": "exploitable",
-      "analysis_detail": "The affected feature is reachable."
+      "analysis_detail": "The affected feature is reachable.",
+      "action_statement": "Upgrade minimist to version 1.2.8 or later."
     },
     {
       "id": "CVE-2026-0004",
@@ -25,7 +27,8 @@
       "source_url": "https://security.example.test/vulns/CVE-2026-0004",
       "modified": "2026-01-04T00:00:00Z",
       "analysis_state": "false_positive",
-      "analysis_detail": "The source matched a package that is not present at runtime."
+      "analysis_detail": "The source matched a package that is not present at runtime.",
+      "impact_statement": "The source matched a package that is not present at runtime."
     },
     {
       "id": "CVE-2026-0001",
@@ -34,7 +37,8 @@
       "source_url": "https://security.example.test/vulns/CVE-2026-0001",
       "modified": "2026-01-01T00:00:00Z",
       "analysis_state": "resolved",
-      "analysis_detail": "The vulnerable code path was removed."
+      "analysis_detail": "The vulnerable code path was removed.",
+      "fixed_version": "1.2"
     },
     {
       "id": "CVE-2026-0003",

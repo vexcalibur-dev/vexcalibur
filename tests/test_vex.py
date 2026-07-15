@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -81,6 +82,38 @@ def test_render_cyclonedx_vex_json_supports_all_analysis_states() -> None:
 
         assert f'"state": "{state.value}"' in generated
         assert VALIDATOR.validate_str(generated) is None
+
+
+def test_render_cyclonedx_vex_json_ignores_openvex_only_fields_when_deduplicating() -> None:
+    components = load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")
+    finding = VulnerabilityFinding(
+        id="GHSA-test-0001",
+        source_name="OSV",
+        source_url="https://osv.dev/",
+        component_ref="component:django",
+        purl="pkg:pypi/django@1.2",
+        analysis_state=VexAnalysisState.IN_TRIAGE,
+        analysis_detail="Reviewed by test.",
+    )
+    timestamp = parse_timestamp("2026-06-23T00:00:00Z")
+
+    generated = render_cyclonedx_vex_json(
+        components=components,
+        findings=(finding,),
+        timestamp=timestamp,
+    )
+    generated_with_openvex_fields = render_cyclonedx_vex_json(
+        components=components,
+        findings=(
+            finding,
+            replace(finding, action_statement="Upgrade the component."),
+            replace(finding, impact_statement="The vulnerable code is unreachable."),
+            replace(finding, fixed_version="1.2"),
+        ),
+        timestamp=timestamp,
+    )
+
+    assert generated_with_openvex_fields == generated
 
 
 def test_render_cyclonedx_vex_json_uses_source_qualified_vulnerability_bom_refs() -> None:

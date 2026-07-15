@@ -8,7 +8,7 @@ license = "Apache-2.0"
 authors = [
   { name = "Danny Sauer" }
 ]
-keywords = ["vex", "sbom", "cyclonedx", "osv", "vulnerability"]
+keywords = ["vex", "sbom", "cyclonedx", "openvex", "osv", "vulnerability"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

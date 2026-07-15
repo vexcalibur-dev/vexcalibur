@@ -14,6 +14,7 @@ The `CI` workflow runs these jobs on pull requests and pushes to `main`:
 - offline tests on Python 3.10–3.14.
 - source and wheel builds.
 - installed-wheel checks for `vexcalibur` and `vexy`.
+- OpenVEX parsing and statement validation with `go-vex` 0.2.8. The version is pinned in `tests/integration/openvex-go/go.mod`.
 - a warning-free Sphinx build.
 
 The `CI result` job combines the normal required results into one status that can be selected by branch protection. The current `main` ruleset does not require a status check, so CI success is not enforced as a merge rule. CodeQL, dependency review, OpenSSF Scorecard, and pre-commit run in dedicated workflows.
@@ -41,7 +42,9 @@ make test-live
 
 The `Release` workflow runs after a push to `main` and supports manual dispatch. It refuses a stale workflow run, then derives a `vMAJOR.MINOR.PATCH` tag from Conventional Commits unless the operator supplies a version.
 
-Before gaining write access, the workflow calls `release-validation.yml` against the exact commit. That workflow checks quality, workflows, security, offline tests, docs, builds, metadata, and the installed wheel. The release job then creates a short-lived installation token for the `vexcalibur-dev-automation` GitHub App.
+Before gaining write access, the workflow calls `release-validation.yml` against the exact commit. It repeats the deterministic repository gates and checks built metadata.
+
+Release validation also runs the OpenVEX interoperability gate. The release job then creates a short-lived installation token for the `vexcalibur-dev-automation` GitHub App.
 
 The write-capable job confirms that `main` still points to the validated commit. It generates release notes and scans them for secrets. It then creates an annotated tag and publishes the GitHub Release.
 

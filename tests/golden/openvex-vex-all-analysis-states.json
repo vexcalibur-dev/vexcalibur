@@ -1,0 +1,89 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "urn:uuid:d70e74c5-5e4d-5d56-80cb-a69f0570445c",
+  "author": "Vexcalibur Test Maintainers",
+  "role": "Document producer",
+  "statements": [
+    {
+      "products": [
+        {
+          "@id": "pkg:pypi/django@1.2",
+          "identifiers": {
+            "purl": "pkg:pypi/django@1.2"
+          }
+        }
+      ],
+      "status": "fixed",
+      "status_notes": "Analysis detail: The vulnerable code path was removed.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0001)\nOriginal Vexcalibur analysis state: resolved\nConfirmed fixed product version: 1.2\nSource record modified: 2026-01-01T00:00:00Z",
+      "vulnerability": {
+        "name": "CVE-2026-0001"
+      }
+    },
+    {
+      "action_statement": "Upgrade minimist to version 1.2.8 or later.",
+      "products": [
+        {
+          "@id": "pkg:npm/minimist@0.0.8",
+          "identifiers": {
+            "purl": "pkg:npm/minimist@0.0.8"
+          }
+        }
+      ],
+      "status": "affected",
+      "status_notes": "Analysis detail: The affected feature is reachable.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0002)\nOriginal Vexcalibur analysis state: exploitable\nSource record modified: 2026-01-02T00:00:00Z",
+      "vulnerability": {
+        "name": "CVE-2026-0002"
+      }
+    },
+    {
+      "products": [
+        {
+          "@id": "pkg:pypi/django@1.2",
+          "identifiers": {
+            "purl": "pkg:pypi/django@1.2"
+          }
+        }
+      ],
+      "status": "under_investigation",
+      "status_notes": "Analysis detail: Impact analysis is still underway.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0003)\nOriginal Vexcalibur analysis state: in_triage\nSource record modified: 2026-01-03T00:00:00Z",
+      "vulnerability": {
+        "name": "CVE-2026-0003"
+      }
+    },
+    {
+      "impact_statement": "The source matched a package that is not present at runtime.",
+      "products": [
+        {
+          "@id": "pkg:npm/minimist@0.0.8",
+          "identifiers": {
+            "purl": "pkg:npm/minimist@0.0.8"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Analysis detail: The source matched a package that is not present at runtime.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0004)\nOriginal Vexcalibur analysis state: false_positive\nSource record modified: 2026-01-04T00:00:00Z",
+      "vulnerability": {
+        "name": "CVE-2026-0004"
+      }
+    },
+    {
+      "impact_statement": "The deployment does not enable the affected configuration.",
+      "products": [
+        {
+          "@id": "pkg:pypi/django@1.2",
+          "identifiers": {
+            "purl": "pkg:pypi/django@1.2"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Analysis detail: The deployment does not enable the affected configuration.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0005)\nOriginal Vexcalibur analysis state: not_affected\nSource record modified: 2026-01-05T00:00:00Z",
+      "vulnerability": {
+        "name": "CVE-2026-0005"
+      }
+    }
+  ],
+  "timestamp": "2026-06-23T00:00:00Z",
+  "tooling": "Vexcalibur",
+  "version": 1
+}
