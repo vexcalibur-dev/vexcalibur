@@ -118,7 +118,8 @@ jobs:
         run: |
           gh api "/repos/${GITHUB_REPOSITORY}/contents/.secrets.baseline?ref=${BASE_SHA}" --jq .content \
             | base64 --decode > /tmp/base.secrets.baseline
-          git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline /tmp/base.secrets.baseline --
+          git ls-files -z -- . ':(exclude).secrets.baseline' \
+            | xargs -0 uv run --frozen detect-secrets-hook --baseline /tmp/base.secrets.baseline --
 
       - name: Scan pushed code for secrets
         if: github.event_name != 'pull_request'
