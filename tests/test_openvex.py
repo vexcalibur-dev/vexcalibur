@@ -7,7 +7,13 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 from packageurl import PackageURL
 
-from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.document import VexDocument
+from vexcalibur.domain import (
+    ComponentIdentity,
+    VexAnalysisState,
+    VexRemediationCategory,
+    VulnerabilityFinding,
+)
 from vexcalibur.generate import generate_vex_from_local_findings
 from vexcalibur.openvex import (
     OPENVEX_CONTEXT,
@@ -101,6 +107,34 @@ def test_render_openvex_matches_all_states_golden_and_official_schema() -> None:
     assert "last_updated" not in document
 
 
+def test_openvex_compatibility_renderer_adapts_then_delegates() -> None:
+    components = _components()
+    finding = _finding(component=components[0])
+    received: dict[str, object] = {}
+
+    class RecordingRenderer(OpenVexJsonRenderer):
+        def render_document(
+            self,
+            *,
+            document: VexDocument,
+            timestamp: datetime | None = None,
+        ) -> str:
+            received.update(document=document, timestamp=timestamp)
+            return "rendered-document"
+
+    rendered = RecordingRenderer(author="Example Security Team").render(
+        components=components,
+        findings=(finding,),
+        timestamp=TIMESTAMP,
+    )
+
+    assert rendered == "rendered-document"
+    assert received["timestamp"] == TIMESTAMP
+    document = received["document"]
+    assert isinstance(document, VexDocument)
+    assert document.assertions[0].product.key == components[0].ref
+
+
 def test_openvex_groups_products_and_is_input_order_independent() -> None:
     components = _components()
     first = _finding(component=components[0])
@@ -147,6 +181,28 @@ def test_openvex_groups_products_and_is_input_order_independent() -> None:
             "vulnerability": {"name": "CVE-2026-0001"},
         }
     ]
+
+
+def test_openvex_ignores_remediation_category() -> None:
+    finding = _finding()
+
+    without_category = render_openvex_json(
+        components=_components(),
+        findings=(finding,),
+        author="Example Security Team",
+        timestamp=TIMESTAMP,
+    )
+    with_category = render_openvex_json(
+        components=_components(),
+        findings=(
+            finding,
+            replace(finding, remediation_category=VexRemediationCategory.WORKAROUND),
+        ),
+        author="Example Security Team",
+        timestamp=TIMESTAMP,
+    )
+
+    assert with_category == without_category
 
 
 @pytest.mark.parametrize(

@@ -10,6 +10,14 @@ from uuid import NAMESPACE_URL, uuid5
 
 from packageurl import PackageURL
 
+from vexcalibur.document import (
+    VexAssertion,
+    VexDocument,
+    analysis_state,
+    product_purl,
+    versioned_product_purl,
+    vex_document_from_findings,
+)
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
 from vexcalibur.render import VexRenderError
 
@@ -39,6 +47,9 @@ class _OpenVexGroupKey:
     modified: str
 
 
+_OpenVexAssertionKey = tuple[_OpenVexGroupKey, str, str]
+
+
 class OpenVexRenderError(VexRenderError):
     """Raised when findings cannot form a valid standalone OpenVEX document."""
 
@@ -51,18 +62,9 @@ class OpenVexJsonRenderer:
     role: str | None = None
 
     def __post_init__(self) -> None:
-        author = self.author.strip()
-        if not author:
-            msg = "OpenVEX output requires a nonempty author"
-            raise OpenVexRenderError(msg)
+        author, role = _validate_document_metadata(author=self.author, role=self.role)
         object.__setattr__(self, "author", author)
-
-        if self.role is not None:
-            role = self.role.strip()
-            if not role:
-                msg = "OpenVEX author role must not be empty"
-                raise OpenVexRenderError(msg)
-            object.__setattr__(self, "role", role)
+        object.__setattr__(self, "role", role)
 
     def render(
         self,
@@ -71,13 +73,28 @@ class OpenVexJsonRenderer:
         findings: tuple[VulnerabilityFinding, ...],
         timestamp: datetime | None = None,
     ) -> str:
-        """Return deterministic OpenVEX 0.2.0 JSON."""
-        return render_openvex_json(
-            components=components,
-            findings=findings,
+        """Adapt provider findings and return OpenVEX 0.2.0 JSON."""
+        try:
+            document = vex_document_from_findings(components=components, findings=findings)
+        except VexRenderError as exc:
+            raise OpenVexRenderError(str(exc)) from exc
+        return self.render_document(
+            document=document,
+            timestamp=timestamp,
+        )
+
+    def render_document(
+        self,
+        *,
+        document: VexDocument,
+        timestamp: datetime | None = None,
+    ) -> str:
+        """Return deterministic OpenVEX 0.2.0 JSON for a VEX document."""
+        return _render_openvex_document(
+            document=document,
             author=self.author,
             role=self.role,
-            timestamp=timestamp,
+            timestamp=_normalize_timestamp(timestamp or datetime.now(tz=timezone.utc)),
         )
 
 
@@ -90,50 +107,53 @@ def render_openvex_json(
     timestamp: datetime | None = None,
 ) -> str:
     """Render deterministic OpenVEX 0.2.0 JSON."""
-    normalized_author, normalized_role = _validate_document_metadata(author=author, role=role)
-    normalized_timestamp = _normalize_timestamp(timestamp or datetime.now(tz=timezone.utc))
-    canonical_findings = _canonical_findings(findings)
-    if not canonical_findings:
+    return OpenVexJsonRenderer(author=author, role=role).render(
+        components=components,
+        findings=findings,
+        timestamp=timestamp,
+    )
+
+
+def _render_openvex_document(
+    *,
+    document: VexDocument,
+    author: str,
+    role: str | None,
+    timestamp: datetime,
+) -> str:
+    canonical_assertions = _canonical_assertions(document.assertions)
+    if not canonical_assertions:
         msg = "OpenVEX output requires at least one vulnerability finding"
         raise OpenVexRenderError(msg)
 
-    components_by_ref = _components_by_ref(components)
-    _validate_findings(findings=canonical_findings, components_by_ref=components_by_ref)
-    _validate_no_overlapping_assertions(
-        findings=canonical_findings,
-        components_by_ref=components_by_ref,
-    )
+    _validate_assertions(canonical_assertions)
+    _validate_no_overlapping_assertions(canonical_assertions)
 
-    document: dict[str, object] = {
+    openvex_document: dict[str, object] = {
         "@context": OPENVEX_CONTEXT,
-        "author": normalized_author,
+        "author": author,
         "statements": [
-            _statement(
-                group_key=group_key,
-                findings=group_findings,
-                components_by_ref=components_by_ref,
-            )
-            for group_key, group_findings in _group_findings(canonical_findings)
+            _statement(group_key=group_key, assertions=group_assertions)
+            for group_key, group_assertions in _group_assertions(canonical_assertions)
         ],
-        "timestamp": _format_timestamp(normalized_timestamp),
+        "timestamp": _format_timestamp(timestamp),
         "tooling": OPENVEX_TOOLING,
         "version": 1,
     }
-    if normalized_role is not None:
-        document["role"] = normalized_role
+    if role is not None:
+        openvex_document["role"] = role
 
-    canonical = json.dumps(document, sort_keys=True, separators=(",", ":"))
-    document["@id"] = (
+    canonical = json.dumps(openvex_document, sort_keys=True, separators=(",", ":"))
+    openvex_document["@id"] = (
         f"urn:uuid:{uuid5(NAMESPACE_URL, f'https://vexcalibur.dev/openvex/{canonical}')}"
     )
-    return f"{json.dumps(document, indent=2, sort_keys=True)}\n"
+    return f"{json.dumps(openvex_document, indent=2, sort_keys=True)}\n"
 
 
 def _statement(
     *,
     group_key: _OpenVexGroupKey,
-    findings: tuple[VulnerabilityFinding, ...],
-    components_by_ref: dict[str, ComponentIdentity],
+    assertions: tuple[VexAssertion, ...],
 ) -> dict[str, object]:
     state = VexAnalysisState(group_key.analysis_state)
     detail = group_key.analysis_detail
@@ -141,9 +161,7 @@ def _statement(
     impact_statement = group_key.impact_statement or None
     fixed_version = group_key.fixed_version or None
     modified = group_key.modified or None
-    product_purls = sorted(
-        {_product_purl(components_by_ref[finding.component_ref]) for finding in findings}
-    )
+    product_purls = sorted({versioned_product_purl(assertion.product) for assertion in assertions})
     statement: dict[str, object] = {
         "products": [{"@id": purl, "identifiers": {"purl": purl}} for purl in product_purls],
         "status": _STATUS_BY_STATE[state],
@@ -169,180 +187,146 @@ def _statement(
         if action_statement is None:
             msg = (
                 f"OpenVEX affected statement {group_key.vulnerability_id!r} requires "
-                "an action_statement "
-                "that describes remediation or mitigation"
+                "an action_statement that describes remediation or mitigation"
             )
             raise OpenVexRenderError(msg)
         statement["action_statement"] = action_statement
     return statement
 
 
-def _group_findings(
-    findings: tuple[VulnerabilityFinding, ...],
-) -> tuple[tuple[_OpenVexGroupKey, tuple[VulnerabilityFinding, ...]], ...]:
-    grouped: dict[_OpenVexGroupKey, list[VulnerabilityFinding]] = defaultdict(list)
-    for finding in findings:
-        key = _finding_group_key(finding)
-        grouped[key].append(finding)
+def _group_assertions(
+    assertions: tuple[VexAssertion, ...],
+) -> tuple[tuple[_OpenVexGroupKey, tuple[VexAssertion, ...]], ...]:
+    grouped: dict[_OpenVexGroupKey, list[VexAssertion]] = defaultdict(list)
+    for assertion in assertions:
+        key = _assertion_group_key(assertion)
+        grouped[key].append(assertion)
     return tuple((key, tuple(grouped[key])) for key in sorted(grouped))
 
 
-def _finding_group_key(finding: VulnerabilityFinding) -> _OpenVexGroupKey:
+def _assertion_group_key(assertion: VexAssertion) -> _OpenVexGroupKey:
+    vulnerability = assertion.vulnerability
     return _OpenVexGroupKey(
-        vulnerability_id=finding.id,
-        source_name=finding.source_name,
-        source_url=finding.source_url,
-        analysis_state=finding.analysis_state.value,
-        analysis_detail=finding.analysis_detail,
-        action_statement=finding.action_statement or "",
-        impact_statement=finding.impact_statement or "",
-        fixed_version=finding.fixed_version or "",
-        modified=_format_timestamp(finding.modified) if finding.modified is not None else "",
+        vulnerability_id=vulnerability.id,
+        source_name=vulnerability.source_name,
+        source_url=vulnerability.source_url,
+        analysis_state=analysis_state(assertion).value,
+        analysis_detail=assertion.analysis_detail,
+        action_statement=assertion.action_statement or "",
+        impact_statement=assertion.impact_statement or "",
+        fixed_version=assertion.fixed_version or "",
+        modified=(
+            _format_timestamp(assertion.source_record_modified_at)
+            if assertion.source_record_modified_at is not None
+            else ""
+        ),
     )
 
 
-def _canonical_findings(
-    findings: tuple[VulnerabilityFinding, ...],
-) -> tuple[VulnerabilityFinding, ...]:
+def _canonical_assertions(
+    assertions: tuple[VexAssertion, ...],
+) -> tuple[VexAssertion, ...]:
+    canonical: dict[_OpenVexAssertionKey, VexAssertion] = {}
     try:
-        return tuple(
-            dict.fromkeys(
-                sorted(
-                    findings,
-                    key=lambda finding: (
-                        _finding_group_key(finding),
-                        finding.component_ref,
-                        finding.purl,
-                    ),
-                )
-            )
-        )
-    except (AttributeError, ValueError) as exc:
+        for assertion in sorted(assertions, key=_openvex_assertion_key):
+            canonical.setdefault(_openvex_assertion_key(assertion), assertion)
+    except (AttributeError, ValueError, VexRenderError) as exc:
         msg = "OpenVEX findings contain an unsupported analysis state or timestamp"
         raise OpenVexRenderError(msg) from exc
+    return tuple(canonical.values())
 
 
-def _components_by_ref(
-    components: tuple[ComponentIdentity, ...],
-) -> dict[str, ComponentIdentity]:
-    components_by_ref: dict[str, ComponentIdentity] = {}
-    duplicate_refs: set[str] = set()
-    for component in components:
-        if component.ref in components_by_ref:
-            duplicate_refs.add(component.ref)
-        components_by_ref[component.ref] = component
-    if duplicate_refs:
-        msg = f"OpenVEX components contain duplicate refs: {', '.join(sorted(duplicate_refs))}"
-        raise OpenVexRenderError(msg)
-    return components_by_ref
+def _openvex_assertion_key(assertion: VexAssertion) -> _OpenVexAssertionKey:
+    return (
+        _assertion_group_key(assertion),
+        assertion.product.key,
+        product_purl(assertion.product).to_string(),
+    )
 
 
-def _validate_findings(
-    *,
-    findings: tuple[VulnerabilityFinding, ...],
-    components_by_ref: dict[str, ComponentIdentity],
-) -> None:
-    for finding in findings:
+def _validate_assertions(assertions: tuple[VexAssertion, ...]) -> None:
+    for assertion in assertions:
+        vulnerability = assertion.vulnerability
         for field_name, value in (
-            ("id", finding.id),
-            ("source_name", finding.source_name),
-            ("source_url", finding.source_url),
-            ("analysis_detail", finding.analysis_detail),
+            ("id", vulnerability.id),
+            ("source_name", vulnerability.source_name),
+            ("source_url", vulnerability.source_url),
+            ("analysis_detail", assertion.analysis_detail),
         ):
             if not value.strip():
                 msg = f"OpenVEX finding {field_name} must not be empty"
                 raise OpenVexRenderError(msg)
 
-        component = components_by_ref.get(finding.component_ref)
-        if component is None:
-            msg = f"OpenVEX finding references unknown component {finding.component_ref!r}"
-            raise OpenVexRenderError(msg)
-        component_purl = component.purl.to_string()
-        if finding.purl != component_purl:
-            msg = (
-                f"OpenVEX finding PURL {finding.purl!r} does not match component "
-                f"{finding.component_ref!r} PURL {component_purl!r}"
-            )
-            raise OpenVexRenderError(msg)
-        product_purl = _product_purl(component)
-        product_version = PackageURL.from_string(product_purl).version
+        emitted_purl = versioned_product_purl(assertion.product)
+        product_version = PackageURL.from_string(emitted_purl).version
         if product_version is None or not product_version.strip():
             msg = (
-                f"OpenVEX product PURL {product_purl!r} must include a version to avoid "
+                f"OpenVEX product PURL {emitted_purl!r} must include a version to avoid "
                 "applying an assertion to every package version"
             )
             raise OpenVexRenderError(msg)
-        if finding.action_statement is not None and not finding.action_statement.strip():
+        state = analysis_state(assertion)
+        if assertion.action_statement is not None and not assertion.action_statement.strip():
             msg = "OpenVEX action_statement must not be empty"
             raise OpenVexRenderError(msg)
-        if (
-            finding.action_statement is not None
-            and finding.analysis_state is not VexAnalysisState.EXPLOITABLE
-        ):
+        if assertion.action_statement is not None and state is not VexAnalysisState.EXPLOITABLE:
             msg = "OpenVEX action_statement is only valid for an exploitable finding"
             raise OpenVexRenderError(msg)
-        if finding.impact_statement is not None and not finding.impact_statement.strip():
+        if assertion.impact_statement is not None and not assertion.impact_statement.strip():
             msg = "OpenVEX impact_statement must not be empty"
             raise OpenVexRenderError(msg)
-        if finding.analysis_state in {
+        if state in {
             VexAnalysisState.FALSE_POSITIVE,
             VexAnalysisState.NOT_AFFECTED,
         }:
-            if finding.impact_statement is None:
+            if assertion.impact_statement is None:
                 msg = "OpenVEX false_positive and not_affected findings require an impact_statement"
                 raise OpenVexRenderError(msg)
-        elif finding.impact_statement is not None:
+        elif assertion.impact_statement is not None:
             msg = (
                 "OpenVEX impact_statement is only valid for a false_positive or "
                 "not_affected finding"
             )
             raise OpenVexRenderError(msg)
 
-        if finding.fixed_version is not None and not finding.fixed_version.strip():
+        if assertion.fixed_version is not None and not assertion.fixed_version.strip():
             msg = "OpenVEX fixed_version must not be empty"
             raise OpenVexRenderError(msg)
-        if finding.analysis_state is VexAnalysisState.RESOLVED:
-            _validate_fixed_version(finding=finding, component=component)
-        elif finding.fixed_version is not None:
+        if state is VexAnalysisState.RESOLVED:
+            _validate_fixed_version(assertion)
+        elif assertion.fixed_version is not None:
             msg = "OpenVEX fixed_version is only valid for a resolved finding"
             raise OpenVexRenderError(msg)
 
 
-def _validate_fixed_version(
-    *,
-    finding: VulnerabilityFinding,
-    component: ComponentIdentity,
-) -> None:
-    if finding.fixed_version is None:
+def _validate_fixed_version(assertion: VexAssertion) -> None:
+    if assertion.fixed_version is None:
         msg = (
             "OpenVEX resolved findings require fixed_version to confirm that the "
             "identified product contains a fix"
         )
         raise OpenVexRenderError(msg)
-    product_version = PackageURL.from_string(_product_purl(component)).version
-    if product_version != finding.fixed_version:
+    emitted_purl = versioned_product_purl(assertion.product)
+    product_version = PackageURL.from_string(emitted_purl).version
+    if product_version != assertion.fixed_version:
         msg = (
-            f"OpenVEX fixed_version {finding.fixed_version!r} does not match product "
-            f"{_product_purl(component)!r} version {product_version!r}"
+            f"OpenVEX fixed_version {assertion.fixed_version!r} does not match product "
+            f"{emitted_purl!r} version {product_version!r}"
         )
         raise OpenVexRenderError(msg)
 
 
-def _validate_no_overlapping_assertions(
-    *,
-    findings: tuple[VulnerabilityFinding, ...],
-    components_by_ref: dict[str, ComponentIdentity],
-) -> None:
-    assertions: dict[tuple[str, str], _OpenVexGroupKey] = {}
-    for finding in findings:
-        product_purl = _product_purl(components_by_ref[finding.component_ref])
-        assertion_key = (finding.id, product_purl)
-        group_key = _finding_group_key(finding)
-        previous = assertions.setdefault(assertion_key, group_key)
+def _validate_no_overlapping_assertions(assertions: tuple[VexAssertion, ...]) -> None:
+    effective_assertions: dict[tuple[str, str], _OpenVexGroupKey] = {}
+    for assertion in assertions:
+        product = versioned_product_purl(assertion.product)
+        assertion_key = (assertion.vulnerability.id, product)
+        group_key = _assertion_group_key(assertion)
+        previous = effective_assertions.setdefault(assertion_key, group_key)
         if previous != group_key:
             msg = (
-                f"OpenVEX findings contain overlapping assertions for vulnerability "
-                f"{finding.id!r} and product {product_purl!r}"
+                "OpenVEX findings contain overlapping assertions for vulnerability "
+                f"{assertion.vulnerability.id!r} and product {product!r}"
             )
             raise OpenVexRenderError(msg)
 
@@ -359,20 +343,6 @@ def _validate_document_metadata(*, author: str, role: str | None) -> tuple[str, 
         msg = "OpenVEX author role must not be empty"
         raise OpenVexRenderError(msg)
     return normalized_author, normalized_role
-
-
-def _product_purl(component: ComponentIdentity) -> str:
-    purl = component.purl
-    if purl.version is not None or not component.version:
-        return purl.to_string()
-    return PackageURL(
-        type=purl.type,
-        namespace=purl.namespace,
-        name=purl.name,
-        version=component.version,
-        qualifiers=purl.qualifiers,
-        subpath=purl.subpath,
-    ).to_string()
 
 
 def _status_notes(

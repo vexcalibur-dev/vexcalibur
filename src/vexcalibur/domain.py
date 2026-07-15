@@ -24,6 +24,16 @@ class VexAnalysisState(str, Enum):
     NOT_AFFECTED = "not_affected"
 
 
+class VexRemediationCategory(str, Enum):
+    """Remediation categories that a VEX output format may represent."""
+
+    MITIGATION = "mitigation"
+    NO_FIX_PLANNED = "no_fix_planned"
+    NONE_AVAILABLE = "none_available"
+    VENDOR_FIX = "vendor_fix"
+    WORKAROUND = "workaround"
+
+
 @dataclass(frozen=True)
 class ComponentIdentity:
     """Minimal component data needed by vulnerability sources and VEX output."""
@@ -50,6 +60,7 @@ class VulnerabilityFinding:
     action_statement: str | None = None
     impact_statement: str | None = None
     fixed_version: str | None = None
+    remediation_category: VexRemediationCategory | None = None
 
 
 class VulnerabilitySourceError(RuntimeError):

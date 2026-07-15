@@ -18,7 +18,8 @@
       "modified": "2026-01-02T00:00:00Z",
       "analysis_state": "exploitable",
       "analysis_detail": "The affected feature is reachable.",
-      "action_statement": "Upgrade minimist to version 1.2.8 or later."
+      "action_statement": "Upgrade minimist to version 1.2.8 or later.",
+      "remediation_category": "vendor_fix"
     },
     {
       "id": "CVE-2026-0004",
