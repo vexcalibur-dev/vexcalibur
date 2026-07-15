@@ -68,7 +68,7 @@ Fetching a GitHub SBOM is a separate choice. `--github-repo` permits that input 
 
 `VexRenderer` separates generation from a serialization format. `generate_vex_from_*` helpers use `CycloneDxJsonRenderer` unless a caller supplies another renderer.
 
-In the current source tree, `vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders OpenVEX 0.2.0 JSON. Each renderer owns grouping, required metadata, validation, and state mapping.
+In version 0.2.0, `vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders OpenVEX 0.2.0 JSON. Each renderer owns grouping, required metadata, validation, and state mapping.
 
 OSV says that a vulnerability matches a package version; it does not decide exploitability for a particular deployment. OSV findings therefore enter VEX as `in_triage`. A local finding can carry a reviewed state such as `not_affected` or `exploitable`.
 

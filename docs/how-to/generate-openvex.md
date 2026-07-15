@@ -2,8 +2,6 @@
 
 Use `vexcalibur generate --format openvex` to write OpenVEX 0.2.0 JSON. CycloneDX remains the default when `--format` is absent.
 
-**Unreleased source feature:** This guide applies to the current source tree. Published version 0.1.1 does not include `--format openvex`. OpenVEX will enter the published package in the next release.
-
 OpenVEX requires a document author and at least one statement. Some statuses also require explicit evidence fields.
 
 ## Prerequisites
@@ -11,7 +9,7 @@ OpenVEX requires a document author and at least one statement. Some statuses als
 Before you begin:
 
 - Install Git, Python 3.10 or newer, and the `uv` version in `.tool-versions`.
-- Clone this repository at a revision that contains the OpenVEX implementation.
+- Clone this repository at version 0.2.0 or later.
 - Open a Bash-compatible shell in the repository root.
 - Confirm that `/tmp` is writable, or replace the example output path.
 

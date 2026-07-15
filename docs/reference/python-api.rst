@@ -4,10 +4,6 @@ Python API
 The Python API is pre-1.0. Import paths, signatures, exceptions, and return
 shapes may change between releases.
 
-The OpenVEX names on this page describe the current source tree. Published
-version 0.1.1 does not include them. They will enter the published package in
-the next release.
-
 Domain objects
 --------------
 

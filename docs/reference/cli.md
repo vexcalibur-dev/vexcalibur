@@ -61,8 +61,6 @@ Live IDs and ordering may change.
 
 Generates CycloneDX 1.6 or OpenVEX 0.2.0 JSON.
 
-The OpenVEX flags in this section describe the current source tree. Published version 0.1.1 generates CycloneDX only. OpenVEX will enter the published package in the next release.
-
 ```text
 vexcalibur generate [OPTIONS] [INPUT_FILE]
 ```

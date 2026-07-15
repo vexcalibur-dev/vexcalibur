@@ -2,8 +2,6 @@
 
 `vexcalibur generate --format openvex` writes OpenVEX 0.2.0 JSON. A controlled timestamp and finding set produce repeatable output. Vexcalibur implements the renderer without an OpenVEX runtime library.
 
-**Unreleased source feature:** This reference describes the current source tree. Published version 0.1.1 does not contain this renderer or its CLI flags. OpenVEX will enter the published package in the next release.
-
 Vexcalibur targets the [OpenVEX 0.2.0 specification](https://github.com/openvex/spec/blob/7667061835da09300f913e26be10ee03c05e784d/OPENVEX-SPEC.md). Tests use the [official schema at commit `a68ccd1`](https://github.com/openvex/spec/blob/a68ccd19b15a9604d28ef66ebf33f27a772ba4ec/openvex_json_schema.json). The release tag predates that schema file, so the repository vendors and pins the later schema.
 
 ## Document contract

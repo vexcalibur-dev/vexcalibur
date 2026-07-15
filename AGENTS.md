@@ -4,7 +4,7 @@ This file gives automated contributors the repository rules needed to work safel
 
 ## Project state
 
-Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services or local JSON. The current source tree renders CycloneDX 1.6 or OpenVEX 0.2.0 JSON. Published version 0.1.1 includes only CycloneDX output.
+Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services or local JSON. Published version 0.2.0 renders CycloneDX 1.6 or OpenVEX 0.2.0 JSON.
 
 The implementation is Python, but domain and product decisions should remain ecosystem-neutral unless an issue narrows the scope. Do not present a planned input, provider, or output format as available.
 
