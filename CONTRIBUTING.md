@@ -43,7 +43,8 @@ CI also checks formatting and enforces 75 percent branch coverage. Run those two
 
 ```bash
 uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
-uv run --frozen pytest -m "not live" --cov-fail-under=75
+uv run --frozen pytest -m "not live and not fuzz" --cov-fail-under=75
+make fuzz-smoke
 ```
 
 Run live compatibility tests only when the test data may be sent to the covered public services:
@@ -51,6 +52,17 @@ Run live compatibility tests only when the test data may be sent to the covered 
 ```bash
 make test-live
 ```
+
+Run the bounded Atheris campaign after changing an untrusted parser or source
+boundary. Atheris requires CPython 3.12–3.14 on Linux x86-64:
+
+```bash
+make fuzz-coverage
+```
+
+The [fuzzing guide](docs/development/fuzzing.md) defines target scope, resource
+limits, corpus rules, and crash triage. Never add private SBOMs, credentials,
+or embargoed findings to a corpus.
 
 Run the pinned official OpenVEX parser after changing that renderer or its goldens:
 

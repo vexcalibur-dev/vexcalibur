@@ -4,7 +4,7 @@ Vexcalibur has published releases and supports the workflows in this manual. It 
 
 Pin exact package and action versions in automation. Do not use a mutable branch for a production workflow.
 
-## Published in version 0.3.0
+## Published in version 0.3.1
 
 - CycloneDX JSON and XML SBOM input for versions 1.4, 1.5, and 1.6
 - GitHub Dependency Graph SBOM input through `--github-repo OWNER/REPO`
@@ -18,7 +18,9 @@ Pin exact package and action versions in automation. Do not use a mutable branch
 - a limited `vexy` compatibility executable
 - a released companion GitHub Action
 
-The repository runs its Python, package, and documentation gates on every change. Supply-chain checks cover dependencies, secrets, CodeQL, and OpenSSF Scorecard.
+The repository runs its Python, package, documentation, and deterministic
+parser-property gates on every change. Supply-chain checks cover dependencies,
+secrets, CodeQL, OpenSSF Scorecard, and a bounded weekly Atheris campaign.
 
 OpenVEX goldens pass the pinned official schema and `go-vex` parser.
 

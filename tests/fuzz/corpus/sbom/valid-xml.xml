@@ -1,0 +1,1 @@
+<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1"><components><component type="library" bom-ref="example"><name>example</name><version>1.0.0</version><purl>pkg:pypi/example@1.0.0</purl></component></components></bom>

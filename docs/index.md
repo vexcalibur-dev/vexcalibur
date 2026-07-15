@@ -1,7 +1,7 @@
 # Vexcalibur
 
 Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
-documents. Version 0.3.0 reads CycloneDX files or a GitHub Dependency Graph
+documents. Version 0.3.1 reads CycloneDX files or a GitHub Dependency Graph
 SBOM. It collects findings from OSV-compatible services or local JSON. It
 writes CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
 
@@ -40,6 +40,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 ## Contributor documentation
 
 - [CI, releases, and recurring checks](development/ci.md)
+- [Fuzz untrusted input boundaries](development/fuzzing.md)
 - [Verify GitHub governance](development/github-governance.md)
 - [Python style policy](development/python-style.md)
 - [Vendored external documents](external/README.md)
@@ -65,6 +66,7 @@ reference/local-findings
 explanation/architecture
 explanation/project-status
 development/ci
+development/fuzzing
 development/github-governance
 development/python-style
 external/README

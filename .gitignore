@@ -2,6 +2,9 @@
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.hypothesis/
+fuzz-artifacts/
+.fuzz-corpus/
 __pycache__/
 *.egg-info/
 src/vexcalibur/_version.py

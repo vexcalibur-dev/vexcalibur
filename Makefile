@@ -1,4 +1,4 @@
-.PHONY: help install install-docs test test-live installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop lint workflow-lint format typecheck governance-check audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live fuzz-smoke fuzz-coverage installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop lint workflow-lint format typecheck governance-check audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 UV := uv
 PACKAGE := vexcalibur
@@ -21,10 +21,17 @@ install-docs: ## Install project and documentation dependencies
 	$(UV) sync --extra docs
 
 test: ## Run offline tests
-	$(UV) run --frozen pytest -m "not live"
+	$(UV) run --frozen pytest -m "not live and not fuzz"
 
 test-live: ## Run live compatibility tests against external services
 	$(UV) run --frozen pytest -m live
+
+fuzz-smoke: ## Run deterministic property tests without a Hypothesis database
+	HYPOTHESIS_PROFILE=fuzz-smoke $(UV) run --frozen pytest -m fuzz tests/fuzz
+
+fuzz-coverage: ## Run bounded Atheris targets (set FUZZ_TARGET to select one)
+	$(UV) sync --frozen --group fuzz
+	scripts/run-atheris.sh
 
 installed-cli-check: ## Build, install, and test console scripts from the wheel
 	scripts/check-installed-cli.sh
@@ -72,7 +79,7 @@ secrets-pr: ## Check tracked files against the base branch secret baseline
 	git show $(SECRETS_BASELINE_REF):.secrets.baseline > /tmp/vexcalibur-base.secrets.baseline
 	git ls-files -z -- . ':(exclude).secrets.baseline' | xargs -0 $(UV) run --frozen detect-secrets-hook --baseline /tmp/vexcalibur-base.secrets.baseline --
 
-check: lint workflow-lint typecheck audit secrets test ## Run local quality gate
+check: lint workflow-lint typecheck audit secrets test fuzz-smoke ## Run local quality gate
 
 docs: ## Build Sphinx documentation
 	$(UV) run --frozen --extra docs sphinx-build -W --keep-going -b html docs docs/_build/html
@@ -90,7 +97,8 @@ secrets-baseline: ## Refresh detect-secrets baseline
 	$(UV) run --frozen detect-secrets scan --baseline .secrets.baseline
 
 clean: ## Remove generated local artifacts
-	rm -rf build dist *.egg-info src/*.egg-info .coverage .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
+	rm -rf build dist *.egg-info src/*.egg-info .coverage .pytest_cache .hypothesis .mypy_cache .ruff_cache htmlcov coverage.xml
+	rm -rf fuzz-artifacts .fuzz-corpus
 	rm -f src/$(PACKAGE)/_version.py
 	rm -rf docs/_build $(CSAF_VALIDATOR_DIR)/node_modules
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

@@ -9,7 +9,7 @@
 
 Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
-Version 0.3.0 writes CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
+Version 0.3.1 writes CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
 output uses the `csaf_vex` profile.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
@@ -31,7 +31,7 @@ Create an environment and pin the package version:
 
 ```bash
 python -m venv .venv
-.venv/bin/python -m pip install "vexcalibur==0.3.0"
+.venv/bin/python -m pip install "vexcalibur==0.3.1"
 .venv/bin/vexcalibur --help
 ```
 
@@ -123,7 +123,17 @@ uv sync --extra docs
 make docs
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), the [security policy](SECURITY.md), and the [Python style policy](https://vexcalibur-dev.github.io/vexcalibur/development/python-style.html) before opening a pull request.
+Parser, source-client, package-URL, and terminal-safety changes must also run
+the deterministic fuzz smoke profile:
+
+```bash
+make fuzz-smoke
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), the [security policy](SECURITY.md), the
+[fuzzing guide](https://vexcalibur-dev.github.io/vexcalibur/development/fuzzing.html),
+and the [Python style policy](https://vexcalibur-dev.github.io/vexcalibur/development/python-style.html)
+before opening a pull request.
 
 Use the [issue forms](https://github.com/vexcalibur-dev/vexcalibur/issues) for questions, bugs, and feature requests. The organization [support policy](https://github.com/vexcalibur-dev/.github/blob/main/SUPPORT.md) explains which public route to use, and the [code of conduct](https://github.com/vexcalibur-dev/.github/blob/main/CODE_OF_CONDUCT.md) applies to project spaces.
 
