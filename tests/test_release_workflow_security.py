@@ -278,6 +278,8 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "persist-credentials: false" in inventory
     assert "prepare-publication-inventory" in inventory
     assert "verify-publication-inventory" in inventory
+    helper_sync = "uv sync --frozen --no-install-project --group dev"
+    assert helper_sync in inventory
 
     assert "needs: [build, publication-inventory]" in direct
     assert "permissions: {}" in direct
@@ -297,6 +299,7 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert finalizer.count("actions/download-artifact@") == 4
     assert "finalize-publication" in finalizer
     assert "verify-publication" in finalizer
+    assert helper_sync in finalizer
 
 
 def test_publication_inventory_never_consumes_or_executes_the_candidate() -> None:
@@ -312,7 +315,7 @@ def test_publication_inventory_never_consumes_or_executes_the_candidate() -> Non
         "package-spec",
     ):
         assert forbidden not in inventory
-    assert "--no-install-project" in inventory
+    assert "uv sync --frozen --no-install-project --group dev" in inventory
     assert "uv.lock" in inventory
     assert "release-evidence/review.json" in inventory
     assert "release-evidence/findings.json" in inventory

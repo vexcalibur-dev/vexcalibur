@@ -592,8 +592,8 @@ jobs:
           enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
 
-      - name: Install evidence-helper dependencies only
-        run: uv sync --frozen --no-dev --no-install-project
+      - name: Install locked evidence-helper dependencies
+        run: uv sync --frozen --no-install-project --group dev
 
       - name: Export reviewed lock inventory
         id: metadata
@@ -1183,8 +1183,8 @@ jobs:
           enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
 
-      - name: Install evidence-helper dependencies only
-        run: uv sync --frozen --no-dev --no-install-project
+      - name: Install locked evidence-helper dependencies
+        run: uv sync --frozen --no-install-project --group dev
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
