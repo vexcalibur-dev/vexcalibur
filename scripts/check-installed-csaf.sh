@@ -42,8 +42,10 @@ if [[ ! -f "$wheel" ]]; then
 fi
 
 venv_dir="$work_dir/venv"
-"$uv_bin" venv "$venv_dir"
-"$uv_bin" pip install --python "$venv_dir/bin/python" "$wheel"
+"$repo_root/scripts/install-locked-wheel.sh" \
+  "$venv_dir" \
+  "$wheel" \
+  "$work_dir/runtime-requirements.txt"
 
 output_path="$work_dir/acme-vex-2026-001.json"
 "$venv_dir/bin/vexcalibur" generate \

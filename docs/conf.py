@@ -38,7 +38,6 @@ exclude_patterns = [
 html_theme = "alabaster"
 html_title = "Vexcalibur"
 html_baseurl = "https://vexcalibur-dev.github.io/vexcalibur/"
-html_static_path: list[str] = []
 
 autodoc_typehints = "description"
 autodoc_typehints_format = "short"

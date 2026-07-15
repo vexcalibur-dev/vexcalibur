@@ -335,45 +335,43 @@ def test_query_batch_keeps_paginating_each_active_query_until_complete() -> None
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        match len(requests):
-            case 1:
-                return httpx.Response(
-                    200,
-                    json={
-                        "results": [
-                            {
-                                "vulns": [{"id": "GHSA-test-0001"}],
-                                "next_page_token": "first-page-2",
-                            },
-                            {
-                                "vulns": [{"id": "GHSA-test-0003"}],
-                                "next_page_token": "second-page-2",
-                            },
-                        ]
-                    },
-                )
-            case 2:
-                return httpx.Response(
-                    200,
-                    json={
-                        "results": [
-                            {"vulns": [{"id": "GHSA-test-0002"}]},
-                            {
-                                "vulns": [{"id": "GHSA-test-0004"}],
-                                "next_page_token": "second-page-3",
-                            },
-                        ]
-                    },
-                )
-            case _:
-                return httpx.Response(
-                    200,
-                    json={
-                        "results": [
-                            {"vulns": [{"id": "GHSA-test-0005"}]},
-                        ]
-                    },
-                )
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "vulns": [{"id": "GHSA-test-0001"}],
+                            "next_page_token": "first-page-2",
+                        },
+                        {
+                            "vulns": [{"id": "GHSA-test-0003"}],
+                            "next_page_token": "second-page-2",
+                        },
+                    ]
+                },
+            )
+        if len(requests) == 2:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"vulns": [{"id": "GHSA-test-0002"}]},
+                        {
+                            "vulns": [{"id": "GHSA-test-0004"}],
+                            "next_page_token": "second-page-3",
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"vulns": [{"id": "GHSA-test-0005"}]},
+                ]
+            },
+        )
 
     transport = httpx.MockTransport(handler)
     client = OsvClient(

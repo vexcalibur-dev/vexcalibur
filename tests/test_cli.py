@@ -7,7 +7,6 @@ from packageurl import PackageURL
 from typer.testing import CliRunner
 
 import vexcalibur.csaf as csaf_module
-import vexcalibur.sources.osv as osv_module
 from vexcalibur import cli
 from vexcalibur.compat import vexy
 from vexcalibur.domain import ComponentIdentity
@@ -47,7 +46,7 @@ def test_query_osv_prints_vulnerability_ids(monkeypatch) -> None:
                 ),
             ]
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -86,7 +85,7 @@ def test_query_osv_prints_server_controlled_ids_without_rich_markup(monkeypatch)
                 )
             ]
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -108,7 +107,7 @@ def test_query_osv_requires_public_osv_opt_in_without_traceback(monkeypatch) -> 
         def __init__(self, **kwargs) -> None:
             raise AssertionError("public OSV client should not be constructed")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(cli.app, ["query-osv", "pkg:pypi/example@1.0.0"])
 
@@ -141,7 +140,7 @@ def test_query_osv_rejects_public_osv_url_variants_without_traceback(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("public OSV client should not be constructed")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -169,7 +168,7 @@ def test_query_osv_allows_private_osv_url_without_public_opt_in(monkeypatch) -> 
         def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
             return []
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -206,7 +205,7 @@ def test_query_osv_rejects_invalid_osv_url_without_traceback(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("OSV client should not be constructed for invalid URL")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -235,7 +234,7 @@ def test_query_osv_allows_cleartext_loopback_osv_url(monkeypatch) -> None:
         def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
             return []
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -275,7 +274,7 @@ def test_query_osv_reports_osv_client_errors_without_traceback(monkeypatch) -> N
         def query_batch(self, purls: list[PackageURL]) -> list[OsvQueryResult]:
             raise OsvClientError("OSV API POST /v1/querybatch failed with HTTP 503")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -318,7 +317,7 @@ def test_generate_prints_deterministic_vex_json(monkeypatch) -> None:
                 ),
             ]
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -374,7 +373,7 @@ def test_generate_accepts_github_repo_source(monkeypatch) -> None:
 
     monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
     monkeypatch.setattr(cli, "resolve_github_token", fake_resolve_github_token)
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -618,7 +617,7 @@ def test_documented_github_repo_generate_examples_execute(
 
     monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
     monkeypatch.setattr(cli, "resolve_github_token", fake_resolve_github_token)
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     args = _documented_vexcalibur_generate_args(marker)
     args = [str(output_path) if arg.endswith("/vexcalibur-vex.json") else arg for arg in args]
@@ -656,7 +655,7 @@ def test_generate_requires_public_osv_opt_in_without_traceback(monkeypatch) -> N
         def __init__(self, **kwargs) -> None:
             raise AssertionError("public OSV client should not be constructed")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -677,7 +676,7 @@ def test_generate_rejects_unversioned_sbom_before_public_osv_policy(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("OSV client should not be constructed without a query set")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
     sbom_path = tmp_path / "sbom.json"
     sbom_path.write_text(
         """
@@ -729,7 +728,7 @@ def test_generate_rejects_public_osv_url_variants_without_traceback(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("public OSV client should not be constructed")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -751,7 +750,7 @@ def test_generate_rejects_empty_osv_url_without_traceback(monkeypatch) -> None:
         def __init__(self, **kwargs) -> None:
             raise AssertionError("OSV client should not be constructed for an empty URL")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -774,7 +773,7 @@ def test_generate_rejects_invalid_osv_url_without_traceback(monkeypatch) -> None
         def __init__(self, **kwargs) -> None:
             raise AssertionError("OSV client should not be constructed for an invalid URL")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -802,7 +801,7 @@ def test_generate_allows_private_osv_url_without_public_opt_in(monkeypatch) -> N
         def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
             return []
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -828,7 +827,7 @@ def test_generate_offline_uses_local_findings_without_osv_client(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("offline generation should not construct an OSV client")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(
         """
@@ -873,7 +872,7 @@ def test_generate_offline_accepts_xml_input_file(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("offline generation should not construct an OSV client")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(
         """
@@ -918,7 +917,7 @@ def test_generate_findings_file_uses_local_findings_without_osv_client(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("local findings generation should not construct an OSV client")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(
         """
@@ -1115,7 +1114,7 @@ def test_generate_reports_osv_errors_without_traceback(monkeypatch) -> None:
         def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
             raise OsvClientError("OSV API POST /v1/querybatch failed with HTTP 503")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -1236,7 +1235,7 @@ def test_generate_rejects_openvex_metadata_with_cyclonedx_before_network(monkeyp
         def __init__(self, **kwargs) -> None:
             raise AssertionError("OSV must not be contacted before format option validation")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         cli.app,
@@ -1701,7 +1700,7 @@ def test_vexy_rejects_invalid_osv_url_without_traceback(monkeypatch) -> None:
         def __init__(self, **kwargs) -> None:
             raise AssertionError("OSV client should not be constructed for an invalid URL")
 
-    monkeypatch.setattr(osv_module, "OsvClient", FakeOsvClient)
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
         vexy.app,

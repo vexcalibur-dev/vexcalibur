@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-import vexcalibur.sources.local as local_module
 from vexcalibur.domain import VexAnalysisState, VexRemediationCategory
 from vexcalibur.sbom import load_cyclonedx_json
 from vexcalibur.sources.local import (
@@ -385,7 +384,7 @@ def test_load_local_findings_rejects_deeply_nested_json(
     def raise_recursion_error(*args: object, **kwargs: object) -> object:
         raise RecursionError
 
-    monkeypatch.setattr(local_module.json, "load", raise_recursion_error)
+    monkeypatch.setattr("vexcalibur.sources.local.json.load", raise_recursion_error)
 
     with pytest.raises(LocalFindingsError, match="too deeply nested"):
         load_local_findings(
