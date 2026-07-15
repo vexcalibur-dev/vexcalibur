@@ -271,7 +271,10 @@ env -u PYTHONPATH -u PYTHONHOME "$installed_python" "$helper" finalize \
   --uv-version "$actual_uv_version" \
   --source-tree-clean "$source_tree_clean"
 
-mv --no-clobber --no-target-directory -- "$staging_dir" "$output_dir"
+if ! mv --no-clobber --no-target-directory -- "$staging_dir" "$output_dir"; then
+  printf 'output directory appeared during evidence generation: %s\n' "$output_dir" >&2
+  exit 1
+fi
 if [[ -d "$staging_dir" ]]; then
   printf 'output directory appeared during evidence generation: %s\n' "$output_dir" >&2
   exit 1

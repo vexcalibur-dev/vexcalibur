@@ -475,7 +475,10 @@ def test_output_move_is_no_clobber_and_no_target_directory(tmp_path: Path) -> No
     completed = subprocess.run(  # noqa: S603 - fixed GNU mv and test-owned paths
         ["/usr/bin/mv", "--no-clobber", "--no-target-directory", "--", staging, output],
         check=False,
+        capture_output=True,
     )
-    assert completed.returncode == 0
+    # GNU coreutils 8 reports a no-clobber collision as success, while newer
+    # versions report failure. The security invariant is identical either way.
+    assert completed.returncode in {0, 1}
     assert (staging / "artifact").is_file()
     assert list(output.iterdir()) == []
