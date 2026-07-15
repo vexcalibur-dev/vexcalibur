@@ -15,6 +15,16 @@ on:
         description: Package version without the leading v.
         required: true
         type: string
+      publication-only:
+        description: Run only the build and immutable-publication contract jobs.
+        required: false
+        default: false
+        type: boolean
+      synthetic-ci-version:
+        description: Isolate a local v0.0.0 tag for the unprivileged CI contract only.
+        required: false
+        default: false
+        type: boolean
     outputs:
       sha:
         description: Validated commit SHA.
@@ -25,6 +35,27 @@ on:
       version:
         description: Validated package version.
         value: ${{ jobs.build.outputs.version }}
+      wheel-sha256:
+        description: SHA-256 digest of the exact wheel built by the build job.
+        value: ${{ jobs.build.outputs.wheel-sha256 }}
+      sdist-sha256:
+        description: SHA-256 digest of the exact source distribution built by the build job.
+        value: ${{ jobs.build.outputs.sdist-sha256 }}
+      dist-artifact:
+        description: Unique Actions artifact containing the exact built distributions.
+        value: ${{ jobs.build.outputs.artifact-name }}
+      dist-artifact-digest:
+        description: Transient GitHub Actions archive digest for same-run transport checks.
+        value: ${{ jobs.build.outputs.artifact-digest }}
+      release-assets-artifact:
+        description: Unique Actions artifact containing the flat immutable release asset set.
+        value: ${{ jobs.publication-assets.outputs.artifact-name }}
+      release-assets-sha256:
+        description: SHA-256 digest of the release asset SHA256SUMS file.
+        value: ${{ jobs.publication-assets.outputs.sha256 }}
+      release-assets-artifact-digest:
+        description: Transient GitHub Actions archive digest for same-run transport checks.
+        value: ${{ jobs.publication-assets.outputs.artifact-digest }}
 
 permissions:
   contents: read
@@ -38,6 +69,7 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-latest
+    if: ${{ !inputs.publication-only }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -71,6 +103,7 @@ jobs:
   workflow-lint:
     name: Workflow lint
     runs-on: ubuntu-latest
+    if: ${{ !inputs.publication-only }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -96,6 +129,7 @@ jobs:
   security:
     name: Repository security
     runs-on: ubuntu-latest
+    if: ${{ !inputs.publication-only }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -123,6 +157,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    if: ${{ !inputs.publication-only }}
     strategy:
       fail-fast: false
       matrix:
@@ -151,6 +186,7 @@ jobs:
   docs:
     name: Build docs
     runs-on: ubuntu-latest
+    if: ${{ !inputs.publication-only }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -175,10 +211,17 @@ jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.metadata.outputs.tag }}
       sha: ${{ steps.metadata.outputs.sha }}
       version: ${{ steps.version.outputs.version }}
+      wheel-sha256: ${{ steps.distributions.outputs.wheel-sha256 }}
+      sdist-sha256: ${{ steps.distributions.outputs.sdist-sha256 }}
+      artifact-name: ${{ steps.metadata.outputs.artifact-name }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -192,28 +235,48 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
           RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
         run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release-sha must be a lowercase 40-character commit SHA." >&2
+            exit 2
+          fi
+          if [[ ! "${RELEASE_VERSION}" =~ ^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+            echo "release-version must be a bounded MAJOR.MINOR.PATCH version." >&2
+            exit 2
+          fi
+          if [[ "${RELEASE_TAG}" != "v${RELEASE_VERSION}" ]]; then
+            echo "release-tag must be v followed by release-version." >&2
+            exit 2
+          fi
+          if [[ "$(git rev-parse --verify HEAD)" != "${RELEASE_SHA}" ]]; then
+            echo "Checked-out HEAD does not match release-sha." >&2
+            exit 1
+          fi
+          source_date_epoch="$(git show -s --format=%ct "${RELEASE_SHA}")"
+          if [[ ! "${source_date_epoch}" =~ ^[0-9]+$ ]]; then
+            echo "Release commit has an invalid timestamp." >&2
+            exit 1
+          fi
           {
             printf 'tag=%s\n' "${RELEASE_TAG}"
             printf 'sha=%s\n' "${RELEASE_SHA}"
+            printf 'artifact-name=dist-%s\n' "${RELEASE_SHA}"
+            printf 'source-date-epoch=%s\n' "${source_date_epoch}"
           } >> "$GITHUB_OUTPUT"
+          printf 'SOURCE_DATE_EPOCH=%s\n' "${source_date_epoch}" >> "$GITHUB_ENV"
 
       - name: Prepare local release tag
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
           RELEASE_SHA: ${{ inputs.release-sha }}
+          SYNTHETIC_CI_VERSION: ${{ inputs.synthetic-ci-version }}
         run: |
           set -euo pipefail
-
-          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
-            tag_sha="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
-            if [[ "${tag_sha}" != "${RELEASE_SHA}" ]]; then
-              echo "Release tag ${RELEASE_TAG} already exists on ${tag_sha}, not ${RELEASE_SHA}." >&2
-              exit 1
-            fi
-          else
-            git tag "${RELEASE_TAG}" "${RELEASE_SHA}"
-          fi
+          scripts/prepare-local-release-tag.sh \
+            "${RELEASE_TAG}" "${RELEASE_SHA}" "${SYNTHETIC_CI_VERSION}"
 
       - name: Set up uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -224,6 +287,26 @@ jobs:
 
       - name: Build distributions
         run: uv build --clear --no-create-gitignore --no-sources
+
+      - name: Normalize source-distribution archive metadata
+        run: |
+          set -euo pipefail
+
+          mapfile -t sdists < <(find dist -mindepth 1 -maxdepth 1 -type f -name '*.tar.gz')
+          if [[ "${#sdists[@]}" -ne 1 ]]; then
+            echo "Expected exactly one source distribution before normalization." >&2
+            exit 1
+          fi
+          normalized_once="${RUNNER_TEMP}/normalized-sdist.tar.gz"
+          normalized_twice="${RUNNER_TEMP}/normalized-sdist-second-pass.tar.gz"
+          python3 scripts/normalize-sdist.py "${sdists[0]}" \
+            --output "${normalized_once}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}"
+          python3 scripts/normalize-sdist.py "${normalized_once}" \
+            --output "${normalized_twice}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}"
+          cmp -- "${normalized_once}" "${normalized_twice}"
+          install -m 0644 -- "${normalized_once}" "${sdists[0]}"
 
       - name: Verify built versions match tag
         id: version
@@ -238,18 +321,51 @@ jobs:
       - name: Check distributions
         run: uv run --frozen twine check dist/*
 
+      - name: Bind exact distribution bytes
+        id: distributions
+        env:
+          WHEEL: ${{ steps.version.outputs.wheel }}
+          SDIST: ${{ steps.version.outputs.sdist }}
+        run: |
+          set -euo pipefail
+
+          expected="$(printf '%s\n' "$(basename "${WHEEL}")" "$(basename "${SDIST}")" | sort)"
+          actual="$(find dist -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual}" = "${expected}"
+          test -z "$(find dist -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          for artifact in "${WHEEL}" "${SDIST}"; do
+            test -f "${artifact}"
+            test ! -L "${artifact}"
+            if (( $(stat --format=%s -- "${artifact}") > 33554432 )); then
+              echo "Distribution exceeds the 32 MiB publication bound: ${artifact}" >&2
+              exit 1
+            fi
+          done
+          wheel_sha256="$(sha256sum -- "${WHEEL}" | awk '{print $1}')"
+          sdist_sha256="$(sha256sum -- "${SDIST}" | awk '{print $1}')"
+          {
+            printf 'wheel-sha256=%s\n' "${wheel_sha256}"
+            printf 'sdist-sha256=%s\n' "${sdist_sha256}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Upload distributions
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dist
+          name: ${{ steps.metadata.outputs.artifact-name }}
           path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
           retention-days: 14
 
   installed-cli:
     name: Installed CLI (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: build
-    if: needs.build.result == 'success'
+    if: ${{ !inputs.publication-only && needs.build.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -272,18 +388,26 @@ jobs:
       - name: Download distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist
+          name: ${{ needs.build.outputs.artifact-name }}
           path: dist
 
       - name: Verify downloaded distributions
         id: dist
         env:
           EXPECTED_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
         run: |
+          set -euo pipefail
+
           python scripts/verify-dist-metadata.py dist \
             --expected-name vexcalibur \
             --expected-version "$EXPECTED_VERSION" \
             --github-output "$GITHUB_OUTPUT"
+          wheel="dist/vexcalibur-${EXPECTED_VERSION}-py3-none-any.whl"
+          sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
+          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
 
       - name: Run installed CLI checks
         env:
@@ -294,7 +418,10 @@ jobs:
   openvex-interoperability:
     name: OpenVEX interoperability
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: build
+    if: ${{ !inputs.publication-only && needs.build.result == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -319,8 +446,21 @@ jobs:
       - name: Download distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist
+          name: ${{ needs.build.outputs.artifact-name }}
           path: dist
+
+      - name: Verify downloaded distribution bytes
+        env:
+          EXPECTED_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+        run: |
+          set -euo pipefail
+
+          wheel="dist/vexcalibur-${EXPECTED_VERSION}-py3-none-any.whl"
+          sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
+          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
 
       - name: Parse the OpenVEX golden with go-vex
         run: make openvex-interop
@@ -348,7 +488,10 @@ jobs:
   csaf-conformance:
     name: CSAF 2.0 conformance
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: build
+    if: ${{ !inputs.publication-only && needs.build.result == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -377,8 +520,21 @@ jobs:
       - name: Download distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist
+          name: ${{ needs.build.outputs.artifact-name }}
           path: dist
+
+      - name: Verify downloaded distribution bytes
+        env:
+          EXPECTED_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+        run: |
+          set -euo pipefail
+
+          wheel="dist/vexcalibur-${EXPECTED_VERSION}-py3-none-any.whl"
+          sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
+          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
 
       - name: Validate checked-in CSAF golden
         run: make csaf-interop
@@ -397,3 +553,906 @@ jobs:
         env:
           VEXCALIBUR_WHEEL: ${{ steps.wheel.outputs.path }}
         run: make installed-csaf-check
+
+  publication-inventory:
+    name: Publication inventory
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: build
+    if: needs.build.result == 'success'
+    outputs:
+      artifact-name: ${{ steps.metadata.outputs.artifact-name }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+      assertion-count: ${{ steps.metadata.outputs.assertion-count }}
+      timestamp: ${{ steps.metadata.outputs.timestamp }}
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release-sha }}
+
+      - name: Verify clean release source
+        env:
+          RELEASE_SHA: ${{ inputs.release-sha }}
+        run: |
+          set -euo pipefail
+
+          [[ "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse --verify HEAD)" = "${RELEASE_SHA}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version-file: .tool-versions
+          enable-cache: true
+          python-version: ${{ env.MAX_PYTHON }}
+
+      - name: Install locked evidence-helper dependencies
+        run: uv sync --frozen --no-install-project --group dev
+
+      - name: Export reviewed lock inventory
+        id: metadata
+        env:
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          input_dir="${RUNNER_TEMP}/publication-inventory-inputs"
+          inventory_dir="${RUNNER_TEMP}/release-inventory"
+          mkdir -- "${input_dir}"
+
+          raw_constraints="${input_dir}/raw-runtime-constraints.txt"
+          uv export \
+            --quiet \
+            --frozen \
+            --no-dev \
+            --no-emit-project \
+            --no-annotate \
+            --no-header \
+            --output-file "${raw_constraints}"
+          {
+            printf '%s\n' '--require-hashes' '--only-binary :all:' ''
+            cat -- "${raw_constraints}"
+          } > "${input_dir}/runtime-constraints.txt"
+
+          raw_sbom="${input_dir}/uv-export.cdx.json"
+          uv export \
+            --quiet \
+            --preview-features sbom-export \
+            --format cyclonedx1.5 \
+            --frozen \
+            --no-dev \
+            --output-file "${raw_sbom}"
+
+          source_date_epoch="$(git show -s --format=%ct "${RELEASE_SHA}")"
+          [[ "${source_date_epoch}" =~ ^[0-9]+$ ]]
+          timestamp="$(.venv/bin/python scripts/release_evidence.py \
+            timestamp --epoch "${source_date_epoch}")"
+          lock_sha256="$(sha256sum -- uv.lock | awk '{print $1}')"
+          .venv/bin/python scripts/release_evidence.py normalize-sbom \
+            --input "${raw_sbom}" \
+            --output "${input_dir}/sbom.cdx.json" \
+            --release-version "${RELEASE_VERSION}" \
+            --timestamp "${timestamp}" \
+            --lock-sha256 "${lock_sha256}"
+
+          uv_version="$(uv --version | awk '{print $2}')"
+          .venv/bin/python scripts/release_evidence.py prepare-publication-inventory \
+            --output-dir "${inventory_dir}" \
+            --release-sha "${RELEASE_SHA}" \
+            --release-version "${RELEASE_VERSION}" \
+            --source-date-epoch "${source_date_epoch}" \
+            --lock uv.lock \
+            --review release-evidence/review.json \
+            --findings release-evidence/findings.json \
+            --constraints "${input_dir}/runtime-constraints.txt" \
+            --sbom "${input_dir}/sbom.cdx.json" \
+            --uv-version "${uv_version}" \
+            --source-tree-clean true
+
+          assertion_count="$(.venv/bin/python -c \
+            'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["review"]["assertion_count"])' \
+            "${inventory_dir}/manifest.json")"
+          [[ "${assertion_count}" =~ ^[0-9]+$ ]]
+          {
+            printf 'artifact-name=release-inventory-%s\n' "${RELEASE_SHA}"
+            printf 'assertion-count=%s\n' "${assertion_count}"
+            printf 'timestamp=%s\n' "${timestamp}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Recheck source and inventory before upload
+        env:
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          test "$(git rev-parse --verify HEAD)" = "${RELEASE_SHA}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          .venv/bin/python scripts/release_evidence.py verify-publication-inventory \
+            --inventory-dir "${RUNNER_TEMP}/release-inventory" \
+            --release-sha "${RELEASE_SHA}" \
+            --release-version "${RELEASE_VERSION}"
+
+      - name: Upload publication inventory
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.metadata.outputs.artifact-name }}
+          path: ${{ runner.temp }}/release-inventory/*
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 14
+
+  direct-vex:
+    name: Direct installed-wheel VEX
+    runs-on: ubuntu-latest
+    permissions: {}
+    needs: [build, publication-inventory]
+    if: >-
+      needs.build.result == 'success' &&
+      needs.publication-inventory.result == 'success'
+    outputs:
+      artifact-name: ${{ steps.metadata.outputs.artifact-name }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: Set up uv without repository checkout
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.17"
+          enable-cache: false
+          python-version: ${{ env.MAX_PYTHON }}
+
+      - name: Download exact distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ${{ runner.temp }}/direct-dist
+
+      - name: Download publication inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publication-inventory.outputs.artifact-name }}
+          path: ${{ runner.temp }}/direct-inventory
+
+      - name: Externally verify downloaded inputs
+        env:
+          BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
+          INVENTORY_ARTIFACT_DIGEST: ${{ needs.publication-inventory.outputs.artifact-digest }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+          EXPECTED_ASSERTION_COUNT: ${{ needs.publication-inventory.outputs.assertion-count }}
+          EXPECTED_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
+          MANIFEST: ${{ runner.temp }}/direct-inventory/manifest.json
+        run: |
+          set -euo pipefail
+
+          [[ "${BUILD_ARTIFACT_DIGEST}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${INVENTORY_ARTIFACT_DIGEST}" =~ ^[0-9a-f]{64}$ ]]
+          dist_dir="${RUNNER_TEMP}/direct-dist"
+          inventory_dir="${RUNNER_TEMP}/direct-inventory"
+          wheel="${dist_dir}/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          sdist="${dist_dir}/vexcalibur-${RELEASE_VERSION}.tar.gz"
+          expected_dist_files="$(printf '%s\n' "$(basename "${sdist}")" "$(basename "${wheel}")" | sort)"
+          actual_dist_files="$(find "${dist_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual_dist_files}" = "${expected_dist_files}"
+          test -z "$(find "${dist_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
+          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
+
+          expected_inventory_files="$(printf '%s\n' \
+            SHA256SUMS findings.json manifest.json review.json \
+            runtime-constraints.txt sbom.cdx.json uv.lock | sort)"
+          actual_inventory_files="$(find "${inventory_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual_inventory_files}" = "${expected_inventory_files}"
+          test -z "$(find "${inventory_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          (cd "${inventory_dir}" && sha256sum --check --strict SHA256SUMS)
+          python3 -c \
+            'import json, os, pathlib; m=json.loads(pathlib.Path(os.environ["MANIFEST"]).read_text()); assert m["release"]["commit"] == os.environ["RELEASE_SHA"]; assert m["release"]["version"] == os.environ["RELEASE_VERSION"]; assert m["release"]["timestamp"] == os.environ["EXPECTED_TIMESTAMP"]; assert m["review"]["assertion_count"] == int(os.environ["EXPECTED_ASSERTION_COUNT"])' \
+            </dev/null
+
+      - name: Install the exact locked wheel
+        env:
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+        run: |
+          set -euo pipefail
+
+          wheel="${RUNNER_TEMP}/direct-dist/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          wheel_uri="$(python3 -c \
+            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
+            "${wheel}")"
+          requirements="${RUNNER_TEMP}/direct-install-requirements.txt"
+          cp -- "${RUNNER_TEMP}/direct-inventory/runtime-constraints.txt" "${requirements}"
+          {
+            printf '\nvexcalibur @ %s \\\n' "${wheel_uri}"
+            printf '    --hash=sha256:%s\n' "${EXPECTED_WHEEL_SHA256}"
+          } >> "${requirements}"
+          uv venv --python "${MAX_PYTHON}" "${RUNNER_TEMP}/direct-venv"
+          uv pip sync \
+            --require-hashes \
+            --python "${RUNNER_TEMP}/direct-venv/bin/python" \
+            "${requirements}"
+          env -u PYTHONHOME -u PYTHONPATH \
+            "${RUNNER_TEMP}/direct-venv/bin/python" -c \
+            'from importlib.metadata import version; import os; assert version("vexcalibur") == os.environ["RELEASE_VERSION"]'
+
+      - name: Generate CycloneDX VEX with only the installed CLI
+        env:
+          RELEASE_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
+        run: |
+          set -euo pipefail
+
+          output_dir="${RUNNER_TEMP}/direct-vex"
+          mkdir -- "${output_dir}"
+          env -u GH_TOKEN -u GITHUB_TOKEN -u PYTHONHOME -u PYTHONPATH \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            ALL_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            "${RUNNER_TEMP}/direct-venv/bin/vexcalibur" generate \
+            "${RUNNER_TEMP}/direct-inventory/sbom.cdx.json" \
+            --findings-file "${RUNNER_TEMP}/direct-inventory/findings.json" \
+            --offline \
+            --timestamp "${RELEASE_TIMESTAMP}" \
+            --output "${output_dir}/vex.cdx.json"
+
+      - name: Generate OpenVEX with only the installed CLI
+        if: needs.publication-inventory.outputs.assertion-count != '0'
+        env:
+          RELEASE_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
+        run: |
+          set -euo pipefail
+
+          env -u GH_TOKEN -u GITHUB_TOKEN -u PYTHONHOME -u PYTHONPATH \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            ALL_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            "${RUNNER_TEMP}/direct-venv/bin/vexcalibur" generate \
+            "${RUNNER_TEMP}/direct-inventory/sbom.cdx.json" \
+            --findings-file "${RUNNER_TEMP}/direct-inventory/findings.json" \
+            --offline \
+            --format openvex \
+            --author "Vexcalibur maintainers" \
+            --author-role "VEX issuer" \
+            --timestamp "${RELEASE_TIMESTAMP}" \
+            --output "${RUNNER_TEMP}/direct-vex/vex.openvex.json"
+
+      - name: Generate CSAF with only the installed CLI
+        if: needs.publication-inventory.outputs.assertion-count != '0'
+        env:
+          RELEASE_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
+        run: |
+          set -euo pipefail
+
+          env -u GH_TOKEN -u GITHUB_TOKEN -u PYTHONHOME -u PYTHONPATH \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            ALL_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            "${RUNNER_TEMP}/direct-venv/bin/vexcalibur" generate \
+            "${RUNNER_TEMP}/direct-inventory/sbom.cdx.json" \
+            --findings-file "${RUNNER_TEMP}/direct-inventory/findings.json" \
+            --offline \
+            --format csaf \
+            --csaf-document-id vexcalibur-vex \
+            --csaf-document-title "Vexcalibur release VEX" \
+            --csaf-publisher-name "Vexcalibur maintainers" \
+            --csaf-publisher-namespace https://github.com/vexcalibur-dev/vexcalibur \
+            --csaf-publisher-category vendor \
+            --csaf-document-status interim \
+            --timestamp "${RELEASE_TIMESTAMP}" \
+            --output "${RUNNER_TEMP}/direct-vex/vexcalibur-vex.json"
+
+      - name: Record direct VEX artifact name
+        id: metadata
+        env:
+          ASSERTION_COUNT: ${{ needs.publication-inventory.outputs.assertion-count }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+        run: |
+          set -euo pipefail
+
+          if (( ASSERTION_COUNT > 0 )); then
+            expected="$(printf '%s\n' vex.cdx.json vex.openvex.json vexcalibur-vex.json | sort)"
+          else
+            expected=vex.cdx.json
+          fi
+          output_dir="${RUNNER_TEMP}/direct-vex"
+          actual="$(find "${output_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual}" = "${expected}"
+          test -z "$(find "${output_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          for output in "${output_dir}"/*; do
+            if (( $(stat --format=%s -- "${output}") > 33554432 )); then
+              echo "Direct VEX output exceeds the 32 MiB publication bound: ${output}" >&2
+              exit 1
+            fi
+          done
+          printf 'artifact-name=direct-vex-%s\n' "${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload only direct VEX output
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.metadata.outputs.artifact-name }}
+          path: ${{ runner.temp }}/direct-vex/*
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 14
+
+  action-vex:
+    name: Pinned Action VEX
+    runs-on: ubuntu-latest
+    permissions: {}
+    needs: [build, publication-inventory]
+    if: >-
+      needs.build.result == 'success' &&
+      needs.publication-inventory.result == 'success'
+    outputs:
+      artifact-name: ${{ steps.metadata.outputs.artifact-name }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: Download exact distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ${{ runner.temp }}/action-dist
+
+      - name: Download publication inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publication-inventory.outputs.artifact-name }}
+          path: ${{ runner.temp }}/action-inventory
+
+      - name: Verify inputs and construct package URIs
+        id: package
+        env:
+          BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
+          INVENTORY_ARTIFACT_DIGEST: ${{ needs.publication-inventory.outputs.artifact-digest }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+          EXPECTED_ASSERTION_COUNT: ${{ needs.publication-inventory.outputs.assertion-count }}
+          EXPECTED_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
+          MANIFEST: ${{ runner.temp }}/action-inventory/manifest.json
+        run: |
+          set -euo pipefail
+
+          [[ "${BUILD_ARTIFACT_DIGEST}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${INVENTORY_ARTIFACT_DIGEST}" =~ ^[0-9a-f]{64}$ ]]
+          dist_dir="${RUNNER_TEMP}/action-dist"
+          inventory_dir="${RUNNER_TEMP}/action-inventory"
+          wheel="${dist_dir}/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          sdist="${dist_dir}/vexcalibur-${RELEASE_VERSION}.tar.gz"
+          expected_dist_files="$(printf '%s\n' "$(basename "${sdist}")" "$(basename "${wheel}")" | sort)"
+          actual_dist_files="$(find "${dist_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual_dist_files}" = "${expected_dist_files}"
+          test -z "$(find "${dist_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
+          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
+
+          expected_inventory_files="$(printf '%s\n' \
+            SHA256SUMS findings.json manifest.json review.json \
+            runtime-constraints.txt sbom.cdx.json uv.lock | sort)"
+          actual_inventory_files="$(find "${inventory_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual_inventory_files}" = "${expected_inventory_files}"
+          test -z "$(find "${inventory_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          (cd "${inventory_dir}" && sha256sum --check --strict SHA256SUMS)
+          python3 -c \
+            'import json, os, pathlib; m=json.loads(pathlib.Path(os.environ["MANIFEST"]).read_text()); assert m["release"]["commit"] == os.environ["RELEASE_SHA"]; assert m["release"]["version"] == os.environ["RELEASE_VERSION"]; assert m["release"]["timestamp"] == os.environ["EXPECTED_TIMESTAMP"]; assert m["review"]["assertion_count"] == int(os.environ["EXPECTED_ASSERTION_COUNT"])' \
+            </dev/null
+
+          wheel_uri="$(python3 -c \
+            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
+            "${wheel}")"
+          sdist_uri="$(python3 -c \
+            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
+            "${sdist}")"
+          {
+            printf 'hashed-wheel-uri=%s#sha256=%s\n' "${wheel_uri}" "${EXPECTED_WHEEL_SHA256}"
+            printf 'unhashed-wheel-uri=%s\n' "${wheel_uri}"
+            printf 'wrong-wheel-uri=%s#sha256=%064d\n' "${wheel_uri}" 0
+            printf 'unhashed-sdist-uri=%s\n' "${sdist_uri}"
+          } >> "$GITHUB_OUTPUT"
+          mkdir -- "${RUNNER_TEMP}/action-vex"
+
+      - name: Reject a missing wheel URI hash
+        id: missing-hash
+        continue-on-error: true
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.unhashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: --version
+
+      - name: Reject an incorrect wheel URI hash
+        id: wrong-hash
+        continue-on-error: true
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.wrong-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: --version
+
+      - name: Reject an unhashed source-distribution fallback
+        id: sdist-fallback
+        continue-on-error: true
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.unhashed-sdist-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: --version
+
+      - name: Require every negative package case to fail closed
+        env:
+          MISSING_HASH_OUTCOME: ${{ steps.missing-hash.outcome }}
+          WRONG_HASH_OUTCOME: ${{ steps.wrong-hash.outcome }}
+          SDIST_FALLBACK_OUTCOME: ${{ steps.sdist-fallback.outcome }}
+        run: |
+          set -euo pipefail
+
+          test "${MISSING_HASH_OUTCOME}" = failure
+          test "${WRONG_HASH_OUTCOME}" = failure
+          test "${SDIST_FALLBACK_OUTCOME}" = failure
+
+      - name: Generate CycloneDX VEX through the pinned Action
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: |
+            generate
+            ${{ runner.temp }}/action-inventory/sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-inventory/findings.json
+            --offline
+            --timestamp
+            ${{ needs.publication-inventory.outputs.timestamp }}
+            --output
+            ${{ runner.temp }}/action-vex/vex.cdx.json
+
+      - name: Generate OpenVEX through the pinned Action
+        if: needs.publication-inventory.outputs.assertion-count != '0'
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: |
+            generate
+            ${{ runner.temp }}/action-inventory/sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-inventory/findings.json
+            --offline
+            --format
+            openvex
+            --author
+            Vexcalibur maintainers
+            --author-role
+            VEX issuer
+            --timestamp
+            ${{ needs.publication-inventory.outputs.timestamp }}
+            --output
+            ${{ runner.temp }}/action-vex/vex.openvex.json
+
+      - name: Generate CSAF through the pinned Action
+        if: needs.publication-inventory.outputs.assertion-count != '0'
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: |
+            generate
+            ${{ runner.temp }}/action-inventory/sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-inventory/findings.json
+            --offline
+            --format
+            csaf
+            --csaf-document-id
+            vexcalibur-vex
+            --csaf-document-title
+            Vexcalibur release VEX
+            --csaf-publisher-name
+            Vexcalibur maintainers
+            --csaf-publisher-namespace
+            https://github.com/vexcalibur-dev/vexcalibur
+            --csaf-publisher-category
+            vendor
+            --csaf-document-status
+            interim
+            --timestamp
+            ${{ needs.publication-inventory.outputs.timestamp }}
+            --output
+            ${{ runner.temp }}/action-vex/vexcalibur-vex.json
+
+      - name: Record Action VEX artifact name
+        id: metadata
+        env:
+          ASSERTION_COUNT: ${{ needs.publication-inventory.outputs.assertion-count }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+        run: |
+          set -euo pipefail
+
+          if (( ASSERTION_COUNT > 0 )); then
+            expected="$(printf '%s\n' vex.cdx.json vex.openvex.json vexcalibur-vex.json | sort)"
+          else
+            expected=vex.cdx.json
+          fi
+          output_dir="${RUNNER_TEMP}/action-vex"
+          actual="$(find "${output_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual}" = "${expected}"
+          test -z "$(find "${output_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          for output in "${output_dir}"/*; do
+            if (( $(stat --format=%s -- "${output}") > 33554432 )); then
+              echo "Action VEX output exceeds the 32 MiB publication bound: ${output}" >&2
+              exit 1
+            fi
+          done
+          printf 'artifact-name=action-vex-%s\n' "${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload only Action VEX output
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.metadata.outputs.artifact-name }}
+          path: ${{ runner.temp }}/action-vex/*
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 14
+
+  publication-assets:
+    name: Finalize immutable publication assets
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    needs:
+      - quality
+      - workflow-lint
+      - security
+      - test
+      - docs
+      - build
+      - installed-cli
+      - openvex-interoperability
+      - csaf-conformance
+      - publication-inventory
+      - direct-vex
+      - action-vex
+    outputs:
+      artifact-name: ${{ steps.metadata.outputs.artifact-name }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+      sha256: ${{ steps.metadata.outputs.sha256 }}
+    if: >-
+      always() &&
+      needs.build.result == 'success' &&
+      needs.publication-inventory.result == 'success' &&
+      needs.direct-vex.result == 'success' &&
+      needs.action-vex.result == 'success' &&
+      (
+        inputs.publication-only ||
+        (
+          needs.quality.result == 'success' &&
+          needs.workflow-lint.result == 'success' &&
+          needs.security.result == 'success' &&
+          needs.test.result == 'success' &&
+          needs.docs.result == 'success' &&
+          needs.installed-cli.result == 'success' &&
+          needs.openvex-interoperability.result == 'success' &&
+          needs.csaf-conformance.result == 'success'
+        )
+      )
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release-sha }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version-file: .tool-versions
+          enable-cache: true
+          python-version: ${{ env.MAX_PYTHON }}
+
+      - name: Install locked evidence-helper dependencies
+        run: uv sync --frozen --no-install-project --group dev
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: tests/integration/openvex-go/go.mod
+          cache-dependency-path: tests/integration/openvex-go/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.14.1"
+          cache: npm
+          cache-dependency-path: tests/integration/csaf-validator/package-lock.json
+
+      - name: Install pinned CSAF validator
+        run: make csaf-validator-install
+
+      - name: Download fresh distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ${{ runner.temp }}/final-dist
+
+      - name: Download fresh publication inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publication-inventory.outputs.artifact-name }}
+          path: ${{ runner.temp }}/final-inventory
+
+      - name: Download fresh direct VEX
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.direct-vex.outputs.artifact-name }}
+          path: ${{ runner.temp }}/final-direct-vex
+
+      - name: Download fresh Action VEX
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.action-vex.outputs.artifact-name }}
+          path: ${{ runner.temp }}/final-action-vex
+
+      - name: Verify producer artifact identities and upload digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+          BUILD_ARTIFACT_NAME: ${{ needs.build.outputs.artifact-name }}
+          BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
+          INVENTORY_ARTIFACT_ID: ${{ needs.publication-inventory.outputs.artifact-id }}
+          INVENTORY_ARTIFACT_NAME: ${{ needs.publication-inventory.outputs.artifact-name }}
+          INVENTORY_ARTIFACT_DIGEST: ${{ needs.publication-inventory.outputs.artifact-digest }}
+          DIRECT_ARTIFACT_ID: ${{ needs.direct-vex.outputs.artifact-id }}
+          DIRECT_ARTIFACT_NAME: ${{ needs.direct-vex.outputs.artifact-name }}
+          DIRECT_ARTIFACT_DIGEST: ${{ needs.direct-vex.outputs.artifact-digest }}
+          ACTION_ARTIFACT_ID: ${{ needs.action-vex.outputs.artifact-id }}
+          ACTION_ARTIFACT_NAME: ${{ needs.action-vex.outputs.artifact-name }}
+          ACTION_ARTIFACT_DIGEST: ${{ needs.action-vex.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+
+          transport_dir="$(mktemp -d "${RUNNER_TEMP}/artifact-transport.XXXXXX")"
+          chmod 700 "${transport_dir}"
+
+          verify_artifact() {
+            local expected_id="$1"
+            local expected_name="$2"
+            local expected_digest="$3"
+            local actual_id actual_name actual_digest expired run_id
+            local archive
+
+            [[ "${expected_id}" =~ ^[1-9][0-9]*$ ]]
+            [[ "${expected_digest}" =~ ^[0-9a-f]{64}$ ]]
+            IFS=$'\t' read -r actual_id actual_name actual_digest expired run_id < <(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${expected_id}" \
+                --jq '[.id, .name, .digest, (.expired | tostring), .workflow_run.id] | @tsv'
+            )
+            test "${actual_id}" = "${expected_id}"
+            test "${actual_name}" = "${expected_name}"
+            test "${actual_digest}" = "sha256:${expected_digest}"
+            test "${expired}" = false
+            test "${run_id}" = "${GITHUB_RUN_ID}"
+            archive="${transport_dir}/${expected_id}.zip"
+            test ! -e "${archive}"
+            test ! -L "${archive}"
+            umask 077
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${expected_id}/zip" > "${archive}"
+            test -f "${archive}"
+            test ! -L "${archive}"
+            printf '%s  %s\n' "${expected_digest}" "${archive}" | \
+              sha256sum --check --strict
+          }
+
+          verify_artifact \
+            "${BUILD_ARTIFACT_ID}" "${BUILD_ARTIFACT_NAME}" "${BUILD_ARTIFACT_DIGEST}"
+          verify_artifact \
+            "${INVENTORY_ARTIFACT_ID}" "${INVENTORY_ARTIFACT_NAME}" \
+            "${INVENTORY_ARTIFACT_DIGEST}"
+          verify_artifact \
+            "${DIRECT_ARTIFACT_ID}" "${DIRECT_ARTIFACT_NAME}" "${DIRECT_ARTIFACT_DIGEST}"
+          verify_artifact \
+            "${ACTION_ARTIFACT_ID}" "${ACTION_ARTIFACT_NAME}" "${ACTION_ARTIFACT_DIGEST}"
+
+      - name: Verify downloaded artifact bindings
+        env:
+          BUILD_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
+          INVENTORY_ARTIFACT_DIGEST: ${{ needs.publication-inventory.outputs.artifact-digest }}
+          DIRECT_ARTIFACT_DIGEST: ${{ needs.direct-vex.outputs.artifact-digest }}
+          ACTION_ARTIFACT_DIGEST: ${{ needs.action-vex.outputs.artifact-digest }}
+          ASSERTION_COUNT: ${{ needs.publication-inventory.outputs.assertion-count }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+        run: |
+          set -euo pipefail
+
+          for digest in \
+            "${BUILD_ARTIFACT_DIGEST}" \
+            "${INVENTORY_ARTIFACT_DIGEST}" \
+            "${DIRECT_ARTIFACT_DIGEST}" \
+            "${ACTION_ARTIFACT_DIGEST}"; do
+            [[ "${digest}" =~ ^[0-9a-f]{64}$ ]]
+          done
+          [[ "${ASSERTION_COUNT}" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse --verify HEAD)" = "${RELEASE_SHA}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+          dist_dir="${RUNNER_TEMP}/final-dist"
+          inventory_dir="${RUNNER_TEMP}/final-inventory"
+          wheel="${dist_dir}/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          sdist="${dist_dir}/vexcalibur-${RELEASE_VERSION}.tar.gz"
+          expected_dist_files="$(printf '%s\n' "$(basename "${sdist}")" "$(basename "${wheel}")" | sort)"
+          actual_dist_files="$(find "${dist_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual_dist_files}" = "${expected_dist_files}"
+          test -z "$(find "${dist_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
+          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
+
+          expected_inventory_files="$(printf '%s\n' \
+            SHA256SUMS findings.json manifest.json review.json \
+            runtime-constraints.txt sbom.cdx.json uv.lock | sort)"
+          actual_inventory_files="$(find "${inventory_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "${actual_inventory_files}" = "${expected_inventory_files}"
+          test -z "$(find "${inventory_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          (cd "${inventory_dir}" && sha256sum --check --strict SHA256SUMS)
+
+          if (( ASSERTION_COUNT > 0 )); then
+            expected_vex_files="$(printf '%s\n' vex.cdx.json vex.openvex.json vexcalibur-vex.json | sort)"
+          else
+            expected_vex_files=vex.cdx.json
+          fi
+          for vex_dir in "${RUNNER_TEMP}/final-direct-vex" "${RUNNER_TEMP}/final-action-vex"; do
+            actual_vex_files="$(find "${vex_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
+            test "${actual_vex_files}" = "${expected_vex_files}"
+            test -z "$(find "${vex_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          done
+          for direct_file in "${RUNNER_TEMP}/final-direct-vex"/*; do
+            cmp -- "${direct_file}" "${RUNNER_TEMP}/final-action-vex/$(basename "${direct_file}")"
+          done
+
+          .venv/bin/python scripts/release_evidence.py verify-publication-inventory \
+            --inventory-dir "${inventory_dir}" \
+            --release-sha "${RELEASE_SHA}" \
+            --release-version "${RELEASE_VERSION}"
+
+      - name: Independently reproduce the lock-derived oracle
+        env:
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          RELEASE_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
+        run: |
+          set -euo pipefail
+
+          test "$(git rev-parse --verify HEAD)" = "${RELEASE_SHA}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          inventory_dir="${RUNNER_TEMP}/final-inventory"
+          reproduced_dir="${RUNNER_TEMP}/reproduced-inventory"
+          mkdir -- "${reproduced_dir}"
+          cmp -- uv.lock "${inventory_dir}/uv.lock"
+          cmp -- release-evidence/review.json "${inventory_dir}/review.json"
+          cmp -- release-evidence/findings.json "${inventory_dir}/findings.json"
+
+          raw_constraints="${reproduced_dir}/raw-runtime-constraints.txt"
+          uv export \
+            --quiet \
+            --frozen \
+            --no-dev \
+            --no-emit-project \
+            --no-annotate \
+            --no-header \
+            --output-file "${raw_constraints}"
+          {
+            printf '%s\n' '--require-hashes' '--only-binary :all:' ''
+            cat -- "${raw_constraints}"
+          } > "${reproduced_dir}/runtime-constraints.txt"
+          cmp -- \
+            "${reproduced_dir}/runtime-constraints.txt" \
+            "${inventory_dir}/runtime-constraints.txt"
+
+          raw_sbom="${reproduced_dir}/uv-export.cdx.json"
+          uv export \
+            --quiet \
+            --preview-features sbom-export \
+            --format cyclonedx1.5 \
+            --frozen \
+            --no-dev \
+            --output-file "${raw_sbom}"
+          lock_sha256="$(sha256sum -- uv.lock | awk '{print $1}')"
+          .venv/bin/python scripts/release_evidence.py normalize-sbom \
+            --input "${raw_sbom}" \
+            --output "${reproduced_dir}/sbom.cdx.json" \
+            --release-version "${RELEASE_VERSION}" \
+            --timestamp "${RELEASE_TIMESTAMP}" \
+            --lock-sha256 "${lock_sha256}"
+          cmp -- "${reproduced_dir}/sbom.cdx.json" "${inventory_dir}/sbom.cdx.json"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Run official VEX validators
+        if: needs.publication-inventory.outputs.assertion-count != '0'
+        run: |
+          set -euo pipefail
+
+          go -C tests/integration/openvex-go run . \
+            "${RUNNER_TEMP}/final-direct-vex/vex.openvex.json"
+          node tests/integration/csaf-validator/validate.mjs \
+            "${RUNNER_TEMP}/final-direct-vex/vexcalibur-vex.json"
+
+      - name: Assemble and verify the flat schema-v2 asset set
+        id: metadata
+        env:
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+        run: |
+          set -euo pipefail
+
+          assets_dir="${RUNNER_TEMP}/release-assets"
+          .venv/bin/python scripts/release_evidence.py finalize-publication \
+            --output-dir "${assets_dir}" \
+            --inventory-dir "${RUNNER_TEMP}/final-inventory" \
+            --wheel "${RUNNER_TEMP}/final-dist/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl" \
+            --sdist "${RUNNER_TEMP}/final-dist/vexcalibur-${RELEASE_VERSION}.tar.gz" \
+            --direct-output-dir "${RUNNER_TEMP}/final-direct-vex" \
+            --action-output-dir "${RUNNER_TEMP}/final-action-vex" \
+            --release-tag "${RELEASE_TAG}" \
+            --action-commit cc570fb0ab80df3f4b1e31c0608b95c0707d5b66 \
+            --expected-wheel-sha256 "${EXPECTED_WHEEL_SHA256}" \
+            --expected-sdist-sha256 "${EXPECTED_SDIST_SHA256}"
+          .venv/bin/python scripts/release_evidence.py verify-publication \
+            --bundle-dir "${assets_dir}" \
+            --release-tag "${RELEASE_TAG}" \
+            --release-sha "${RELEASE_SHA}" \
+            --action-commit cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+          sha256="$(sha256sum -- "${assets_dir}/SHA256SUMS" | awk '{print $1}')"
+          {
+            printf 'artifact-name=release-assets-%s\n' "${RELEASE_SHA}"
+            printf 'sha256=%s\n' "${sha256}"
+          } >> "$GITHUB_OUTPUT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable release assets
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.metadata.outputs.artifact-name }}
+          path: ${{ runner.temp }}/release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 14

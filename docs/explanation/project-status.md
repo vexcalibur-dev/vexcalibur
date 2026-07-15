@@ -24,18 +24,27 @@ secrets, CodeQL, OpenSSF Scorecard, and a bounded weekly Atheris campaign.
 
 OpenVEX goldens pass the pinned official schema and `go-vex` parser.
 
-## Repository-only self-evidence foundation
+## Self-release evidence after version 0.3.1
 
-The repository can build a deterministic local self-release evidence bundle
-from the exact commit, its locked reference runtime, a reviewed local-findings
-snapshot, and an isolated local wheel. The initial public snapshot makes zero
-assertions. CI separately exercises all formats with a synthetic `in_triage`
-finding and checks cross-format equivalence.
+Repository tooling can build a deterministic local schema-1 bundle and an
+immutable-publication schema-2 bundle from the exact commit, locked reference
+runtime, reviewed local findings, wheel, and source distribution. The
+publication path requires byte-identical output from the installed package and
+the full-commit-pinned companion Action. It publishes the same checked
+distribution bytes to a flat immutable GitHub Release and then to PyPI through
+Trusted Publishing.
 
-This is maintainer tooling, not behavior published in version 0.3.1. It does
-not attach artifacts to GitHub Releases, publish through PyPI, query live OSV,
-or compare the companion Action. Read [Why Vexcalibur builds its own release
-evidence](self-release-evidence.md) for its trust and inventory boundaries.
+Pull requests exercise the full schema-2 asset-generation and validation graph
+without publication credentials or external publication. They do not perform a
+real GitHub publication or PyPI OIDC exchange; those publisher paths are tested
+statically until a real release. The initial production review makes zero
+assertions; a separate synthetic `in_triage` fixture exercises CycloneDX,
+OpenVEX, and CSAF equivalence.
+
+This is maintainer and release tooling added after 0.3.1, not a new 0.3.1 package
+API. Read [Why Vexcalibur publishes evidence about
+itself](self-release-evidence.md) for its trust, isolation, and recovery
+boundaries.
 
 ## CSAF conformance
 
@@ -63,8 +72,11 @@ Vexcalibur does not read VEX documents or convert between VEX formats.
 OpenVEX and CSAF support is output-only.
 
 CSAF 2.1, product branches and relationships, later document revisions,
-trusted-provider metadata, distribution policy, TLP, signing, and publication
-are not implemented.
+trusted-provider metadata, distribution policy, and TLP are not implemented.
+
+The release evidence is covered by GitHub's immutable-release and attestation
+mechanisms. Vexcalibur does not yet produce a separate project-managed signing
+format for VEX documents.
 
 OSV findings do not yet pass through a policy engine that can decide deployment-specific exploitability. They use `in_triage` and require review.
 

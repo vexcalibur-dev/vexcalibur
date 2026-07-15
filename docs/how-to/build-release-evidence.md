@@ -1,40 +1,48 @@
-# Build and review self-release evidence
+# Build and review local release evidence
 
-This runbook is for a Vexcalibur maintainer validating the local evidence
-foundation for one exact commit. It creates files under `build/`; it does not
-publish assets, change a GitHub Release, contact OSV, or require credentials.
+Use this runbook to inspect Vexcalibur's schema-1 self-evidence for one exact
+commit. The commands do not mutate GitHub, PyPI, or another external service:
+they do not create a tag, GitHub Release, attestation, or package upload.
 
-## Prerequisites
+They do change the local checkout and tool caches. Expect `.venv/`, `dist/`,
+`src/vexcalibur/_version.py`,
+`tests/integration/csaf-validator/node_modules/`, the requested bundle under
+`build/`, and uv, Go, and npm cache entries. Temporary evidence workspaces are
+removed on exit. `make clean` removes the repository-generated build output and
+validator installation; remove `.venv/` or prune tool caches separately only
+when you no longer need them.
 
-Use a Linux checkout with:
+For the credentialed schema-2 publication path, use [Publish Vexcalibur to
+PyPI](publish-to-pypi.md).
 
-- the exact `uv`, Node.js, `actionlint`, and `shellcheck` versions in
-  `.tool-versions`.
-- Python 3.14 for the repository validation environment.
-- the Go version in `tests/integration/openvex-go/go.mod`.
-- GNU Make, `sha256sum`, Git, npm, and a clean checkout of the target commit.
-- no existing `build/release-evidence` directory.
+## Prepare a clean release checkout
 
-Dependency installation and first-time Go or npm validator setup may contact
-their configured package registries. VEX generation itself uses local files,
-`--offline`, and unreachable proxy endpoints. Run the setup only on a host
-where those public dependency fetches are allowed.
+Use Linux and the tool versions in `.tool-versions`. You also need GNU Make,
+Git, `sha256sum`, the Go version selected by
+`tests/integration/openvex-go/go.mod`, and the locked Node dependencies for the
+CSAF validator.
 
-Do not put private SBOM data, embargoed advisories, tokens, customer
-identifiers, or internal URLs in `release-evidence/`. These inputs and any
-future generated assets are public by design.
-
-## Validate the checked review
-
-From the repository root, install the locked development and validator
-dependencies:
+From the repository root:
 
 ```bash
+git status --short
+test -z "$(git status --porcelain)"
 uv sync --frozen
 make csaf-validator-install
 ```
 
-Confirm that `release-evidence/review.json` names the current lock digest:
+Stop if Git reports any path. A dirty checkout is not a release-evidence input.
+
+Dependency setup may download exact packages. VEX generation uses the reviewed
+local-findings provider, but this process is not a general network sandbox.
+
+Everything under `release-evidence/` is intended to become public. Do not place
+embargoed advisories, private SBOM data, tokens, customer identifiers, or
+internal URLs there.
+
+## Check the human-reviewed snapshot
+
+Display the two digests that the review binds:
 
 ```bash
 sha256sum uv.lock release-evidence/findings.json
@@ -44,18 +52,19 @@ uv run --frozen python scripts/release_evidence.py validate-review \
   --lock uv.lock
 ```
 
-For the initial snapshot, the sample success output is:
+The initial zero-finding review prints:
 
 ```text
 production	0
 ```
 
-Stop if a digest differs or the validator fails. Do not update a digest until a
-maintainer has reviewed the corresponding full file.
+A digest mismatch is a review failure. Do not update `review.json` merely to
+make the command pass; review the complete changed lock or findings file first.
 
-## Build and exercise the installed wheel
+## Build once and run the conformance gate
 
-Build once, select the single wheel, and run the complete fixture gate:
+Build the exact clean commit, select the only wheel, and exercise both evidence
+fixtures:
 
 ```bash
 uv build --clear --no-create-gitignore --no-sources
@@ -65,37 +74,37 @@ export VEXCALIBUR_WHEEL="${wheels[0]}"
 make release-evidence-check
 ```
 
-The command generates both the production and synthetic bundles twice and
-requires each recursive byte comparison to pass. The synthetic nonempty review
-generates all formats, runs the official OpenVEX parser, runs the CSAF strict
-schema and 42 mandatory tests, and compares cross-format assertions.
+The gate generates the production and synthetic bundles twice in distinct
+temporary directories and compares every byte. It also:
 
-The final success line is:
+- verifies clean, full-commit wheel SCM metadata;
+- installs with exact hash-locked dependencies and a SHA-256-bound wheel URI;
+- validates CycloneDX output;
+- runs the pinned official OpenVEX parser;
+- runs the pinned CSAF schema and mandatory-test suite; and
+- compares normalized assertions across all generated VEX formats.
+
+Success ends with:
 
 ```text
 release-evidence production and synthetic fixture checks passed
 ```
 
-The checker uses temporary directories and removes them on exit.
+The synthetic fixture is conformance data, not a vulnerability claim. Its
+reserved `.test` URL and `review_kind: synthetic_fixture` prevent accidental
+publication as production evidence.
 
-## Generate the inspectable bundle
+## Create an inspectable schema-1 bundle
 
-Set `SOURCE_DATE_EPOCH` from the target commit. The generator also derives this
-value and rejects a mismatch, so exporting it is an explicit operator check:
+Make the commit-derived timestamp explicit and generate into a fresh directory:
 
 ```bash
-export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
 export RELEASE_SHA="$(git rev-parse --verify HEAD)"
+export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
 RELEASE_EVIDENCE_OUTPUT=build/release-evidence make release-evidence
 ```
 
-For a zero-finding production review, verify the exact file set:
-
-```bash
-find build/release-evidence -maxdepth 1 -type f -printf '%f\n' | sort
-```
-
-Sample output:
+For a zero-finding review, the file list is:
 
 ```text
 SHA256SUMS
@@ -107,21 +116,9 @@ sbom.cdx.json
 vex.cdx.json
 ```
 
-`vex.openvex.json` and `vexcalibur-vex.json` must not exist when the assertion
-count is zero. Confirm the manifest decision and checksum integrity:
+Verify the bundle and its checksum inventory:
 
 ```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-manifest = json.loads(Path("build/release-evidence/manifest.json").read_text())
-assert manifest["review"]["assertion_count"] == 0
-assert manifest["formats"]["openvex"]["status"] == "omitted"
-assert manifest["formats"]["csaf"]["status"] == "omitted"
-assert manifest["intended_use"] == "release_evidence_candidate"
-assert manifest["source_tree_clean"] is True
-PY
 uv run --frozen python scripts/release_evidence.py verify-bundle \
   --bundle-dir build/release-evidence
 (
@@ -130,44 +127,57 @@ uv run --frozen python scripts/release_evidence.py verify-bundle \
 )
 ```
 
-Every command must exit zero. Retain the bundle only as a local validation
-artifact; this tranche does not define or authorize a publication step.
+Inspect `manifest.json`. For the empty production snapshot, require:
 
-## Update the reviewed findings
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
 
-Use this procedure only for public, reviewed findings. A discovered advisory is
-not evidence for a stronger exploitability status.
+manifest = json.loads(Path("build/release-evidence/manifest.json").read_text())
+assert manifest["schema_version"] == 1
+assert manifest["review"]["assertion_count"] == 0
+assert manifest["formats"]["openvex"]["status"] == "omitted"
+assert manifest["formats"]["csaf"]["status"] == "omitted"
+assert manifest["source_tree_clean"] is True
+PY
+```
 
-1. Add one local-finding object to `release-evidence/findings.json`. Set
-   `analysis_state` explicitly to `in_triage`, identify exactly one component by
-   PURL or component reference, use a public source URL, and explain that impact
-   analysis remains underway.
-2. Review the complete findings file, then compute its SHA-256 digest.
-3. Increment `analysis_revision` in `release-evidence/review.json`. Update
-   `reviewed_at`, `reviewed_by`, `findings.sha256`, and `conclusion`.
-4. If `uv.lock` changed, review the complete new lock and update
-   `inventory.sha256`. The review cannot be carried across lock bytes without a
-   new revision.
-5. If the synthetic fixture's selected dependency changed, update its PURL and
-   both fixture digests. Keep the fixture synthetic and `in_triage`.
-6. Repeat the installed-wheel fixture gate and inspectable bundle steps.
+Do not upload this local bundle to an existing release. The release workflow
+creates the broader schema-2 asset set from isolated jobs and refuses manual
+replacement.
 
-With a real reviewed finding, the inspectable bundle must include CycloneDX,
-OpenVEX, and CSAF output. All three validators and the equivalence check must
-pass before review.
+## Update public findings
 
-## Recover from a failed run
+Use this sequence only after a maintainer has reviewed a public finding:
 
-| Failure | Response |
+1. Add the finding to `release-evidence/findings.json`. Select exactly one
+   component, explicitly set `analysis_state` to `in_triage`, and provide a
+   public source and honest analysis text.
+2. Review the entire new file and calculate its SHA-256.
+3. Increment `analysis_revision`; update `reviewed_at`, `reviewed_by`, the
+   findings digest, and `conclusion` in `review.json`.
+4. If `uv.lock` changed, review the entire lock and update its digest in the
+   same new revision.
+5. Run the complete conformance gate and inspectable-bundle checks again.
+
+A nonempty production bundle must contain `vex.cdx.json`,
+`vex.openvex.json`, and `vexcalibur-vex.json`. Do not promote a finding to
+`resolved`, `exploitable`, `false_positive`, or `not_affected` until a separate
+evidence and approval policy exists for that stronger claim.
+
+## Recover from local failures
+
+| Failure | Safe response |
 | --- | --- |
-| Dirty-tree rejection | Commit or intentionally discard the unrelated work, then rebuild the wheel. Do not use a dirty result for release review. |
-| `SOURCE_DATE_EPOCH` mismatch | Derive it again from the exact requested commit; do not substitute wall-clock time. |
-| Lock or findings digest mismatch | Review the changed file and update the review as a new revision, or restore the reviewed bytes. |
-| Missing, dirty, or mismatched wheel SCM metadata | Rebuild the wheel once from the exact clean target commit. Do not relabel or reuse an artifact from another commit. |
-| Missing OpenVEX or CSAF tool | Install the pinned Go or npm prerequisites and rerun; do not mark validation as passed manually. |
-| Cross-format mismatch | Keep every generated file unpublished, identify the renderer or comparison defect, and add a regression test before rerunning. |
-| Existing or concurrently created output directory | Verify or remove only the generated `build/release-evidence` directory, then rerun. Final placement fails without nesting into or overwriting that directory. |
+| Dirty-tree rejection | Commit the intended change or remove unrelated local state, then rebuild |
+| Timestamp mismatch | Derive the epoch from the exact commit again |
+| Review digest mismatch | Review and revise the bound input, or restore the reviewed bytes |
+| Wheel SCM mismatch | Rebuild once from the exact clean commit; never relabel another wheel |
+| Constraint grammar failure | Regenerate from the committed lock; never remove hash or binary-only enforcement |
+| Missing OpenVEX or CSAF validator | Install the pinned prerequisites and rerun |
+| Cross-format mismatch | Keep all output unpublished, fix the renderer or comparator, and add a regression test |
+| Output directory already exists | Verify or remove only that generated directory, then rerun; the generator never overwrites it |
 
-To roll back an input change, revert the reviewed JSON change with Git and
-rebuild from the prior exact commit. Generated files under `build/` are ignored
-and have no external side effect.
+Generated files have no external effect. Roll back reviewed-input changes with
+a normal Git revert and rebuild from the resulting exact commit.

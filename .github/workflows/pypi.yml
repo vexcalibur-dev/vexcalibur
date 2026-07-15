@@ -3,84 +3,526 @@ name: PyPI
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Existing immutable release tag to recover or finish publishing.
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: pypi-${{ github.repository }}-${{ github.event.release.tag_name || github.event.inputs.release-tag }}
+  cancel-in-progress: false
+
+env:
+  AUTOMATION_APP_SLUG: vexcalibur-dev-automation
+  AUTOMATION_BOT_LOGIN: vexcalibur-dev-automation[bot]
+  MAX_PYTHON: "3.14"
+  UV_CACHE_DIR: /tmp/vexcalibur-pypi-uv-cache
+  XDG_CACHE_HOME: /tmp/vexcalibur-pypi-cache
+
 jobs:
   resolve:
-    name: Resolve release tag
+    name: Resolve immutable release
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      sha: ${{ steps.tag.outputs.sha }}
-      version: ${{ steps.tag.outputs.version }}
+      release-id: ${{ steps.release.outputs.release_id }}
+      sha: ${{ steps.release.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
     steps:
-      - name: Refuse prerelease publishing
-        if: github.event.release.prerelease
-        run: |
-          echo "::error::PyPI publishing requires a non-prerelease GitHub Release."
-          exit 1
-
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: main
-
-      - name: Require automation release author
+      - name: Resolve release, tag, and main ancestry
+        id: release
         env:
-          AUTOMATION_BOT_LOGIN: vexcalibur-dev-automation[bot]
-          RELEASE_AUTHOR: ${{ github.event.release.author.login }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ github.event.release.tag_name || github.event.inputs.release-tag }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
-          if [[ "$RELEASE_AUTHOR" != "$AUTOMATION_BOT_LOGIN" ]]; then
-            echo "::error::PyPI publishes must come from ${AUTOMATION_BOT_LOGIN}, not ${RELEASE_AUTHOR}."
+          set -euo pipefail
+
+          tag="${REQUESTED_TAG}"
+          if ! printf '%s\n' "${tag}" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'; then
+            echo "::error::Release tag must look like v0.1.0 without leading zeros: ${tag}"
+            exit 1
+          fi
+          expected_ref="refs/tags/${tag}"
+          if [[ "${WORKFLOW_REF}" != "${expected_ref}" ]]; then
+            echo "::error::${EVENT_NAME} must run from ${expected_ref}, not ${WORKFLOW_REF}."
+            echo "::error::For recovery, dispatch with --ref ${tag} and release-tag=${tag}."
             exit 1
           fi
 
-      - name: Resolve tag
-        id: tag
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          tag="$RELEASE_TAG"
-
-          if ! printf '%s\n' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'; then
-            echo "::error::Release tag must look like v0.1.0 without leading zeros: $tag"
+          release_path="${RUNNER_TEMP}/resolved-release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > "${release_path}"
+          read -r api_tag is_draft is_prerelease is_immutable author target release_id < <(
+            jq -r \
+              '[.tag_name, (.draft | tostring), (.prerelease | tostring),
+                (.immutable | tostring), .author.login, .target_commitish,
+                (.id | tostring)] | @tsv' "${release_path}"
+          )
+          if [[ "${api_tag}" != "${tag}" ]]; then
+            echo "::error::Release API returned tag ${api_tag}, expected ${tag}."
+            exit 1
+          fi
+          if [[ "${is_draft}" != "false" || "${is_prerelease}" != "false" ]]; then
+            echo "::error::PyPI requires a published, non-prerelease GitHub Release."
+            exit 1
+          fi
+          if [[ "${is_immutable}" != "true" ]]; then
+            echo "::error::PyPI requires a GitHub Release protected by immutable releases."
+            exit 1
+          fi
+          if [[ "${author}" != "${AUTOMATION_BOT_LOGIN}" ]]; then
+            echo "::error::PyPI releases must come from ${AUTOMATION_BOT_LOGIN}, not ${author}."
+            exit 1
+          fi
+          if [[ ! "${release_id}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Release API returned an invalid release ID."
+            exit 1
+          fi
+          if ! jq -e --arg tag "${tag}" \
+            '.name == $tag and (.body | type == "string")' \
+            "${release_path}" >/dev/null; then
+            echo "::error::Immutable release title or body has an invalid contract."
+            exit 1
+          fi
+          release_assets="${RUNNER_TEMP}/resolved-release-assets.json"
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+            --jq '.[]' | jq -s '.' > "${release_assets}"
+          if ! jq -e --arg uploader "${AUTOMATION_BOT_LOGIN}" \
+            'length > 0 and
+             all(.[]; .state == "uploaded" and .uploader.login == $uploader and
+                      (.label == null or .label == ""))' \
+            "${release_assets}" >/dev/null; then
+            echo "::error::Immutable release assets have an unexpected uploader or display label."
             exit 1
           fi
 
-          sha="$(git rev-parse --verify "refs/tags/$tag^{commit}")"
-          current_main_sha="$(git rev-parse --verify origin/main)"
-          if [[ "$sha" != "$current_main_sha" ]]; then
-            echo "::error::Release tag $tag points at $sha, not current main $current_main_sha."
+          tag_ref_path="${RUNNER_TEMP}/resolved-release-tag-ref.json"
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" > "${tag_ref_path}"
+          if ! jq -e --arg ref "refs/tags/${tag}" \
+            '.ref == $ref and .object.type == "tag" and
+             (.object.sha | test("^[0-9a-f]{40}$"))' "${tag_ref_path}" >/dev/null; then
+            echo "::error::Release tag ${tag} is not the required annotated tag."
+            exit 1
+          fi
+          tag_object_sha="$(jq -r .object.sha "${tag_ref_path}")"
+          tag_path="${RUNNER_TEMP}/resolved-release-tag.json"
+          gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
+          bot_user_id="$(gh api "/users/${AUTOMATION_APP_SLUG}%5Bbot%5D" --jq .id)"
+          if [[ ! "${bot_user_id}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Could not resolve the automation App bot identity."
+            exit 1
+          fi
+          bot_email="${bot_user_id}+${AUTOMATION_BOT_LOGIN}@users.noreply.github.com"
+          if ! jq -e \
+            --arg tag "${tag}" \
+            --arg name "${AUTOMATION_BOT_LOGIN}" \
+            --arg email "${bot_email}" \
+            '(.message | fromjson) as $message |
+             .tag == $tag and .object.type == "commit" and
+             (.object.sha | test("^[0-9a-f]{40}$")) and
+             .tagger.name == $name and .tagger.email == $email and
+             ($message | type == "object") and
+             ($message | keys) ==
+               ["release_notes", "release_notes_sha256", "schema_version", "tag"] and
+             $message.schema_version == 1 and $message.tag == $tag and
+             ($message.release_notes | type == "string") and
+             ($message.release_notes_sha256 | type == "string" and
+              test("^[0-9a-f]{64}$"))' "${tag_path}" >/dev/null; then
+            echo "::error::Release tag ${tag} has an invalid bot-authored notes contract."
+            exit 1
+          fi
+          object_sha="$(jq -r .object.sha "${tag_path}")"
+          protected_notes="${RUNNER_TEMP}/resolved-release-notes.md"
+          release_notes="${RUNNER_TEMP}/resolved-release-body.md"
+          jq --join-output '.message | fromjson | .release_notes' \
+            "${tag_path}" > "${protected_notes}"
+          jq --join-output .body "${release_path}" > "${release_notes}"
+          expected_notes_sha256="$(
+            jq -r '.message | fromjson | .release_notes_sha256' "${tag_path}"
+          )"
+          if [[ "$(sha256sum "${protected_notes}" | awk '{print $1}')" != \
+            "${expected_notes_sha256}" ]] || \
+            ! cmp --silent "${protected_notes}" "${release_notes}"; then
+            echo "::error::Immutable release notes differ from the protected tag payload."
+            exit 1
+          fi
+          if [[ "${target}" != "${object_sha}" ]]; then
+            echo "::error::Release target ${target} differs from tag commit ${object_sha}."
+            exit 1
+          fi
+
+          current_main_sha="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha'
+          )"
+          if [[ ! "${current_main_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Main does not resolve to a Git commit."
+            exit 1
+          fi
+          compare_status="$(
+            gh api "repos/${GITHUB_REPOSITORY}/compare/${object_sha}...${current_main_sha}" \
+              --jq '.status'
+          )"
+          if [[ "${compare_status}" != "ahead" && "${compare_status}" != "identical" ]]; then
+            echo "::error::Release commit ${object_sha} is not an ancestor of current main ${current_main_sha}."
             exit 1
           fi
 
           {
-            printf 'tag=%s\n' "$tag"
-            printf 'sha=%s\n' "$sha"
+            printf 'release_id=%s\n' "${release_id}"
+            printf 'sha=%s\n' "${object_sha}"
+            printf 'tag=%s\n' "${tag}"
             printf 'version=%s\n' "${tag#v}"
-          } >> "$GITHUB_OUTPUT"
+          } >> "${GITHUB_OUTPUT}"
 
   validation:
-    name: Release validation
+    name: Verify immutable release assets
+    runs-on: ubuntu-latest
     needs: resolve
     permissions:
       contents: read
-    uses: ./.github/workflows/release-validation.yml
-    with:
-      release-sha: ${{ needs.resolve.outputs.sha }}
-      release-tag: ${{ needs.resolve.outputs.tag }}
-      release-version: ${{ needs.resolve.outputs.version }}
+    outputs:
+      missing_count: ${{ steps.select.outputs.missing_count }}
+      missing_files: ${{ steps.select.outputs.missing_files }}
+      publish_needed: ${{ steps.select.outputs.publish_needed }}
+      release_id: ${{ needs.resolve.outputs.release-id }}
+      sdist_name: ${{ steps.distributions.outputs.sdist_name }}
+      sdist_sha256: ${{ steps.distributions.outputs.sdist_sha256 }}
+      sha: ${{ needs.resolve.outputs.sha }}
+      tag: ${{ needs.resolve.outputs.tag }}
+      version: ${{ needs.resolve.outputs.version }}
+      wheel_name: ${{ steps.distributions.outputs.wheel_name }}
+      wheel_sha256: ${{ steps.distributions.outputs.wheel_sha256 }}
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Require exact tagged checkout
+        env:
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$(git rev-parse --verify HEAD)" != "${RELEASE_SHA}" ]] || \
+            [[ "$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")" != "${RELEASE_SHA}" ]]; then
+            echo "::error::Checkout does not match the recursively resolved release tag."
+            exit 1
+          fi
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version-file: .tool-versions
+          enable-cache: false
+          python-version: ${{ env.MAX_PYTHON }}
+
+      - name: Install exact release verifier dependencies
+        run: uv sync --frozen
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: tests/integration/openvex-go/go.mod
+          cache-dependency-path: tests/integration/openvex-go/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.14.1"
+          cache: npm
+          cache-dependency-path: tests/integration/csaf-validator/package-lock.json
+
+      - name: Download exact GitHub Release assets
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.resolve.outputs.release-id }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          asset_dir="${RUNNER_TEMP}/release-assets"
+          mkdir -m 0700 "${asset_dir}"
+          asset_inventory="${RUNNER_TEMP}/immutable-release-assets.json"
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+            --jq '.[]' | jq -s '.' > "${asset_inventory}"
+          if ! jq -e --arg uploader "${AUTOMATION_BOT_LOGIN}" \
+            'length > 0 and
+             ([.[].name] | length == (unique | length)) and
+             all(.[]; (.id | type == "number") and .id > 0 and
+                      (.size | type == "number") and .size > 0 and
+                      .state == "uploaded" and .uploader.login == $uploader and
+                      (.label == null or .label == ""))' \
+            "${asset_inventory}" >/dev/null; then
+            echo "::error::Immutable release assets have invalid state, identity, or uploader."
+            exit 1
+          fi
+          gh release download "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir "${asset_dir}"
+
+          expected_count="$(jq 'length' "${asset_inventory}")"
+          actual_count="$(find "${asset_dir}" -mindepth 1 -maxdepth 1 -type f | wc -l)"
+          entry_count="$(find "${asset_dir}" -mindepth 1 -maxdepth 1 | wc -l)"
+          if [[ ! "${expected_count}" =~ ^[0-9]+$ || "${actual_count}" != "${expected_count}" || "${entry_count}" != "${expected_count}" ]]; then
+            echo "::error::Downloaded release assets do not match the immutable release inventory."
+            exit 1
+          fi
+          printf 'directory=%s\n' "${asset_dir}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify GitHub release attestations
+        env:
+          ASSET_DIR: ${{ steps.assets.outputs.directory }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          retry_attestation() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if "$@"; then
+                return 0
+              fi
+              if ((attempt == 5)); then
+                echo "::error::Release attestation verification failed after ${attempt} attempts."
+                return 1
+              fi
+              sleep $((attempt * 5))
+            done
+          }
+
+          retry_attestation gh release verify "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}"
+          while IFS= read -r -d '' asset; do
+            retry_attestation gh release verify-asset "${RELEASE_TAG}" "${asset}" \
+              --repo "${GITHUB_REPOSITORY}"
+          done < <(find "${ASSET_DIR}" -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
+
+      - name: Reproduce lock-derived release inventory
+        env:
+          ASSET_DIR: ${{ steps.assets.outputs.directory }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          manifest="${ASSET_DIR}/manifest.json"
+          if [[ ! -f "${manifest}" || -L "${manifest}" ]] || \
+            (( $(stat --format='%s' "${manifest}") > 33554432 )); then
+            echo "::error::Release manifest is not a bounded regular file."
+            exit 1
+          fi
+
+          manifest_version="$(jq -er '.release.version | strings | select(length > 0)' "${manifest}")"
+          release_timestamp="$(jq -er '.release.timestamp | strings | select(length > 0)' "${manifest}")"
+          if [[ "${manifest_version}" != "${RELEASE_VERSION}" ]]; then
+            echo "::error::Manifest version differs from the release tag."
+            exit 1
+          fi
+          cmp --silent -- uv.lock "${ASSET_DIR}/uv.lock" || {
+            echo "::error::Release uv.lock differs from the exact tagged source."
+            exit 1
+          }
+
+          reproduction_dir="${RUNNER_TEMP}/reproduced-inventory"
+          mkdir -m 0700 "${reproduction_dir}"
+          uv export \
+            --quiet \
+            --frozen \
+            --no-dev \
+            --no-emit-project \
+            --no-annotate \
+            --no-header \
+            --output-file "${reproduction_dir}/raw-constraints.txt"
+          {
+            printf '%s\n' '--require-hashes' '--only-binary :all:' ''
+            cat -- "${reproduction_dir}/raw-constraints.txt"
+          } > "${reproduction_dir}/runtime-constraints.txt"
+          cmp --silent \
+            "${reproduction_dir}/runtime-constraints.txt" \
+            "${ASSET_DIR}/runtime-constraints.txt" || {
+            echo "::error::Release constraints are not reproducible from the tagged uv.lock."
+            exit 1
+          }
+
+          uv export \
+            --quiet \
+            --preview-features sbom-export \
+            --format cyclonedx1.5 \
+            --frozen \
+            --no-dev \
+            --output-file "${reproduction_dir}/raw-sbom.cdx.json"
+          lock_sha256="$(sha256sum -- uv.lock | awk '{print $1}')"
+          uv run --frozen python scripts/release_evidence.py normalize-sbom \
+            --input "${reproduction_dir}/raw-sbom.cdx.json" \
+            --output "${reproduction_dir}/sbom.cdx.json" \
+            --release-version "${RELEASE_VERSION}" \
+            --timestamp "${release_timestamp}" \
+            --lock-sha256 "${lock_sha256}"
+          cmp --silent "${reproduction_dir}/sbom.cdx.json" "${ASSET_DIR}/sbom.cdx.json" || {
+            echo "::error::Release SBOM is not reproducible from the tagged uv.lock."
+            exit 1
+          }
+
+      - name: Verify publication contract
+        env:
+          ASSET_DIR: ${{ steps.assets.outputs.directory }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          uv run --frozen python scripts/release_evidence.py verify-publication \
+            --bundle-dir "${ASSET_DIR}" \
+            --release-tag "${RELEASE_TAG}" \
+            --release-sha "${RELEASE_SHA}"
+
+      - name: Validate official OpenVEX and CSAF release assets
+        env:
+          ASSET_DIR: ${{ steps.assets.outputs.directory }}
+        run: |
+          set -euo pipefail
+
+          if [[ -f "${ASSET_DIR}/vex.openvex.json" ]]; then
+            go -C tests/integration/openvex-go run . \
+              "${ASSET_DIR}/vex.openvex.json"
+          fi
+          if [[ -f "${ASSET_DIR}/vexcalibur-vex.json" ]]; then
+            npm --prefix tests/integration/csaf-validator ci \
+              --ignore-scripts --no-audit --no-fund
+            node tests/integration/csaf-validator/validate.mjs \
+              "${ASSET_DIR}/vexcalibur-vex.json"
+          fi
+
+      - name: Copy exact distributions out of the release bundle
+        id: distributions
+        env:
+          ASSET_DIR: ${{ steps.assets.outputs.directory }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          wheel_name="vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          sdist_name="vexcalibur-${RELEASE_VERSION}.tar.gz"
+          gh release verify-asset "${RELEASE_TAG}" "${ASSET_DIR}/${wheel_name}" \
+            --repo "${GITHUB_REPOSITORY}"
+          gh release verify-asset "${RELEASE_TAG}" "${ASSET_DIR}/${sdist_name}" \
+            --repo "${GITHUB_REPOSITORY}"
+          dist_dir="${RUNNER_TEMP}/release-dist"
+          mkdir -m 0700 "${dist_dir}"
+          install -m 0644 "${ASSET_DIR}/${wheel_name}" "${dist_dir}/${wheel_name}"
+          install -m 0644 "${ASSET_DIR}/${sdist_name}" "${dist_dir}/${sdist_name}"
+
+          wheel_sha256="$(sha256sum -- "${dist_dir}/${wheel_name}" | awk '{print $1}')"
+          sdist_sha256="$(sha256sum -- "${dist_dir}/${sdist_name}" | awk '{print $1}')"
+          if [[ ! "${wheel_sha256}" =~ ^[0-9a-f]{64}$ || ! "${sdist_sha256}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Could not bind exact distribution hashes."
+            exit 1
+          fi
+
+          {
+            printf 'directory=%s\n' "${dist_dir}"
+            printf 'wheel_name=%s\n' "${wheel_name}"
+            printf 'wheel_sha256=%s\n' "${wheel_sha256}"
+            printf 'sdist_name=%s\n' "${sdist_name}"
+            printf 'sdist_sha256=%s\n' "${sdist_sha256}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Verify distribution metadata and installed wheel
+        env:
+          DIST_DIR: ${{ steps.distributions.outputs.directory }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          VEXCALIBUR_EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
+          VEXCALIBUR_WHEEL: ${{ steps.distributions.outputs.directory }}/${{ steps.distributions.outputs.wheel_name }}
+        run: |
+          set -euo pipefail
+
+          uv run --frozen python scripts/verify-dist-metadata.py "${DIST_DIR}" \
+            --expected-name vexcalibur \
+            --expected-version "${RELEASE_VERSION}"
+          uv run --frozen twine check "${DIST_DIR}"/*
+          make installed-cli-check
+
+      - name: Select exact distributions absent from PyPI
+        id: select
+        env:
+          DIST_DIR: ${{ steps.distributions.outputs.directory }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          pypi_response="${RUNNER_TEMP}/pypi-response.json"
+          http_status="$(
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --proto '=https' \
+              --tlsv1.2 \
+              --connect-timeout 10 \
+              --max-time 60 \
+              --max-filesize 8388608 \
+              --retry 4 \
+              --retry-all-errors \
+              --retry-max-time 45 \
+              --output "${pypi_response}" \
+              --write-out '%{http_code}' \
+              "https://pypi.org/pypi/vexcalibur/${RELEASE_VERSION}/json"
+          )"
+
+          pypi_arguments=()
+          case "${http_status}" in
+            200)
+              if [[ ! -f "${pypi_response}" || -L "${pypi_response}" ]] || \
+                (( $(stat --format='%s' "${pypi_response}") > 8388608 )); then
+                echo "::error::PyPI returned an invalid or oversized response."
+                exit 1
+              fi
+              pypi_arguments=(--pypi-response "${pypi_response}")
+              ;;
+            404)
+              pypi_arguments=(--pypi-missing)
+              ;;
+            *)
+              echo "::error::PyPI JSON API returned HTTP ${http_status}."
+              exit 1
+              ;;
+          esac
+
+          uv run --frozen python scripts/select-pypi-release-files.py "${DIST_DIR}" \
+            --version "${RELEASE_VERSION}" \
+            "${pypi_arguments[@]}" \
+            --output-directory "${RUNNER_TEMP}/verified-pypi-dist" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Upload only missing verified distributions
+        id: upload
+        if: steps.select.outputs.publish_needed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-pypi-dist-${{ needs.resolve.outputs.sha }}
+          path: ${{ runner.temp }}/verified-pypi-dist/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 1
 
   publish:
-    name: Publish to PyPI
+    name: Publish exact missing distributions
+    if: needs.validation.outputs.publish_needed == 'true'
     runs-on: ubuntu-latest
-    needs:
-      - resolve
-      - validation
+    needs: validation
     environment:
       name: pypi
       url: https://pypi.org/p/vexcalibur
@@ -88,54 +530,219 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Download distributions
+      - name: Download verified missing distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist
+          name: verified-pypi-dist-${{ needs.validation.outputs.sha }}
           path: dist/
+
+      - name: Verify exact publication files
+        env:
+          DIST_DIR: dist
+          EXPECTED_COUNT: ${{ needs.validation.outputs.missing_count }}
+          MISSING_FILES_JSON: ${{ needs.validation.outputs.missing_files }}
+          SDIST_NAME: ${{ needs.validation.outputs.sdist_name }}
+          SDIST_SHA256: ${{ needs.validation.outputs.sdist_sha256 }}
+          WHEEL_NAME: ${{ needs.validation.outputs.wheel_name }}
+          WHEEL_SHA256: ${{ needs.validation.outputs.wheel_sha256 }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${EXPECTED_COUNT}" =~ ^[12]$ ]]; then
+            echo "::error::Invalid missing-distribution count: ${EXPECTED_COUNT}."
+            exit 1
+          fi
+          if ! expected_names_json="$(
+            jq -cer \
+              --arg wheel "${WHEEL_NAME}" \
+              --arg sdist "${SDIST_NAME}" \
+              'if type == "array"
+                  and length >= 1
+                  and length <= 2
+                  and . == sort
+                  and (unique | length) == length
+                  and all(.[]; . == $wheel or . == $sdist)
+                then .
+                else error("invalid missing-files contract")
+                end' <<< "${MISSING_FILES_JSON}"
+          )"; then
+            echo "::error::Invalid missing-distribution filename contract."
+            exit 1
+          fi
+          mapfile -t expected_names < <(jq -r '.[]' <<< "${expected_names_json}")
+          if [[ "${#expected_names[@]}" -ne "${EXPECTED_COUNT}" ]]; then
+            echo "::error::Missing-distribution count differs from its filename contract."
+            exit 1
+          fi
+          mapfile -d '' entries < <(
+            find "${DIST_DIR}" -mindepth 1 -maxdepth 1 -print0 | sort -z
+          )
+          if [[ "${#entries[@]}" -ne "${EXPECTED_COUNT}" ]]; then
+            echo "::error::Verified artifact contains ${#entries[@]} entries, expected ${EXPECTED_COUNT}."
+            exit 1
+          fi
+
+          for index in "${!entries[@]}"; do
+            path="${entries[${index}]}"
+            if [[ ! -f "${path}" || -L "${path}" ]]; then
+              echo "::error::Verified artifact contains a nonregular file: ${path}."
+              exit 1
+            fi
+            name="${path##*/}"
+            if [[ "${name}" != "${expected_names[${index}]}" ]]; then
+              echo "::error::Verified artifact filename subset differs from validation."
+              exit 1
+            fi
+            case "${name}" in
+              "${WHEEL_NAME}") expected_sha256="${WHEEL_SHA256}" ;;
+              "${SDIST_NAME}") expected_sha256="${SDIST_SHA256}" ;;
+              *)
+                echo "::error::Verified artifact contains an unexpected distribution: ${name}."
+                exit 1
+                ;;
+            esac
+            actual_sha256="$(sha256sum -- "${path}" | awk '{print $1}')"
+            if [[ "${actual_sha256}" != "${expected_sha256}" ]]; then
+              echo "::error::Verified distribution hash changed: ${name}."
+              exit 1
+            fi
+          done
 
       - name: Re-resolve validated release tag
         env:
+          DIST_DIR: dist
+          EXPECTED_RELEASE_ID: ${{ needs.validation.outputs.release_id }}
           EXPECTED_SHA: ${{ needs.validation.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validation.outputs.tag }}
         run: |
           set -euo pipefail
 
-          read -r object_type object_sha < <(
-            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
-              --jq '[.object.type, .object.sha] | @tsv'
+          release_path="${RUNNER_TEMP}/pre-oidc-release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            > "${release_path}"
+          read -r api_tag is_draft is_prerelease is_immutable author target release_id < <(
+            jq -r \
+              '[.tag_name, (.draft | tostring), (.prerelease | tostring),
+                (.immutable | tostring), .author.login, .target_commitish,
+                (.id | tostring)] | @tsv' "${release_path}"
           )
+          if [[ "${api_tag}" != "${RELEASE_TAG}" || "${release_id}" != "${EXPECTED_RELEASE_ID}" ]]; then
+            echo "::error::The immutable release changed after validation."
+            exit 1
+          fi
+          if [[ "${is_draft}" != "false" || "${is_prerelease}" != "false" || "${is_immutable}" != "true" ]]; then
+            echo "::error::Release is no longer an immutable, published, non-prerelease release."
+            exit 1
+          fi
+          if [[ "${author}" != "${AUTOMATION_BOT_LOGIN}" ]]; then
+            echo "::error::Release author changed after validation."
+            exit 1
+          fi
+          if ! jq -e --arg tag "${RELEASE_TAG}" \
+            '.name == $tag and (.body | type == "string")' \
+            "${release_path}" >/dev/null; then
+            echo "::error::Immutable release title or body changed after validation."
+            exit 1
+          fi
+          release_assets="${RUNNER_TEMP}/pre-oidc-release-assets.json"
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+            --jq '.[]' | jq -s '.' > "${release_assets}"
+          if ! jq -e --arg uploader "${AUTOMATION_BOT_LOGIN}" \
+            'length > 0 and
+             all(.[]; .state == "uploaded" and .uploader.login == $uploader and
+                      (.label == null or .label == ""))' \
+            "${release_assets}" >/dev/null; then
+            echo "::error::Immutable release asset uploader or display label changed after validation."
+            exit 1
+          fi
 
-          tag_depth=0
-          while [[ "${object_type}" == "tag" ]]; do
-            tag_depth=$((tag_depth + 1))
-            if ((tag_depth > 8)); then
-              echo "::error::Release tag ${RELEASE_TAG} has excessive indirection."
-              exit 1
-            fi
-            read -r object_type object_sha < <(
-              gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object_sha}" \
-                --jq '[.object.type, .object.sha] | @tsv'
-            )
-          done
-
-          if [[ "${object_type}" != "commit" ]]; then
-            echo "::error::Release tag ${RELEASE_TAG} does not resolve to a commit."
+          tag_ref_path="${RUNNER_TEMP}/pre-oidc-tag-ref.json"
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+            > "${tag_ref_path}"
+          if ! jq -e --arg ref "refs/tags/${RELEASE_TAG}" \
+            '.ref == $ref and .object.type == "tag" and
+             (.object.sha | test("^[0-9a-f]{40}$"))' "${tag_ref_path}" >/dev/null; then
+            echo "::error::Release tag contract changed after validation."
+            exit 1
+          fi
+          tag_object_sha="$(jq -r .object.sha "${tag_ref_path}")"
+          tag_path="${RUNNER_TEMP}/pre-oidc-tag.json"
+          gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
+          bot_user_id="$(gh api "/users/${AUTOMATION_APP_SLUG}%5Bbot%5D" --jq .id)"
+          if [[ ! "${bot_user_id}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Could not re-resolve the automation App bot identity."
+            exit 1
+          fi
+          bot_email="${bot_user_id}+${AUTOMATION_BOT_LOGIN}@users.noreply.github.com"
+          if ! jq -e \
+            --arg tag "${RELEASE_TAG}" \
+            --arg sha "${EXPECTED_SHA}" \
+            --arg name "${AUTOMATION_BOT_LOGIN}" \
+            --arg email "${bot_email}" \
+            '(.message | fromjson) as $message |
+             .tag == $tag and .object.type == "commit" and .object.sha == $sha and
+             .tagger.name == $name and .tagger.email == $email and
+             ($message | type == "object") and
+             ($message | keys) ==
+               ["release_notes", "release_notes_sha256", "schema_version", "tag"] and
+             $message.schema_version == 1 and $message.tag == $tag and
+             ($message.release_notes | type == "string") and
+             ($message.release_notes_sha256 | type == "string" and
+              test("^[0-9a-f]{64}$"))' "${tag_path}" >/dev/null; then
+            echo "::error::Protected release-note tag contract changed after validation."
+            exit 1
+          fi
+          object_sha="$(jq -r .object.sha "${tag_path}")"
+          protected_notes="${RUNNER_TEMP}/pre-oidc-protected-notes.md"
+          release_notes="${RUNNER_TEMP}/pre-oidc-release-notes.md"
+          jq --join-output '.message | fromjson | .release_notes' \
+            "${tag_path}" > "${protected_notes}"
+          jq --join-output .body "${release_path}" > "${release_notes}"
+          expected_notes_sha256="$(
+            jq -r '.message | fromjson | .release_notes_sha256' "${tag_path}"
+          )"
+          if [[ "$(sha256sum "${protected_notes}" | awk '{print $1}')" != \
+            "${expected_notes_sha256}" ]] || \
+            ! cmp --silent "${protected_notes}" "${release_notes}"; then
+            echo "::error::Protected release notes changed after validation."
+            exit 1
+          fi
+          if [[ "${target}" != "${object_sha}" ]]; then
+            echo "::error::Release target differs from the validated tag commit."
             exit 1
           fi
 
           current_main_sha="$(
             gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha'
           )"
-          if [[ "${object_sha}" != "${EXPECTED_SHA}" ]]; then
-            echo "::error::Release tag ${RELEASE_TAG} moved after validation."
+          compare_status="$(
+            gh api "repos/${GITHUB_REPOSITORY}/compare/${object_sha}...${current_main_sha}" \
+              --jq '.status'
+          )"
+          if [[ "${compare_status}" != "ahead" && "${compare_status}" != "identical" ]]; then
+            echo "::error::Validated release commit is no longer an ancestor of main."
             exit 1
           fi
-          if [[ "${current_main_sha}" != "${EXPECTED_SHA}" ]]; then
-            echo "::error::Main moved after release validation."
-            exit 1
-          fi
+          while IFS= read -r -d '' distribution; do
+            gh release verify-asset "${RELEASE_TAG}" "${distribution}" \
+              --repo "${GITHUB_REPOSITORY}"
+          done < <(find "${DIST_DIR}" -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
 
       - name: Publish distributions
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          packages-dir: dist/
+
+  already-published:
+    name: Exact distributions already on PyPI
+    if: needs.validation.outputs.publish_needed == 'false'
+    runs-on: ubuntu-latest
+    needs: validation
+    permissions: {}
+    steps:
+      - name: Record successful no-op
+        env:
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+        run: echo "${RELEASE_TAG} already has both exact immutable distribution hashes on PyPI."

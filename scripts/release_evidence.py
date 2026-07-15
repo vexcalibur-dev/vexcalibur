@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import email
 import hashlib
 import json
 import re
+import shutil
 import stat
 import sys
+import tarfile
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
@@ -19,20 +22,46 @@ from urllib.parse import quote
 from packageurl import PackageURL
 
 MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024
+MAX_ARCHIVE_METADATA_BYTES = 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_WHEEL_SCM_METADATA_BYTES = 64 * 1024
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 GROUPED_SHA256_PATTERN = re.compile(r"^(?:[0-9a-f]{16}:){3}[0-9a-f]{16}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+RELEASE_VERSION_PATTERN = re.compile(r"^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$")
 SCM_NODE_PATTERN = re.compile(r"^g?([0-9a-f]{40})$")
 SCM_METADATA_MEMBER_PATTERN = re.compile(r"^vexcalibur-[^/]+\.dist-info/scm_version\.json$")
 WHEEL_METADATA_MEMBER_PATTERN = re.compile(r"^vexcalibur-[^/]+\.dist-info/METADATA$")
 RFC3339_UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 CHECKSUM_LINE_PATTERN = re.compile(r"^([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._+-]*)$")
+CONSTRAINT_REQUIREMENT_PATTERN = re.compile(
+    r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9.!+_-]+)(?: ; [^\\\r\n]+)?$"
+)
+CONSTRAINT_HASH_PATTERN = re.compile(r"^    --hash=sha256:([0-9a-f]{64})$")
 ORIGINAL_STATE_PATTERN = re.compile(
     r"(?:^|\n)Original Vexcalibur analysis state: "
     r"(resolved|exploitable|in_triage|false_positive|not_affected)(?:\n|$)"
 )
 ALLOWED_PRODUCTION_STATES = ("in_triage",)
+ACTION_REPOSITORY = "vexcalibur-dev/vexcalibur-action"
+PUBLICATION_ACTION_COMMIT = "cc570fb0ab80df3f4b1e31c0608b95c0707d5b66"  # pragma: allowlist secret
+PUBLICATION_ACTION_COMMITS_BY_SCHEMA = {2: frozenset({PUBLICATION_ACTION_COMMIT})}
+PUBLICATION_INVENTORY_FILES = {
+    "findings.json",
+    "review.json",
+    "runtime-constraints.txt",
+    "sbom.cdx.json",
+    "uv.lock",
+}
+INVENTORY_COVERAGE = "cross-platform-reference-runtime"
+INVENTORY_LIMITATION = (
+    "uv.lock records the project's cross-platform reference runtime; it is not a "
+    "claim about every environment-specific consumer resolution."
+)
+VULNERABILITY_PROVIDER_POLICY = "offline_local_findings_only"
+PRODUCTION_STATE_POLICY = "only_in_triage"
+PAYLOAD_DIGEST_ALGORITHM = "sha256_canonical_artifact_records_v1"
 REVIEW_KEYS = {
     "schema_version",
     "review_kind",
@@ -75,6 +104,14 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def hashed_file_uri(path: Path) -> str:
+    """Return an absolute file URI carrying the file's SHA-256 fragment."""
+    if not path.is_file() or path.is_symlink():
+        raise EvidenceError(f"expected a regular, non-symlink file: {path}")
+    resolved = path.resolve(strict=True)
+    return f"{resolved.as_uri()}#sha256={sha256_file(resolved)}"
+
+
 def load_json(path: Path) -> Any:
     """Read bounded UTF-8 JSON while rejecting duplicate object keys."""
     if not path.is_file() or path.is_symlink():
@@ -101,6 +138,7 @@ def validate_wheel_source(wheel_path: Path, *, release_sha: str) -> str:
 
     try:
         with zipfile.ZipFile(wheel_path) as wheel:
+            _validate_zip_members(wheel.infolist())
             distribution_metadata = [
                 member
                 for member in wheel.infolist()
@@ -418,12 +456,16 @@ def compare_vex_formats(
 
 
 def _cyclonedx_assertions(document: dict[str, Any]) -> set[tuple[str, str, str]]:
-    component_by_ref = {
-        _require_nonempty_string(
+    component_by_ref: dict[str, str] = {}
+    for component in _dict_items(document.get("components", []), field="CycloneDX components"):
+        component_ref = _require_nonempty_string(
             component.get("bom-ref"), field="CycloneDX component bom-ref"
-        ): _require_nonempty_string(component.get("purl"), field="CycloneDX component purl")
-        for component in _dict_items(document.get("components", []), field="CycloneDX components")
-    }
+        )
+        if component_ref in component_by_ref:
+            raise EvidenceError(f"CycloneDX contains duplicate bom-ref {component_ref!r}")
+        component_by_ref[component_ref] = _canonical_purl(
+            component.get("purl"), field="CycloneDX component purl"
+        )
     records: list[tuple[str, str, str]] = []
     for vulnerability in _dict_items(
         document.get("vulnerabilities", []), field="CycloneDX vulnerabilities"
@@ -457,6 +499,8 @@ def _openvex_assertions(document: dict[str, Any]) -> set[tuple[str, str, str]]:
         vulnerability = _require_dict(
             statement.get("vulnerability"), field="OpenVEX statement vulnerability"
         )
+        if set(vulnerability) != {"name"}:
+            raise EvidenceError("OpenVEX vulnerability identity has unexpected fields")
         vulnerability_id = _require_nonempty_string(
             vulnerability.get("name"), field="OpenVEX vulnerability name"
         )
@@ -468,10 +512,17 @@ def _openvex_assertions(document: dict[str, Any]) -> set[tuple[str, str, str]]:
         if status != OPENVEX_STATUS_BY_STATE[state]:
             raise EvidenceError(f"OpenVEX status {status!r} does not match state {state!r}")
         for product in _dict_items(statement.get("products", []), field="OpenVEX products"):
+            if set(product) != {"@id", "identifiers"}:
+                raise EvidenceError("OpenVEX product identity has unexpected fields")
             identifiers = _require_dict(
                 product.get("identifiers"), field="OpenVEX product identifiers"
             )
-            purl = _require_nonempty_string(identifiers.get("purl"), field="OpenVEX product purl")
+            if set(identifiers) != {"purl"}:
+                raise EvidenceError("OpenVEX product identifiers have unexpected fields")
+            purl = _canonical_purl(identifiers.get("purl"), field="OpenVEX product purl")
+            product_id = _canonical_purl(product.get("@id"), field="OpenVEX product @id")
+            if product_id != purl:
+                raise EvidenceError("OpenVEX product @id differs from its canonical PURL")
             records.append((vulnerability_id, purl, state))
     return _unique_assertions(records, format_name="OpenVEX")
 
@@ -483,12 +534,12 @@ def _csaf_assertions(document: dict[str, Any]) -> set[tuple[str, str, str]]:
         product_tree.get("full_product_names", []), field="CSAF full_product_names"
     ):
         product_id = _require_nonempty_string(product.get("product_id"), field="CSAF product_id")
+        if product_id in product_by_id:
+            raise EvidenceError(f"CSAF contains duplicate product_id {product_id!r}")
         helper = _require_dict(
             product.get("product_identification_helper"), field="CSAF product helper"
         )
-        product_by_id[product_id] = _require_nonempty_string(
-            helper.get("purl"), field="CSAF product purl"
-        )
+        product_by_id[product_id] = _canonical_purl(helper.get("purl"), field="CSAF product purl")
 
     records: list[tuple[str, str, str]] = []
     for vulnerability in _dict_items(
@@ -565,15 +616,7 @@ def build_manifest(
     wheel_source_commit = validate_wheel_source(wheel_path, release_sha=release_sha)
 
     files = _bundle_files(bundle_dir, excluded={"manifest.json", "SHA256SUMS"})
-    expected_names = {
-        "findings.json",
-        "review.json",
-        "runtime-constraints.txt",
-        "sbom.cdx.json",
-        "vex.cdx.json",
-    }
-    if assertion_count > 0:
-        expected_names.update({"vex.openvex.json", "vexcalibur-vex.json"})
+    expected_names = _expected_evidence_payload_names(assertion_count)
     actual_names = {path.name for path in files}
     if actual_names != expected_names:
         raise EvidenceError(
@@ -593,41 +636,10 @@ def build_manifest(
         for path in files
     ]
 
-    formats: dict[str, dict[str, Any]] = {
-        "cyclonedx": {
-            "artifact": "vex.cdx.json",
-            "assertion_count": assertion_count,
-            "conformance": "CycloneDX 1.6 schema passed",
-            "status": "generated",
-        }
-    }
-    omitted_formats: list[dict[str, str]] = []
-    if assertion_count == 0:
-        for format_name, specification in (
-            ("openvex", "OpenVEX 0.2.0"),
-            ("csaf", "CSAF 2.0 VEX profile"),
-        ):
-            reason = (
-                f"{specification} requires at least one vulnerability finding; "
-                "this reviewed snapshot contains zero findings and makes zero VEX assertions."
-            )
-            formats[format_name] = {"reason": reason, "status": "omitted"}
-            omitted_formats.append({"format": format_name, "reason": reason})
-        cross_format_validation = "not_applicable_without_assertions"
-    else:
-        formats["openvex"] = {
-            "artifact": "vex.openvex.json",
-            "assertion_count": assertion_count,
-            "conformance": "official OpenVEX Go parser passed",
-            "status": "generated",
-        }
-        formats["csaf"] = {
-            "artifact": "vexcalibur-vex.json",
-            "assertion_count": assertion_count,
-            "conformance": "CSAF 2.0 strict schema and mandatory tests passed",
-            "status": "generated",
-        }
-        cross_format_validation = "passed"
+    formats, omitted_formats = _expected_format_manifest(assertion_count)
+    cross_format_validation = (
+        "passed" if assertion_count > 0 else "not_applicable_without_assertions"
+    )
 
     return {
         "schema_version": 1,
@@ -644,11 +656,8 @@ def build_manifest(
             "version": release_version,
         },
         "inventory": {
-            "coverage": "cross-platform-reference-runtime",
-            "limitation": (
-                "uv.lock records the project's cross-platform reference runtime; it is not a "
-                "claim about every environment-specific consumer resolution."
-            ),
+            "coverage": INVENTORY_COVERAGE,
+            "limitation": INVENTORY_LIMITATION,
             "lock_sha256": sha256_file(lock_path),
             "sbom": "sbom.cdx.json",
             "sbom_specification": "CycloneDX 1.5",
@@ -675,13 +684,73 @@ def build_manifest(
         "validation": {
             "cross_format_assertion_equivalence": cross_format_validation,
             "installed_local_wheel": "passed",
-            "network_during_generation": "disabled_by_offline_local_findings_mode",
-            "production_state_policy": "only_in_triage",
+            "production_state_policy": PRODUCTION_STATE_POLICY,
             "sbom_cyclonedx_1_5_schema": "passed",
             "vex_cyclonedx_1_6_schema": "passed",
+            "vulnerability_provider_selection": VULNERABILITY_PROVIDER_POLICY,
         },
         "artifacts": artifact_records,
     }
+
+
+def _expected_evidence_payload_names(assertion_count: int) -> set[str]:
+    if assertion_count < 0:
+        raise EvidenceError("assertion count must not be negative")
+    names = {
+        "findings.json",
+        "review.json",
+        "runtime-constraints.txt",
+        "sbom.cdx.json",
+        "vex.cdx.json",
+    }
+    if assertion_count > 0:
+        names.update({"vex.openvex.json", "vexcalibur-vex.json"})
+    return names
+
+
+def _expected_format_manifest(
+    assertion_count: int,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
+    if assertion_count < 0:
+        raise EvidenceError("assertion count must not be negative")
+    formats: dict[str, dict[str, Any]] = {
+        "cyclonedx": {
+            "artifact": "vex.cdx.json",
+            "assertion_count": assertion_count,
+            "conformance": "CycloneDX 1.6 schema passed",
+            "status": "generated",
+        }
+    }
+    omitted_formats: list[dict[str, str]] = []
+    for format_name, specification, artifact, conformance in (
+        (
+            "openvex",
+            "OpenVEX 0.2.0",
+            "vex.openvex.json",
+            "official OpenVEX Go parser passed",
+        ),
+        (
+            "csaf",
+            "CSAF 2.0 VEX profile",
+            "vexcalibur-vex.json",
+            "CSAF 2.0 strict schema and mandatory tests passed",
+        ),
+    ):
+        if assertion_count == 0:
+            reason = (
+                f"{specification} requires at least one vulnerability finding; "
+                "this reviewed snapshot contains zero findings and makes zero VEX assertions."
+            )
+            formats[format_name] = {"reason": reason, "status": "omitted"}
+            omitted_formats.append({"format": format_name, "reason": reason})
+        else:
+            formats[format_name] = {
+                "artifact": artifact,
+                "assertion_count": assertion_count,
+                "conformance": conformance,
+                "status": "generated",
+            }
+    return formats, omitted_formats
 
 
 def write_checksums(bundle_dir: Path) -> None:
@@ -728,6 +797,7 @@ def verify_bundle(bundle_dir: Path) -> None:
     if not isinstance(artifact_records, list):
         raise EvidenceError("manifest artifacts must be an array")
     manifest_artifacts: dict[str, tuple[str, int]] = {}
+    artifact_names: list[str] = []
     for index, record in enumerate(artifact_records):
         item = _require_dict(record, field=f"manifest artifacts[{index}]")
         if set(item) != {"name", "sha256", "size"}:
@@ -737,11 +807,14 @@ def verify_bundle(bundle_dir: Path) -> None:
         filename = _require_nonempty_string(item.get("name"), field="artifact name")
         if filename in manifest_artifacts:
             raise EvidenceError(f"duplicate manifest artifact record: {filename}")
+        artifact_names.append(filename)
         digest = _require_sha256(item.get("sha256"), name="artifact sha256")
         size = item.get("size")
         if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             raise EvidenceError("manifest artifact size must be a nonnegative integer")
         manifest_artifacts[filename] = (digest, size)
+    if artifact_names != sorted(artifact_names):
+        raise EvidenceError("manifest artifact records are not sorted by filename")
     expected_artifacts = expected_names - {"manifest.json"}
     if set(manifest_artifacts) != expected_artifacts:
         raise EvidenceError("manifest artifact file set differs from bundle")
@@ -750,6 +823,1129 @@ def verify_bundle(bundle_dir: Path) -> None:
             raise EvidenceError(f"manifest artifact digest mismatch for {filename}")
         if (bundle_dir / filename).stat().st_size != size:
             raise EvidenceError(f"manifest artifact size mismatch for {filename}")
+
+
+def prepare_publication_inventory(
+    *,
+    output_dir: Path,
+    release_sha: str,
+    release_version: str,
+    source_date_epoch: int,
+    lock_path: Path,
+    review_path: Path,
+    findings_path: Path,
+    constraints_path: Path,
+    sbom_path: Path,
+    uv_version: str,
+    source_tree_clean: bool,
+) -> None:
+    """Build the candidate-free oracle artifact used by publication jobs."""
+    if output_dir.exists() or output_dir.is_symlink():
+        raise EvidenceError(f"publication inventory output already exists: {output_dir}")
+    if COMMIT_PATTERN.fullmatch(release_sha) is None:
+        raise EvidenceError("release SHA must be a lowercase 40-character Git commit")
+    release_version = _require_release_version(release_version)
+    timestamp = release_timestamp(source_date_epoch)
+    uv_version = _require_nonempty_string(uv_version, field="uv version")
+    for path in (lock_path, review_path, findings_path, constraints_path, sbom_path):
+        _require_bounded_publication_file(path)
+
+    review_document = _require_dict(load_json(review_path), field="review")
+    findings_document = _require_dict(load_json(findings_path), field="findings document")
+    review_kind, findings = validate_review(
+        review_document,
+        findings_document,
+        lock_path=lock_path,
+        findings_path=findings_path,
+    )
+    if review_kind != "production":
+        raise EvidenceError("publication inventory requires a production review")
+    _validate_runtime_constraints(constraints_path)
+    sbom_document = _require_dict(load_json(sbom_path), field="SBOM")
+    validate_cyclonedx(sbom_path, spec_version="1.5")
+    _validate_normalized_sbom(
+        sbom_document,
+        release_version=release_version,
+        release_timestamp_value=timestamp,
+        lock_sha256=sha256_file(lock_path),
+    )
+    _reviewed_assertions(findings, sbom_document)
+
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(mode=0o700)
+    except OSError as exc:
+        raise EvidenceError(f"could not create fresh publication inventory: {exc}") from exc
+    try:
+        for source, name in (
+            (findings_path, "findings.json"),
+            (review_path, "review.json"),
+            (constraints_path, "runtime-constraints.txt"),
+            (sbom_path, "sbom.cdx.json"),
+            (lock_path, "uv.lock"),
+        ):
+            _copy_regular_file_exclusive(source, output_dir / name)
+        manifest = {
+            "artifacts": [
+                _artifact_record(output_dir / name) for name in sorted(PUBLICATION_INVENTORY_FILES)
+            ],
+            "inventory": {
+                "coverage": INVENTORY_COVERAGE,
+                "limitation": INVENTORY_LIMITATION,
+                "lock": "uv.lock",
+                "lock_sha256": sha256_file(output_dir / "uv.lock"),
+                "sbom": "sbom.cdx.json",
+                "sbom_specification": "CycloneDX 1.5",
+            },
+            "inventory_kind": "publication_oracle",
+            "release": {
+                "commit": release_sha,
+                "purl": _release_purl(release_version),
+                "source_date_epoch": source_date_epoch,
+                "timestamp": timestamp,
+                "version": release_version,
+            },
+            "review": _review_manifest_record(
+                review_document,
+                findings,
+                review_path=output_dir / "review.json",
+                findings_path=output_dir / "findings.json",
+            ),
+            "schema_version": 1,
+            "source_tree_clean": source_tree_clean,
+            "uv_version": uv_version,
+        }
+        (output_dir / "manifest.json").write_text(canonical_json(manifest), encoding="utf-8")
+        write_checksums(output_dir)
+        verify_publication_inventory(
+            inventory_dir=output_dir,
+            expected_release_sha=release_sha,
+            expected_release_version=release_version,
+        )
+    except Exception:
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        raise
+
+
+def verify_publication_inventory(
+    *, inventory_dir: Path, expected_release_sha: str, expected_release_version: str
+) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
+    """Verify the immutable oracle artifact without executing the release package."""
+    verify_bundle(inventory_dir)
+    if COMMIT_PATTERN.fullmatch(expected_release_sha) is None:
+        raise EvidenceError("expected release SHA must be a lowercase 40-character commit")
+    expected_release_version = _require_release_version(expected_release_version)
+    manifest = _require_dict(load_json(inventory_dir / "manifest.json"), field="manifest")
+    if set(manifest) != {
+        "artifacts",
+        "inventory",
+        "inventory_kind",
+        "release",
+        "review",
+        "schema_version",
+        "source_tree_clean",
+        "uv_version",
+    }:
+        raise EvidenceError("publication inventory manifest contains unexpected fields")
+    if manifest.get("schema_version") != 1:
+        raise EvidenceError("publication inventory schema version must be 1")
+    if manifest.get("inventory_kind") != "publication_oracle":
+        raise EvidenceError("publication inventory has the wrong kind")
+    if manifest.get("source_tree_clean") is not True:
+        raise EvidenceError("publication inventory requires a clean source tree")
+    _require_nonempty_string(manifest.get("uv_version"), field="publication inventory uv version")
+
+    release = _validate_release_record(
+        manifest.get("release"),
+        expected_release_sha=expected_release_sha,
+        expected_release_version=expected_release_version,
+    )
+    lock_path = inventory_dir / "uv.lock"
+    expected_inventory = {
+        "coverage": INVENTORY_COVERAGE,
+        "limitation": INVENTORY_LIMITATION,
+        "lock": "uv.lock",
+        "lock_sha256": sha256_file(lock_path),
+        "sbom": "sbom.cdx.json",
+        "sbom_specification": "CycloneDX 1.5",
+    }
+    if manifest.get("inventory") != expected_inventory:
+        raise EvidenceError("publication inventory does not bind its bundled uv.lock")
+    actual_names = {
+        path.name for path in _bundle_files(inventory_dir, excluded={"manifest.json", "SHA256SUMS"})
+    }
+    if actual_names != PUBLICATION_INVENTORY_FILES:
+        raise EvidenceError("publication inventory file set differs from the contract")
+
+    review_document = _require_dict(load_json(inventory_dir / "review.json"), field="review")
+    findings_document = _require_dict(
+        load_json(inventory_dir / "findings.json"), field="findings document"
+    )
+    review_kind, findings = validate_review(
+        review_document,
+        findings_document,
+        lock_path=lock_path,
+        findings_path=inventory_dir / "findings.json",
+    )
+    if review_kind != "production":
+        raise EvidenceError("publication inventory review is not production evidence")
+    expected_review = _review_manifest_record(
+        review_document,
+        findings,
+        review_path=inventory_dir / "review.json",
+        findings_path=inventory_dir / "findings.json",
+    )
+    if manifest.get("review") != expected_review:
+        raise EvidenceError("publication inventory review record differs from its inputs")
+
+    _validate_runtime_constraints(inventory_dir / "runtime-constraints.txt")
+    sbom = _require_dict(load_json(inventory_dir / "sbom.cdx.json"), field="SBOM")
+    validate_cyclonedx(inventory_dir / "sbom.cdx.json", spec_version="1.5")
+    _validate_normalized_sbom(
+        sbom,
+        release_version=expected_release_version,
+        release_timestamp_value=str(release["timestamp"]),
+        lock_sha256=sha256_file(lock_path),
+    )
+    _reviewed_assertions(findings, sbom)
+    return manifest, findings
+
+
+def _review_manifest_record(
+    review: dict[str, Any],
+    findings: tuple[dict[str, Any], ...],
+    *,
+    review_path: Path,
+    findings_path: Path,
+) -> dict[str, Any]:
+    return {
+        "analysis_revision": review["analysis_revision"],
+        "assertion_count": len(findings),
+        "conclusion": review["conclusion"],
+        "findings_sha256": sha256_file(findings_path),
+        "review_sha256": sha256_file(review_path),
+        "state_counts": dict(
+            sorted(Counter(str(item["analysis_state"]) for item in findings).items())
+        ),
+    }
+
+
+def _validate_release_record(
+    value: Any, *, expected_release_sha: str, expected_release_version: str
+) -> dict[str, Any]:
+    release = _require_dict(value, field="release record")
+    if set(release) != {"commit", "purl", "source_date_epoch", "timestamp", "version"}:
+        raise EvidenceError("release record contains unexpected fields")
+    if release.get("commit") != expected_release_sha:
+        raise EvidenceError("release record commit differs from the expected SHA")
+    if release.get("version") != expected_release_version:
+        raise EvidenceError("release record version differs from the expected version")
+    if release.get("purl") != _release_purl(expected_release_version):
+        raise EvidenceError("release record purl differs from the expected version")
+    source_date_epoch = release.get("source_date_epoch")
+    if (
+        not isinstance(source_date_epoch, int)
+        or isinstance(source_date_epoch, bool)
+        or source_date_epoch < 0
+    ):
+        raise EvidenceError("release source_date_epoch must be a nonnegative integer")
+    if release.get("timestamp") != release_timestamp(source_date_epoch):
+        raise EvidenceError("release timestamp differs from source_date_epoch")
+    return release
+
+
+def _verify_generated_vex(
+    *,
+    output_dir: Path,
+    findings: tuple[dict[str, Any], ...],
+    sbom: dict[str, Any],
+) -> None:
+    vex_document = _require_dict(load_json(output_dir / "vex.cdx.json"), field="CycloneDX VEX")
+    validate_cyclonedx(output_dir / "vex.cdx.json", spec_version="1.6")
+    if _cyclonedx_assertions(vex_document) != _reviewed_assertions(findings, sbom):
+        raise EvidenceError("generated CycloneDX assertions differ from reviewed findings")
+    if findings:
+        compare_vex_formats(
+            vex_document,
+            _require_dict(load_json(output_dir / "vex.openvex.json"), field="OpenVEX"),
+            _require_dict(load_json(output_dir / "vexcalibur-vex.json"), field="CSAF"),
+        )
+
+
+def _expected_publication_validation(assertion_count: int) -> dict[str, str]:
+    return {
+        "action_local_wheel_equivalence": "passed",
+        "cross_format_assertion_equivalence": (
+            "passed" if assertion_count > 0 else "not_applicable_without_assertions"
+        ),
+        "installed_local_wheel": "passed",
+        "production_state_policy": PRODUCTION_STATE_POLICY,
+        "sbom_cyclonedx_1_5_schema": "passed",
+        "vex_cyclonedx_1_6_schema": "passed",
+        "vulnerability_provider_selection": VULNERABILITY_PROVIDER_POLICY,
+    }
+
+
+def finalize_publication_bundle(
+    *,
+    output_dir: Path,
+    inventory_dir: Path,
+    wheel_path: Path,
+    sdist_path: Path,
+    direct_output_dir: Path,
+    action_output_dir: Path,
+    release_tag: str,
+    action_commit: str,
+    expected_wheel_sha256: str,
+    expected_sdist_sha256: str,
+) -> None:
+    """Assemble release assets atomically from isolated, verified job outputs."""
+    if output_dir.exists() or output_dir.is_symlink():
+        raise EvidenceError(f"publication output already exists: {output_dir}")
+    if action_commit != PUBLICATION_ACTION_COMMIT:
+        raise EvidenceError("Action commit differs from the schema-version 2 publication pin")
+    expected_wheel_sha256 = _require_sha256(expected_wheel_sha256, name="build-job wheel SHA-256")
+    expected_sdist_sha256 = _require_sha256(expected_sdist_sha256, name="build-job sdist SHA-256")
+
+    untrusted_inventory = _require_dict(
+        load_json(inventory_dir / "manifest.json"), field="inventory manifest"
+    )
+    untrusted_release = _require_dict(untrusted_inventory.get("release"), field="inventory release")
+    release_sha = _require_nonempty_string(untrusted_release.get("commit"), field="release commit")
+    release_version = _require_release_version(untrusted_release.get("version"))
+    inventory_manifest, findings = verify_publication_inventory(
+        inventory_dir=inventory_dir,
+        expected_release_sha=release_sha,
+        expected_release_version=release_version,
+    )
+    release = _require_dict(inventory_manifest.get("release"), field="inventory release")
+    if release_tag != f"v{release_version}":
+        raise EvidenceError("release tag differs from the publication inventory version")
+
+    _require_bounded_publication_file(wheel_path)
+    _require_bounded_publication_file(sdist_path)
+    expected_wheel_name = f"vexcalibur-{release_version}-py3-none-any.whl"
+    expected_sdist_name = f"vexcalibur-{release_version}.tar.gz"
+    if wheel_path.name != expected_wheel_name or sdist_path.name != expected_sdist_name:
+        raise EvidenceError("publication distribution filenames differ from the release version")
+    if sha256_file(wheel_path) != expected_wheel_sha256:
+        raise EvidenceError("publication wheel differs from the build-job digest")
+    if sha256_file(sdist_path) != expected_sdist_sha256:
+        raise EvidenceError("publication sdist differs from the build-job digest")
+    _validate_distribution_metadata(
+        wheel_path=wheel_path,
+        sdist_path=sdist_path,
+        expected_version=release_version,
+        expected_release_sha=release_sha,
+    )
+    wheel_commit = validate_wheel_source(wheel_path, release_sha=release_sha)
+
+    formats, omitted_formats = _expected_format_manifest(len(findings))
+    generated_artifacts = _generated_format_artifacts(
+        {"formats": formats}, assertion_count=len(findings)
+    )
+    direct_files = _bundle_files(direct_output_dir, excluded=set())
+    action_files = _bundle_files(action_output_dir, excluded=set())
+    if {path.name for path in direct_files} != generated_artifacts:
+        raise EvidenceError("direct-wheel output file set differs from the format contract")
+    if {path.name for path in action_files} != generated_artifacts:
+        raise EvidenceError("Action output file set differs from the format contract")
+    action_by_name = {path.name: path for path in action_files}
+    for direct_file in direct_files:
+        action_file = action_by_name[direct_file.name]
+        _require_bounded_publication_file(direct_file)
+        _require_bounded_publication_file(action_file)
+        if direct_file.stat().st_size != action_file.stat().st_size or sha256_file(
+            direct_file
+        ) != sha256_file(action_file):
+            raise EvidenceError(f"Action output differs from direct output: {action_file.name}")
+    _verify_generated_vex(
+        output_dir=direct_output_dir,
+        findings=findings,
+        sbom=_require_dict(load_json(inventory_dir / "sbom.cdx.json"), field="SBOM"),
+    )
+    build_payload_sha256 = _payload_sha256([wheel_path, sdist_path])
+    inventory_payload_sha256 = _payload_sha256(
+        [inventory_dir / name for name in sorted(PUBLICATION_INVENTORY_FILES)]
+    )
+    direct_payload_sha256 = _payload_sha256(direct_files)
+    action_payload_sha256 = _payload_sha256(action_files)
+
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(mode=0o700)
+    except OSError as exc:
+        raise EvidenceError(f"could not create fresh publication output: {exc}") from exc
+    try:
+        for name in sorted(PUBLICATION_INVENTORY_FILES):
+            _copy_regular_file_exclusive(inventory_dir / name, output_dir / name)
+        for direct_file in direct_files:
+            _copy_regular_file_exclusive(direct_file, output_dir / direct_file.name)
+        _copy_regular_file_exclusive(wheel_path, output_dir / wheel_path.name)
+        _copy_regular_file_exclusive(sdist_path, output_dir / sdist_path.name)
+
+        distribution_records = [
+            _distribution_record(output_dir / expected_sdist_name, kind="sdist"),
+            _distribution_record(output_dir / expected_wheel_name, kind="wheel"),
+        ]
+        manifest = {
+            "artifacts": [],
+            "evidence_kind": "production",
+            "formats": formats,
+            "generator": {
+                "distribution": "vexcalibur",
+                "sdist_filename": sdist_path.name,
+                "sdist_sha256": sha256_file(sdist_path),
+                "uv_version": inventory_manifest["uv_version"],
+                "version": release_version,
+                "wheel_filename": wheel_path.name,
+                "wheel_sha256": sha256_file(wheel_path),
+                "wheel_source_commit": wheel_commit,
+                "wheel_source_dirty": False,
+            },
+            "intended_use": "immutable_release_candidate",
+            "inventory": inventory_manifest["inventory"],
+            "omitted_formats": omitted_formats,
+            "publication": {
+                "action": {
+                    "actions_artifact_name": f"action-vex-{release_sha}",
+                    "commit": action_commit,
+                    "constraints": "runtime-constraints.txt",
+                    "job": "action-vex",
+                    "output_equivalence": "byte_for_byte",
+                    "package_spec": "file_uri_with_sha256_fragment",
+                    "payload_sha256": action_payload_sha256,
+                    "repository": ACTION_REPOSITORY,
+                },
+                "asset_contract": "flat_immutable_github_release",
+                "build": {
+                    "actions_artifact_name": f"dist-{release_sha}",
+                    "job": "build",
+                    "payload_sha256": build_payload_sha256,
+                    "workflow": ".github/workflows/release-validation.yml",
+                },
+                "direct_generation": {
+                    "actions_artifact_name": f"direct-vex-{release_sha}",
+                    "job": "direct-vex",
+                    "payload_sha256": direct_payload_sha256,
+                },
+                "distributions": distribution_records,
+                "inventory": {
+                    "actions_artifact_name": f"release-inventory-{release_sha}",
+                    "job": "publication-inventory",
+                    "payload_sha256": inventory_payload_sha256,
+                },
+                "payload_digest_algorithm": PAYLOAD_DIGEST_ALGORITHM,
+                "release_tag": release_tag,
+            },
+            "release": release,
+            "review": inventory_manifest["review"],
+            "schema_version": 2,
+            "source_tree_clean": True,
+            "validation": _expected_publication_validation(len(findings)),
+        }
+        files = _bundle_files(output_dir, excluded={"manifest.json", "SHA256SUMS"})
+        manifest["artifacts"] = [_artifact_record(path) for path in files]
+        (output_dir / "manifest.json").write_text(canonical_json(manifest), encoding="utf-8")
+        write_checksums(output_dir)
+        verify_publication_bundle(
+            bundle_dir=output_dir,
+            expected_release_tag=release_tag,
+            expected_release_sha=release_sha,
+            expected_action_commit=action_commit,
+        )
+    except Exception:
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        raise
+
+
+def verify_publication_bundle(
+    *,
+    bundle_dir: Path,
+    expected_release_tag: str,
+    expected_release_sha: str,
+    expected_action_commit: str | None,
+) -> None:
+    """Verify the complete immutable-release asset contract."""
+    verify_bundle(bundle_dir)
+    if COMMIT_PATTERN.fullmatch(expected_release_sha) is None:
+        raise EvidenceError("expected release SHA must be a lowercase 40-character commit")
+    if (
+        expected_action_commit is not None
+        and COMMIT_PATTERN.fullmatch(expected_action_commit) is None
+    ):
+        raise EvidenceError("expected Action commit must be a lowercase 40-character commit")
+
+    manifest = _require_dict(load_json(bundle_dir / "manifest.json"), field="manifest")
+    expected_top_level_keys = {
+        "artifacts",
+        "evidence_kind",
+        "formats",
+        "generator",
+        "intended_use",
+        "inventory",
+        "omitted_formats",
+        "publication",
+        "release",
+        "review",
+        "schema_version",
+        "source_tree_clean",
+        "validation",
+    }
+    if set(manifest) != expected_top_level_keys:
+        raise EvidenceError("publication manifest contains unexpected top-level fields")
+    if manifest.get("schema_version") != 2:
+        raise EvidenceError("publication manifest must use schema version 2")
+    if manifest.get("evidence_kind") != "production":
+        raise EvidenceError("publication manifest must contain production evidence")
+    if manifest.get("intended_use") != "immutable_release_candidate":
+        raise EvidenceError("publication manifest has the wrong intended use")
+    if manifest.get("source_tree_clean") is not True:
+        raise EvidenceError("publication manifest must record a clean source tree")
+
+    release = _require_dict(manifest.get("release"), field="manifest release")
+    if set(release) != {"commit", "purl", "source_date_epoch", "timestamp", "version"}:
+        raise EvidenceError("publication release record contains unexpected fields")
+    release_version = _require_release_version(release.get("version"))
+    if expected_release_tag != f"v{release_version}":
+        raise EvidenceError("expected release tag differs from the manifest version")
+    if release.get("commit") != expected_release_sha:
+        raise EvidenceError("manifest release commit differs from the expected release SHA")
+    if release.get("purl") != _release_purl(release_version):
+        raise EvidenceError("manifest release purl differs from the release version")
+    source_date_epoch = release.get("source_date_epoch")
+    if (
+        not isinstance(source_date_epoch, int)
+        or isinstance(source_date_epoch, bool)
+        or source_date_epoch < 0
+    ):
+        raise EvidenceError("manifest release source_date_epoch must be nonnegative")
+    if release.get("timestamp") != release_timestamp(source_date_epoch):
+        raise EvidenceError("manifest release timestamp differs from source_date_epoch")
+
+    lock_path = bundle_dir / "uv.lock"
+    _require_bounded_publication_file(lock_path)
+    inventory = _require_dict(manifest.get("inventory"), field="manifest inventory")
+    expected_inventory = {
+        "coverage": INVENTORY_COVERAGE,
+        "limitation": INVENTORY_LIMITATION,
+        "lock": "uv.lock",
+        "lock_sha256": sha256_file(lock_path),
+        "sbom": "sbom.cdx.json",
+        "sbom_specification": "CycloneDX 1.5",
+    }
+    if inventory != expected_inventory:
+        raise EvidenceError("publication inventory differs from the bundled lock contract")
+    _validate_runtime_constraints(bundle_dir / "runtime-constraints.txt")
+
+    review_kind, findings = validate_review(
+        _require_dict(load_json(bundle_dir / "review.json"), field="review"),
+        _require_dict(load_json(bundle_dir / "findings.json"), field="findings document"),
+        lock_path=lock_path,
+        findings_path=bundle_dir / "findings.json",
+    )
+    if review_kind != "production":
+        raise EvidenceError("publication bundle review is not production evidence")
+    review = _require_dict(manifest.get("review"), field="manifest review")
+    review_document = _require_dict(load_json(bundle_dir / "review.json"), field="review")
+    expected_review = {
+        "analysis_revision": review_document["analysis_revision"],
+        "assertion_count": len(findings),
+        "conclusion": review_document["conclusion"],
+        "findings_sha256": sha256_file(bundle_dir / "findings.json"),
+        "review_sha256": sha256_file(bundle_dir / "review.json"),
+        "state_counts": dict(
+            sorted(Counter(str(item["analysis_state"]) for item in findings).items())
+        ),
+    }
+    if review != expected_review:
+        raise EvidenceError("publication review record differs from the reviewed inputs")
+
+    publication = _require_dict(manifest.get("publication"), field="manifest publication")
+    if set(publication) != {
+        "action",
+        "asset_contract",
+        "build",
+        "direct_generation",
+        "distributions",
+        "inventory",
+        "payload_digest_algorithm",
+        "release_tag",
+    }:
+        raise EvidenceError("publication manifest contains unexpected publication fields")
+    if publication.get("asset_contract") != "flat_immutable_github_release":
+        raise EvidenceError("publication manifest has an unsupported asset contract")
+    if publication.get("release_tag") != expected_release_tag:
+        raise EvidenceError("publication release tag differs from the expected tag")
+    if publication.get("payload_digest_algorithm") != PAYLOAD_DIGEST_ALGORITHM:
+        raise EvidenceError("publication payload digest algorithm is unsupported")
+    generated_names = _generated_format_artifacts(
+        {"formats": _expected_format_manifest(len(findings))[0]},
+        assertion_count=len(findings),
+    )
+    generated_paths = [bundle_dir / name for name in sorted(generated_names)]
+    generated_payload_sha256 = _payload_sha256(generated_paths)
+    build_payload_sha256 = _payload_sha256(
+        [
+            bundle_dir / f"vexcalibur-{release_version}-py3-none-any.whl",
+            bundle_dir / f"vexcalibur-{release_version}.tar.gz",
+        ]
+    )
+    inventory_payload_sha256 = _payload_sha256(
+        [bundle_dir / name for name in sorted(PUBLICATION_INVENTORY_FILES)]
+    )
+    action = _require_dict(publication.get("action"), field="publication action")
+    recorded_action_commit = _require_nonempty_string(
+        action.get("commit"), field="publication Action commit"
+    )
+    if expected_action_commit is None:
+        allowed_commits = PUBLICATION_ACTION_COMMITS_BY_SCHEMA.get(2, frozenset())
+        if recorded_action_commit not in allowed_commits:
+            raise EvidenceError("publication Action commit is not in the schema pin history")
+        expected_action_commit = recorded_action_commit
+    expected_action = {
+        "actions_artifact_name": f"action-vex-{expected_release_sha}",
+        "commit": expected_action_commit,
+        "constraints": "runtime-constraints.txt",
+        "job": "action-vex",
+        "output_equivalence": "byte_for_byte",
+        "package_spec": "file_uri_with_sha256_fragment",
+        "payload_sha256": generated_payload_sha256,
+        "repository": ACTION_REPOSITORY,
+    }
+    if action != expected_action:
+        raise EvidenceError("publication Action provenance differs from the pinned contract")
+    build = _require_dict(publication.get("build"), field="publication build")
+    expected_build = {
+        "actions_artifact_name": f"dist-{expected_release_sha}",
+        "job": "build",
+        "payload_sha256": build_payload_sha256,
+        "workflow": ".github/workflows/release-validation.yml",
+    }
+    if build != expected_build:
+        raise EvidenceError("publication build provenance differs from the workflow contract")
+    direct_generation = _require_dict(
+        publication.get("direct_generation"), field="publication direct generation"
+    )
+    expected_direct_generation = {
+        "actions_artifact_name": f"direct-vex-{expected_release_sha}",
+        "job": "direct-vex",
+        "payload_sha256": generated_payload_sha256,
+    }
+    if direct_generation != expected_direct_generation:
+        raise EvidenceError("publication direct-generation provenance is invalid")
+    inventory_provenance = _require_dict(
+        publication.get("inventory"), field="publication inventory provenance"
+    )
+    expected_inventory_provenance = {
+        "actions_artifact_name": f"release-inventory-{expected_release_sha}",
+        "job": "publication-inventory",
+        "payload_sha256": inventory_payload_sha256,
+    }
+    if inventory_provenance != expected_inventory_provenance:
+        raise EvidenceError("publication inventory provenance is invalid")
+
+    expected_wheel_name = f"vexcalibur-{release_version}-py3-none-any.whl"
+    expected_sdist_name = f"vexcalibur-{release_version}.tar.gz"
+    distribution_records = _dict_items(
+        publication.get("distributions"), field="publication distributions"
+    )
+    if len(distribution_records) != 2:
+        raise EvidenceError("publication must contain exactly one wheel and one sdist record")
+    expected_distributions = {
+        "sdist": expected_sdist_name,
+        "wheel": expected_wheel_name,
+    }
+    actual_distributions: dict[str, str] = {}
+    for record in distribution_records:
+        if set(record) != {"kind", "name", "sha256", "size"}:
+            raise EvidenceError("publication distribution record has unexpected fields")
+        kind = _require_nonempty_string(record.get("kind"), field="distribution kind")
+        name = _require_nonempty_string(record.get("name"), field="distribution name")
+        if kind in actual_distributions:
+            raise EvidenceError(f"duplicate publication distribution kind: {kind}")
+        if expected_distributions.get(kind) != name:
+            raise EvidenceError(f"publication {kind!r} filename is invalid")
+        path = bundle_dir / name
+        _require_bounded_publication_file(path)
+        if record.get("sha256") != sha256_file(path):
+            raise EvidenceError(f"publication {kind} digest mismatch")
+        if record.get("size") != path.stat().st_size:
+            raise EvidenceError(f"publication {kind} size mismatch")
+        actual_distributions[kind] = name
+    if actual_distributions != expected_distributions:
+        raise EvidenceError("publication distribution set is incomplete")
+
+    expected_names = _expected_evidence_payload_names(len(findings)) | {
+        expected_wheel_name,
+        expected_sdist_name,
+        "uv.lock",
+        "manifest.json",
+        "SHA256SUMS",
+    }
+    actual_names = {path.name for path in _bundle_files(bundle_dir, excluded=set())}
+    if actual_names != expected_names:
+        raise EvidenceError(
+            "publication asset file set differs from the contract: "
+            f"{sorted(actual_names)!r} != {sorted(expected_names)!r}"
+        )
+    for name in actual_names:
+        _require_bounded_publication_file(bundle_dir / name)
+
+    generator = _require_dict(manifest.get("generator"), field="manifest generator")
+    expected_generator_keys = {
+        "distribution",
+        "sdist_filename",
+        "sdist_sha256",
+        "uv_version",
+        "version",
+        "wheel_filename",
+        "wheel_sha256",
+        "wheel_source_commit",
+        "wheel_source_dirty",
+    }
+    if set(generator) != expected_generator_keys:
+        raise EvidenceError("publication generator contains unexpected fields")
+    wheel_path = bundle_dir / expected_wheel_name
+    sdist_path = bundle_dir / expected_sdist_name
+    if generator.get("distribution") != "vexcalibur":
+        raise EvidenceError("generator distribution is not vexcalibur")
+    if generator.get("version") != release_version:
+        raise EvidenceError("generator version differs from the release version")
+    _require_nonempty_string(generator.get("uv_version"), field="generator uv_version")
+    if generator.get("wheel_filename") != expected_wheel_name:
+        raise EvidenceError("generator wheel filename differs from the release asset")
+    if generator.get("wheel_sha256") != sha256_file(wheel_path):
+        raise EvidenceError("generator wheel digest differs from the release asset")
+    if generator.get("sdist_filename") != expected_sdist_name:
+        raise EvidenceError("generator sdist filename differs from the release asset")
+    if generator.get("sdist_sha256") != sha256_file(sdist_path):
+        raise EvidenceError("generator sdist digest differs from the release asset")
+    if generator.get("wheel_source_dirty") is not False:
+        raise EvidenceError("generator wheel source must be clean")
+    _validate_distribution_metadata(
+        wheel_path=wheel_path,
+        sdist_path=sdist_path,
+        expected_version=release_version,
+        expected_release_sha=expected_release_sha,
+    )
+    if generator.get("wheel_source_commit") != validate_wheel_source(
+        wheel_path, release_sha=expected_release_sha
+    ):
+        raise EvidenceError("generator wheel source commit is invalid")
+
+    expected_formats, expected_omissions = _expected_format_manifest(len(findings))
+    if manifest.get("formats") != expected_formats:
+        raise EvidenceError("publication format records differ from the reviewed assertion count")
+    if manifest.get("omitted_formats") != expected_omissions:
+        raise EvidenceError("publication omitted-format records differ from the format contract")
+    generated_artifacts = _generated_format_artifacts(manifest, assertion_count=len(findings))
+    if generated_artifacts != {"vex.cdx.json"} and len(findings) == 0:
+        raise EvidenceError("zero-assertion publication generated unexpected VEX formats")
+    sbom_document = _require_dict(load_json(bundle_dir / "sbom.cdx.json"), field="SBOM")
+    vex_document = _require_dict(load_json(bundle_dir / "vex.cdx.json"), field="CycloneDX VEX")
+    validate_cyclonedx(bundle_dir / "sbom.cdx.json", spec_version="1.5")
+    validate_cyclonedx(bundle_dir / "vex.cdx.json", spec_version="1.6")
+    _validate_normalized_sbom(
+        sbom_document,
+        release_version=release_version,
+        release_timestamp_value=str(release["timestamp"]),
+        lock_sha256=sha256_file(lock_path),
+    )
+    expected_assertions = _reviewed_assertions(findings, sbom_document)
+    if _cyclonedx_assertions(vex_document) != expected_assertions:
+        raise EvidenceError("CycloneDX assertions differ from the reviewed findings")
+    if len(findings) > 0:
+        compare_vex_formats(
+            vex_document,
+            _require_dict(load_json(bundle_dir / "vex.openvex.json"), field="OpenVEX"),
+            _require_dict(load_json(bundle_dir / "vexcalibur-vex.json"), field="CSAF"),
+        )
+    expected_validation = _expected_publication_validation(len(findings))
+    if manifest.get("validation") != expected_validation:
+        raise EvidenceError("publication validation record differs from the checked contract")
+
+
+def _validate_runtime_constraints(path: Path) -> None:
+    _require_bounded_publication_file(path)
+    try:
+        contents = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise EvidenceError(f"could not read runtime constraints: {exc}") from exc
+    if any(ord(character) < 32 and character != "\n" for character in contents):
+        raise EvidenceError("runtime constraints must be newline-delimited UTF-8 text")
+    lines = contents.splitlines()
+    if lines[:3] != ["--require-hashes", "--only-binary :all:", ""]:
+        raise EvidenceError(
+            "runtime constraints must require hashes and binary distributions before entries"
+        )
+    if len(lines) < 5:
+        raise EvidenceError("runtime constraints contain no SHA-256-pinned requirements")
+
+    index = 3
+    package_names: set[str] = set()
+    while index < len(lines):
+        requirement_line = lines[index]
+        if not requirement_line.endswith(" \\"):
+            raise EvidenceError("each runtime requirement must continue to SHA-256 hashes")
+        match = CONSTRAINT_REQUIREMENT_PATTERN.fullmatch(requirement_line[:-2])
+        if match is None:
+            raise EvidenceError("runtime constraints contain a non-exact requirement or directive")
+        package_name = re.sub(r"[-_.]+", "-", match.group(1)).lower()
+        if package_name in package_names:
+            raise EvidenceError(f"runtime constraints repeat package {package_name!r}")
+        package_names.add(package_name)
+        index += 1
+
+        hashes: set[str] = set()
+        while index < len(lines) and lines[index].startswith("    --hash="):
+            hash_line = lines[index]
+            continued = hash_line.endswith(" \\")
+            candidate = hash_line[:-2] if continued else hash_line
+            hash_match = CONSTRAINT_HASH_PATTERN.fullmatch(candidate)
+            if hash_match is None:
+                raise EvidenceError("runtime constraints contain a malformed package hash")
+            digest = hash_match.group(1)
+            if digest in hashes:
+                raise EvidenceError("runtime constraints repeat a package hash")
+            hashes.add(digest)
+            index += 1
+            if not continued:
+                break
+        if not hashes:
+            raise EvidenceError("every runtime requirement must have a SHA-256 hash")
+        if continued:
+            raise EvidenceError("runtime constraint hash continuation is incomplete")
+        if index < len(lines) and lines[index].startswith((" ", "-")):
+            raise EvidenceError("runtime constraints contain an unsupported directive")
+
+
+def _validate_distribution_metadata(
+    *,
+    wheel_path: Path,
+    sdist_path: Path,
+    expected_version: str,
+    expected_release_sha: str,
+) -> None:
+    expected = {"Name": "vexcalibur", "Version": expected_version}
+    wheel_metadata = _read_wheel_distribution_metadata(wheel_path)
+    sdist_metadata, sdist_commit = _read_sdist_distribution_metadata(sdist_path, expected_version)
+    if wheel_metadata != expected:
+        raise EvidenceError("wheel Name or Version metadata differs from the release")
+    if sdist_metadata != expected:
+        raise EvidenceError("sdist Name or Version metadata differs from the release")
+    if not expected_release_sha.startswith(sdist_commit):
+        raise EvidenceError("sdist SCM commit differs from the release commit")
+
+
+def _validate_zip_members(members: list[zipfile.ZipInfo]) -> None:
+    if len(members) > MAX_ARCHIVE_MEMBERS:
+        raise EvidenceError("wheel contains too many archive members")
+    names: set[str] = set()
+    uncompressed_bytes = 0
+    for member in members:
+        _validate_archive_member_name(member.filename, artifact="wheel")
+        if member.filename in names:
+            raise EvidenceError(f"wheel contains duplicate member {member.filename!r}")
+        names.add(member.filename)
+        if member.flag_bits & 0x1:
+            raise EvidenceError("wheel contains an encrypted archive member")
+        if not member.is_dir():
+            uncompressed_bytes += member.file_size
+            if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                raise EvidenceError("wheel exceeds the cumulative uncompressed byte limit")
+        if member.create_system == 3:
+            file_type = stat.S_IFMT(member.external_attr >> 16)
+            if member.is_dir():
+                if file_type not in {0, stat.S_IFDIR}:
+                    raise EvidenceError("wheel directory member has an invalid file type")
+            elif file_type not in {0, stat.S_IFREG}:
+                raise EvidenceError("wheel contains a link or special nonregular member")
+
+
+def _validate_archive_member_name(name: str, *, artifact: str) -> None:
+    canonical = name.rstrip("/")
+    if (
+        not canonical
+        or canonical.startswith(("/", "\\"))
+        or (
+            len(canonical) >= 2
+            and canonical[0].isascii()
+            and canonical[0].isalpha()
+            and canonical[1] == ":"
+        )
+        or "\\" in canonical
+        or any(ord(character) < 32 or ord(character) == 127 for character in canonical)
+        or any(part in {"", ".", ".."} for part in canonical.split("/"))
+    ):
+        raise EvidenceError(f"{artifact} contains an unsafe archive member path")
+
+
+def _read_wheel_distribution_metadata(path: Path) -> dict[str, str]:
+    _require_bounded_publication_file(path)
+    try:
+        with zipfile.ZipFile(path) as wheel:
+            _validate_zip_members(wheel.infolist())
+            members = [
+                member
+                for member in wheel.infolist()
+                if WHEEL_METADATA_MEMBER_PATTERN.fullmatch(member.filename) is not None
+            ]
+            if len(members) != 1:
+                raise EvidenceError("wheel must contain exactly one Vexcalibur METADATA member")
+            member = members[0]
+            if member.is_dir() or member.file_size > MAX_ARCHIVE_METADATA_BYTES:
+                raise EvidenceError("wheel METADATA is not a bounded regular member")
+            if member.create_system == 3:
+                file_type = stat.S_IFMT(member.external_attr >> 16)
+                if file_type not in {0, stat.S_IFREG}:
+                    raise EvidenceError("wheel METADATA is not a bounded regular member")
+            with wheel.open(member) as stream:
+                metadata = stream.read(MAX_ARCHIVE_METADATA_BYTES + 1)
+    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise EvidenceError(f"could not read wheel metadata: {exc}") from exc
+    return _parse_distribution_metadata(metadata, artifact="wheel")
+
+
+def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[str, str], str]:
+    _require_bounded_publication_file(path)
+    expected_member = f"vexcalibur-{version}/PKG-INFO"
+    expected_version_member = f"vexcalibur-{version}/src/vexcalibur/_version.py"
+    metadata: bytes | None = None
+    version_source: bytes | None = None
+    member_names: set[str] = set()
+    uncompressed_bytes = 0
+    try:
+        with tarfile.open(path, "r:gz") as sdist:
+            for index, member in enumerate(sdist):
+                if index >= MAX_ARCHIVE_MEMBERS:
+                    raise EvidenceError("sdist contains too many archive members")
+                _validate_archive_member_name(member.name, artifact="sdist")
+                if member.name in member_names:
+                    raise EvidenceError(f"sdist contains duplicate member {member.name!r}")
+                member_names.add(member.name)
+                if not (member.isfile() or member.isdir()):
+                    raise EvidenceError("sdist contains a link or special archive member")
+                if member.isfile():
+                    uncompressed_bytes += member.size
+                    if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                        raise EvidenceError("sdist exceeds the cumulative uncompressed byte limit")
+                if member.name != expected_member:
+                    if member.name != expected_version_member:
+                        continue
+                    if version_source is not None:
+                        raise EvidenceError("sdist contains duplicate generated version files")
+                    if not member.isfile() or member.size > MAX_ARCHIVE_METADATA_BYTES:
+                        raise EvidenceError("sdist generated version is not a bounded member")
+                    version_stream = sdist.extractfile(member)
+                    if version_stream is None:
+                        raise EvidenceError("could not read sdist generated version")
+                    version_source = version_stream.read(MAX_ARCHIVE_METADATA_BYTES + 1)
+                    continue
+                if metadata is not None:
+                    raise EvidenceError("sdist contains duplicate PKG-INFO members")
+                if not member.isfile() or member.size > MAX_ARCHIVE_METADATA_BYTES:
+                    raise EvidenceError("sdist PKG-INFO is not a bounded regular member")
+                stream = sdist.extractfile(member)
+                if stream is None:
+                    raise EvidenceError("could not read sdist PKG-INFO")
+                metadata = stream.read(MAX_ARCHIVE_METADATA_BYTES + 1)
+    except (OSError, tarfile.TarError) as exc:
+        raise EvidenceError(f"could not read sdist metadata: {exc}") from exc
+    if metadata is None:
+        raise EvidenceError(f"sdist does not contain exactly {expected_member}")
+    if version_source is None or len(version_source) > MAX_ARCHIVE_METADATA_BYTES:
+        raise EvidenceError("sdist does not contain a bounded generated version file")
+    try:
+        version_text = version_source.decode("utf-8")
+    except UnicodeError as exc:
+        raise EvidenceError("sdist generated version is not UTF-8") from exc
+    version_match = re.search(r"(?m)^__version__ = version = '([^'\r\n]+)'$", version_text)
+    commit_match = re.search(
+        r"(?m)^__commit_id__ = commit_id = 'g?([0-9a-f]{7,40})'$", version_text
+    )
+    if version_match is None or version_match.group(1) != version or commit_match is None:
+        raise EvidenceError("sdist generated version does not bind its version and SCM commit")
+    return _parse_distribution_metadata(metadata, artifact="sdist"), commit_match.group(1)
+
+
+def _parse_distribution_metadata(raw_metadata: bytes, *, artifact: str) -> dict[str, str]:
+    if len(raw_metadata) > MAX_ARCHIVE_METADATA_BYTES:
+        raise EvidenceError(f"{artifact} metadata exceeds the byte limit")
+    try:
+        metadata = email.message_from_bytes(raw_metadata)
+    except (TypeError, UnicodeError) as exc:
+        raise EvidenceError(f"{artifact} metadata is malformed: {exc}") from exc
+    values: dict[str, str] = {}
+    for key in ("Name", "Version"):
+        headers = metadata.get_all(key, [])
+        if len(headers) != 1 or not isinstance(headers[0], str) or not headers[0].strip():
+            raise EvidenceError(f"{artifact} metadata must contain exactly one {key} header")
+        values[key] = headers[0]
+    return values
+
+
+def _validate_normalized_sbom(
+    document: dict[str, Any],
+    *,
+    release_version: str,
+    release_timestamp_value: str,
+    lock_sha256: str,
+) -> None:
+    metadata = _require_dict(document.get("metadata"), field="SBOM metadata")
+    if metadata.get("timestamp") != release_timestamp_value:
+        raise EvidenceError("SBOM timestamp differs from the release timestamp")
+    component = _require_dict(metadata.get("component"), field="SBOM root component")
+    release_purl = _release_purl(release_version)
+    for field, expected in (
+        ("name", "vexcalibur"),
+        ("version", release_version),
+        ("purl", release_purl),
+        ("bom-ref", release_purl),
+    ):
+        if component.get(field) != expected:
+            raise EvidenceError(f"SBOM root component {field} differs from the release")
+    properties = _dict_items(component.get("properties", []), field="SBOM root properties")
+    lock_properties = [
+        item for item in properties if item.get("name") == "vexcalibur:source:uv-lock-sha256"
+    ]
+    if lock_properties != [{"name": "vexcalibur:source:uv-lock-sha256", "value": lock_sha256}]:
+        raise EvidenceError("SBOM root component does not bind the bundled uv.lock")
+    if "serialNumber" in document:
+        raise EvidenceError("normalized SBOM must not contain a random serial number")
+
+
+def _reviewed_assertions(
+    findings: tuple[dict[str, Any], ...], sbom: dict[str, Any]
+) -> set[tuple[str, str, str]]:
+    components = list(_dict_items(sbom.get("components", []), field="SBOM components"))
+    metadata = _require_dict(sbom.get("metadata"), field="SBOM metadata")
+    root = metadata.get("component")
+    if root is not None:
+        components.append(_require_dict(root, field="SBOM root component"))
+    component_by_ref: dict[str, str] = {}
+    known_purls: set[str] = set()
+    for component in components:
+        component_ref = _require_nonempty_string(component.get("bom-ref"), field="SBOM bom-ref")
+        purl = _canonical_purl(component.get("purl"), field="SBOM component purl")
+        if component_ref in component_by_ref:
+            raise EvidenceError(f"SBOM contains duplicate component reference {component_ref!r}")
+        component_by_ref[component_ref] = purl
+        known_purls.add(purl)
+
+    assertions: set[tuple[str, str, str]] = set()
+    for index, finding in enumerate(findings):
+        vulnerability_id = _require_nonempty_string(
+            finding.get("id"), field=f"findings[{index}].id"
+        )
+        if finding.get("purl") is not None:
+            purl = _canonical_purl(finding.get("purl"), field=f"findings[{index}].purl")
+            if purl not in known_purls:
+                raise EvidenceError(f"findings[{index}] purl is absent from the SBOM")
+        else:
+            component_ref = _require_nonempty_string(
+                finding.get("component_ref"), field=f"findings[{index}].component_ref"
+            )
+            try:
+                purl = component_by_ref[component_ref]
+            except KeyError as exc:
+                raise EvidenceError(
+                    f"findings[{index}] references an unknown SBOM component"
+                ) from exc
+        assertion = (vulnerability_id, purl, "in_triage")
+        if assertion in assertions:
+            raise EvidenceError(f"reviewed findings resolve to duplicate assertion {assertion!r}")
+        assertions.add(assertion)
+    return assertions
+
+
+def _canonical_purl(value: Any, *, field: str) -> str:
+    raw = _require_nonempty_string(value, field=field)
+    try:
+        return PackageURL.from_string(raw).to_string()
+    except ValueError as exc:
+        raise EvidenceError(f"{field} is invalid: {exc}") from exc
+
+
+def _generated_format_artifacts(manifest: dict[str, Any], *, assertion_count: int) -> set[str]:
+    formats = _require_dict(manifest.get("formats"), field="manifest formats")
+    if set(formats) != {"cyclonedx", "openvex", "csaf"}:
+        raise EvidenceError("manifest formats must contain CycloneDX, OpenVEX, and CSAF")
+    artifacts: set[str] = set()
+    for format_name in ("cyclonedx", "openvex", "csaf"):
+        record = _require_dict(formats.get(format_name), field=f"manifest format {format_name}")
+        status = record.get("status")
+        if status == "generated":
+            artifact = _require_nonempty_string(
+                record.get("artifact"), field=f"{format_name} artifact"
+            )
+            if artifact in artifacts:
+                raise EvidenceError(f"duplicate generated format artifact: {artifact}")
+            artifacts.add(artifact)
+        elif status != "omitted":
+            raise EvidenceError(f"manifest format {format_name} has an invalid status")
+    expected = {"vex.cdx.json"}
+    if assertion_count > 0:
+        expected.update({"vex.openvex.json", "vexcalibur-vex.json"})
+    if artifacts != expected:
+        raise EvidenceError(
+            f"generated format artifacts differ from reviewed assertions: "
+            f"{sorted(artifacts)!r} != {sorted(expected)!r}"
+        )
+    return artifacts
+
+
+def _require_release_version(value: Any) -> str:
+    version = _require_nonempty_string(value, field="release version")
+    match = RELEASE_VERSION_PATTERN.fullmatch(version)
+    if match is None or any(int(component) > 999_999 for component in match.groups()):
+        raise EvidenceError(
+            "release version must be bounded MAJOR.MINOR.PATCH without leading zeros"
+        )
+    return version
+
+
+def _require_bounded_publication_file(path: Path) -> None:
+    if not path.is_file() or path.is_symlink():
+        raise EvidenceError(f"expected a regular, non-symlink publication file: {path}")
+    if path.stat().st_size > MAX_EVIDENCE_FILE_BYTES:
+        raise EvidenceError(f"publication file exceeds {MAX_EVIDENCE_FILE_BYTES} bytes: {path}")
+
+
+def _copy_regular_file_exclusive(source: Path, target: Path) -> None:
+    _require_bounded_publication_file(source)
+    created = False
+    try:
+        with source.open("rb") as input_stream, target.open("xb") as output_stream:
+            created = True
+            shutil.copyfileobj(input_stream, output_stream, length=64 * 1024)
+    except Exception:
+        if created:
+            target.unlink(missing_ok=True)
+        raise
+    if source.stat().st_size != target.stat().st_size or sha256_file(source) != sha256_file(target):
+        target.unlink(missing_ok=True)
+        raise EvidenceError(f"copied publication asset differs from its source: {source.name}")
+
+
+def _artifact_record(path: Path) -> dict[str, Any]:
+    _require_bounded_publication_file(path)
+    return {"name": path.name, "sha256": sha256_file(path), "size": path.stat().st_size}
+
+
+def _payload_sha256(paths: list[Path]) -> str:
+    """Digest a stable, filename-sorted set of publication payload records."""
+    records = [_artifact_record(path) for path in sorted(paths, key=lambda item: item.name)]
+    names = [str(record["name"]) for record in records]
+    if len(names) != len(set(names)):
+        raise EvidenceError("publication payload contains duplicate filenames")
+    return hashlib.sha256(canonical_json(records).encode()).hexdigest()
+
+
+def _distribution_record(path: Path, *, kind: str) -> dict[str, Any]:
+    return {"kind": kind, **_artifact_record(path)}
 
 
 def _bundle_files(bundle_dir: Path, *, excluded: set[str]) -> list[Path]:
@@ -858,6 +2054,9 @@ def _parser() -> argparse.ArgumentParser:
     wheel_parser.add_argument("--wheel", required=True, type=Path)
     wheel_parser.add_argument("--release-sha", required=True)
 
+    file_uri_parser = subparsers.add_parser("hashed-file-uri")
+    file_uri_parser.add_argument("--file", required=True, type=Path)
+
     cyclonedx_parser = subparsers.add_parser("validate-cyclonedx")
     cyclonedx_parser.add_argument("--document", required=True, type=Path)
     cyclonedx_parser.add_argument("--spec-version", required=True, choices=("1.5", "1.6"))
@@ -881,6 +2080,42 @@ def _parser() -> argparse.ArgumentParser:
 
     verify_parser = subparsers.add_parser("verify-bundle")
     verify_parser.add_argument("--bundle-dir", required=True, type=Path)
+
+    inventory_parser = subparsers.add_parser("prepare-publication-inventory")
+    inventory_parser.add_argument("--output-dir", required=True, type=Path)
+    inventory_parser.add_argument("--release-sha", required=True)
+    inventory_parser.add_argument("--release-version", required=True)
+    inventory_parser.add_argument("--source-date-epoch", required=True, type=int)
+    inventory_parser.add_argument("--lock", required=True, type=Path)
+    inventory_parser.add_argument("--review", required=True, type=Path)
+    inventory_parser.add_argument("--findings", required=True, type=Path)
+    inventory_parser.add_argument("--constraints", required=True, type=Path)
+    inventory_parser.add_argument("--sbom", required=True, type=Path)
+    inventory_parser.add_argument("--uv-version", required=True)
+    inventory_parser.add_argument("--source-tree-clean", required=True, choices=("true", "false"))
+
+    verify_inventory_parser = subparsers.add_parser("verify-publication-inventory")
+    verify_inventory_parser.add_argument("--inventory-dir", required=True, type=Path)
+    verify_inventory_parser.add_argument("--release-sha", required=True)
+    verify_inventory_parser.add_argument("--release-version", required=True)
+
+    publication_parser = subparsers.add_parser("finalize-publication")
+    publication_parser.add_argument("--output-dir", required=True, type=Path)
+    publication_parser.add_argument("--inventory-dir", required=True, type=Path)
+    publication_parser.add_argument("--wheel", required=True, type=Path)
+    publication_parser.add_argument("--sdist", required=True, type=Path)
+    publication_parser.add_argument("--direct-output-dir", required=True, type=Path)
+    publication_parser.add_argument("--action-output-dir", required=True, type=Path)
+    publication_parser.add_argument("--release-tag", required=True)
+    publication_parser.add_argument("--action-commit", required=True)
+    publication_parser.add_argument("--expected-wheel-sha256", required=True)
+    publication_parser.add_argument("--expected-sdist-sha256", required=True)
+
+    verify_publication_parser = subparsers.add_parser("verify-publication")
+    verify_publication_parser.add_argument("--bundle-dir", required=True, type=Path)
+    verify_publication_parser.add_argument("--release-tag", required=True)
+    verify_publication_parser.add_argument("--release-sha", required=True)
+    verify_publication_parser.add_argument("--action-commit")
     return parser
 
 
@@ -912,6 +2147,8 @@ def main() -> None:
             print(f"{review_kind}\t{len(findings)}")
         elif args.command == "validate-wheel":
             print(validate_wheel_source(args.wheel, release_sha=args.release_sha))
+        elif args.command == "hashed-file-uri":
+            print(hashed_file_uri(args.file))
         elif args.command == "validate-cyclonedx":
             validate_cyclonedx(args.document, spec_version=args.spec_version)
         elif args.command == "compare-formats":
@@ -941,6 +2178,46 @@ def main() -> None:
             verify_bundle(args.bundle_dir)
         elif args.command == "verify-bundle":
             verify_bundle(args.bundle_dir)
+        elif args.command == "prepare-publication-inventory":
+            prepare_publication_inventory(
+                output_dir=args.output_dir,
+                release_sha=args.release_sha,
+                release_version=args.release_version,
+                source_date_epoch=args.source_date_epoch,
+                lock_path=args.lock,
+                review_path=args.review,
+                findings_path=args.findings,
+                constraints_path=args.constraints,
+                sbom_path=args.sbom,
+                uv_version=args.uv_version,
+                source_tree_clean=args.source_tree_clean == "true",
+            )
+        elif args.command == "verify-publication-inventory":
+            verify_publication_inventory(
+                inventory_dir=args.inventory_dir,
+                expected_release_sha=args.release_sha,
+                expected_release_version=args.release_version,
+            )
+        elif args.command == "finalize-publication":
+            finalize_publication_bundle(
+                output_dir=args.output_dir,
+                inventory_dir=args.inventory_dir,
+                wheel_path=args.wheel,
+                sdist_path=args.sdist,
+                direct_output_dir=args.direct_output_dir,
+                action_output_dir=args.action_output_dir,
+                release_tag=args.release_tag,
+                action_commit=args.action_commit,
+                expected_wheel_sha256=args.expected_wheel_sha256,
+                expected_sdist_sha256=args.expected_sdist_sha256,
+            )
+        elif args.command == "verify-publication":
+            verify_publication_bundle(
+                bundle_dir=args.bundle_dir,
+                expected_release_tag=args.release_tag,
+                expected_release_sha=args.release_sha,
+                expected_action_commit=args.action_commit,
+            )
         else:
             raise AssertionError(f"unhandled command: {args.command}")
     except (EvidenceError, OSError) as exc:

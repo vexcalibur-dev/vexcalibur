@@ -1,102 +1,163 @@
-# Why Vexcalibur builds its own release evidence
+# Why Vexcalibur publishes evidence about itself
 
-Vexcalibur's self-release evidence exercises the same installed command-line
-interface, CycloneDX input path, local-findings source, and output renderers
-that a downstream user runs. The foundation is intentionally narrower than a
-publication system: it builds and validates a local bundle but does not attach
-assets to a GitHub Release or publish them elsewhere.
+Vexcalibur should be able to describe its own vulnerability posture using the
+same package and GitHub Action that downstream users run. That is useful only
+if the evidence is tied to the release bytes. A VEX file generated from a
+checkout while different bytes reach PyPI would be reassuring but meaningless.
 
-## Trust model
+The release design therefore treats the wheel, source distribution, locked
+inventory, reviewed findings, direct CLI output, and Action output as one
+immutable publication unit.
 
-The bundle joins four independently reviewable inputs:
+## Two bundles serve different purposes
 
-| Input | What it establishes | What it does not establish |
+The repository keeps two related contracts:
+
+| Contract | Purpose | Published with a release |
 | --- | --- | --- |
-| Exact release commit | Source identity and one fixed commit timestamp | That a working tree with other changes is publishable |
-| `uv.lock` | The project's locked, cross-platform reference runtime | Every marker-selected resolution on every consumer platform |
-| Local wheel | The installed Vexcalibur distribution used to render VEX; embedded SCM metadata must name the exact clean release commit | PyPI availability or equivalence with a future GitHub Action run |
-| `release-evidence/review.json` and `findings.json` | A claimed, public review attribution and finding snapshot bound to the exact lock digest | Independent authentication of the reviewer or an assertion that unlisted vulnerabilities do not exist |
+| Local bundle, manifest schema 1 | Fast, deterministic maintainer and CI checks of one installed wheel | No |
+| Publication bundle, manifest schema 2 | Flat GitHub Release assets and the exact distributions later sent to PyPI | Yes |
 
-The repository's commit and pull-request history supplies provenance for the
-claimed `reviewed_by` value. The JSON validator checks that the attribution is
-present, but it cannot authenticate a person or substitute for repository
-review policy.
+The local bundle remains useful because it can be generated without release
+credentials or GitHub state. The publication bundle adds isolation between
+producers, companion-Action equivalence, source-distribution checks, immutable
+release state, and recovery rules. Schema 2 extends the design; it does not
+silently change what an old schema-1 manifest means.
 
-The lock deliberately includes environment markers such as Windows-only and
-older-Python dependencies. It describes the reference runtime that the project
-locks across supported environments. A consumer's concrete installation will
-select only the dependencies whose markers apply. Consumers that need evidence
-for one deployed environment should generate an environment-specific SBOM and
-VEX instead of treating this bundle as that inventory.
+## What is trusted
 
-## Deterministic data flow
+The design narrows trust instead of pretending to eliminate it:
 
-The generator performs this sequence:
+| Input or service | Trusted claim | Important limit |
+| --- | --- | --- |
+| Exact Git commit | Source identity and commit-derived timestamp | A checkout alone does not identify published bytes |
+| `uv.lock` | Cross-platform reference runtime reviewed at one digest | It is not an environment-specific deployed inventory |
+| `review.json` and `findings.json` | Publicly reviewable finding snapshot and attribution | JSON cannot authenticate the reviewer or prove that no finding was missed |
+| Wheel and source distribution | Exact package bytes and embedded version/source metadata | Archive validation does not prove the source code is benign |
+| Pinned Vexcalibur Action commit | One reviewed wrapper implementation | The pin must be advanced deliberately when the Action changes |
+| GitHub Actions and Releases | Job isolation, artifact transport, server-authenticated release and asset uploader identity, attestations, and immutable release enforcement | GitHub and the selected hosted-runner images remain part of the trusted platform |
+| PyPI Trusted Publishing | OIDC-bound upload identity | PyPI availability and account governance remain external dependencies |
 
-1. It requires the requested 40-character commit to be the checked-out `HEAD`
-   and rejects a dirty tree by default.
-2. It derives `SOURCE_DATE_EPOCH` from that commit. A caller-supplied value must
-   match the commit epoch.
-3. Pinned `uv` exports the non-development lock graph as CycloneDX 1.5. The
-   normalizer removes uv's random serial number and timestamp, applies the
-   installed wheel version and PURL to the root component, inserts the lock
-   digest, and sorts order-insensitive collections.
-4. The generator reads exactly one
-   `vexcalibur-*.dist-info/scm_version.json` member from the wheel. Its full Git
-   node must equal the requested commit and `dirty` must be `false`.
-5. `scripts/install-locked-wheel.sh` creates an isolated environment from
-   hash-locked runtime requirements and the SHA-256-pinned local wheel.
-6. The absolute `vexcalibur` console script in that environment runs outside
-   the checkout with `--offline --findings-file`. Proxy variables point at an
-   unreachable loopback port as an additional failure boundary.
-7. Applicable format validators run before the manifest is written. The
-   canonical CycloneDX assertion count must equal the reviewed count, including
-   when different selector forms resolve to one component. The manifest and
-   filename-sorted `SHA256SUMS` then bind the result.
+Production review policy currently permits only explicit `in_triage` findings.
+An empty findings file means zero assertions. It never means that every
+dependency is `not_affected`.
 
-The commit timestamp controls the normalized SBOM and all VEX timestamps. Temp
-directory names, local wheel paths, uv's random UUID, and wall-clock time do not
-enter the bundle. CI generates both the zero-finding and synthetic all-format
-bundles twice in different temp directories and requires byte-for-byte equality.
+## Isolation is the main security boundary
 
-## Honest empty evidence
+The reusable release-validation workflow divides candidate handling across
+fresh jobs:
 
-The initial public findings file contains an empty array. The generated
-CycloneDX 1.6 VEX document is schema-valid and records zero vulnerabilities.
-OpenVEX 0.2.0 and the CSAF 2.0 VEX profile require at least one finding, so the
-generator omits those files. `manifest.json` records both omissions, their
-reasons, and an assertion count of zero.
+```text
+build ───────────────┐
+                     ├──> fresh finalizer ──> flat release assets
+inventory oracle ────┤
+                     │
+direct installed CLI ┤
+pinned Action ────────┘
+```
 
-Inventing a vulnerability would make the other file formats nonempty but would
-destroy the evidence contract. Interpreting an empty source response as
-`not_affected` would be worse: it would turn missing analysis into a strong
-exploitability claim. The production policy therefore accepts only explicitly
-reviewed `in_triage` findings. Stronger states need a separate evidence and
-approval design.
+The inventory-oracle job never installs or executes the candidate wheel and
+never invokes the companion Action. It exports strict hash-locked runtime
+constraints and a normalized CycloneDX 1.5 SBOM from the exact lock, then binds
+those files to the reviewed inputs.
 
-## Synthetic conformance is separate
+The direct-generation job receives that oracle plus the exact wheel. It
+installs the wheel with a SHA-256-bound local URI and runs the installed
+`vexcalibur` entry point outside the checkout. The Action-generation job runs
+the full-commit-pinned companion Action in a separate environment. Each job
+emits only the files its consumer needs.
 
-The fixture under `tests/fixtures/release-evidence/` contains one clearly
-synthetic `in_triage` CVE and a reserved `.test` source URL. CI uses it to
-generate CycloneDX, OpenVEX, and CSAF documents, then checks schema or official
-tool conformance and compares normalized vulnerability, product PURL, and state
-assertions across all three formats.
+A fresh finalizer downloads all producer artifacts, verifies their GitHub
+artifact identity and transport digests, revalidates every input, and requires
+the direct and Action VEX files to be byte-for-byte equal. It writes into a
+fresh directory and removes the incomplete directory after any late failure.
+It never merges into or overwrites an existing output.
 
-The fixture review has `review_kind: synthetic_fixture`; its manifest marks the
-intended use as `ci_conformance_only`. The production generator requires an
-explicit `--allow-synthetic` option before accepting it.
+GitHub artifact archive digests protect transport within one workflow run, but
+they are not stable publication data. The schema-2 manifest instead records
+stable payload digests over filename-sorted `{name, sha256, size}` records.
+That distinction keeps recovery runs byte-reproducible even if GitHub changes
+the archive envelope.
 
-## Deferred boundaries
+## The evidence is deterministic
 
-This foundation does not:
+The release commit supplies `SOURCE_DATE_EPOCH` and every VEX timestamp. The
+workflow builds once. The wheel must contain clean, full-commit SCM metadata;
+the source distribution must contain the exact version and matching generated
+SCM prefix. Both archive readers reject unsafe paths, duplicate members,
+links, special files, oversized metadata, excessive member counts, and
+excessive expanded size.
 
-- query OSV or another live vulnerability service.
-- permit `resolved`, `exploitable`, `false_positive`, or `not_affected` in the
-  production snapshot.
-- compare output with the companion GitHub Action.
-- change the GitHub Release or PyPI workflows.
-- publish, revise, supersede, or sign evidence bundles.
+The bundled runtime constraints start with `--require-hashes` and
+`--only-binary :all:`. Every requirement is an exact version with at least one
+SHA-256 hash. This prevents dependency substitution; it does not mean package
+installation is network-free. A runner may still download those exact bytes
+from its configured index.
 
-Those boundaries keep the first tranche reversible. The local bundle and its
-validators can mature before publication receives credentials or mutates a
-release.
+VEX generation itself selects only the reviewed local-findings provider. Proxy
+settings provide an additional failure boundary, but the precise claim is
+provider selection, not that every process on the runner lacks network access.
+
+## Publication preserves the checked bytes
+
+The release publisher verifies the validation artifact and every proposed
+asset before it receives the short-lived write token. It accepts only a narrow
+state machine: the tag is absent or is the exact bot-authored annotated tag for
+the target; the release is absent, is an exact matching draft, or is the exact
+already-published immutable release. Normal-mode idempotency may reuse the
+exact release tag already at the current `main` tip. Recovering an older tag
+requires the explicit recovery input.
+
+The annotated tag also protects the release notes before the draft becomes
+immutable. Its message is canonical, closed-world JSON containing the tag, the
+exact secret-scanned notes, and their SHA-256. Recovery validates the tag ref,
+object type, target commit, bot tagger, payload schema, and digest, then
+reconstructs the notes from that protected object. An existing draft or release
+body must match those bytes. The mutable draft body is therefore a checked
+replica, not recovery's source of truth.
+
+It never uploads with a clobber option. Existing assets must already match the
+validated bytes. The only disposable marker is a zero-byte `state=starter`
+asset created for the draft transaction. After publication, GitHub must report
+the release immutable and the workflow verifies the release and each asset.
+
+GitHub's API, rather than a self-authored manifest field, supplies each asset's
+uploader identity. Reconciliation accepts a completed asset only when
+`uploader.login` is `vexcalibur-dev-automation[bot]`. Immediately before the
+immutable transition, the publisher snapshots every asset's ID, name, size,
+state, uploader, and empty display label, downloads the bytes, and rejects any
+metadata or byte change. It queries the immutable release again afterward and
+requires the same bot uploader and empty label for every uniquely named,
+completed asset.
+
+Normal releases require the validated commit to remain the tip of `main`.
+Manual recovery names an existing tag whose commit may be older, but that
+commit must still be an ancestor of current `main`. Recovery therefore does
+not break merely because unrelated commits landed after a partial release.
+
+PyPI publishing downloads the wheel and source distribution from that exact
+immutable GitHub Release. It does not rebuild. If neither file exists on PyPI,
+both are uploaded; if one exact hash already exists, only the missing file is
+selected. An existing filename with a different hash or package type stops the
+workflow. The OIDC-bearing job receives only the already-checked subset and
+uses no checkout, package installation, cache, or repository script.
+
+PyPI publication independently queries the server-authenticated asset metadata
+when it resolves the release, when validation downloads the asset set, and
+immediately before the OIDC exchange. Every boundary requires a completed asset
+uploaded by `vexcalibur-dev-automation[bot]` with no display label; an immutable
+release authored by the bot is insufficient if even one asset has another
+uploader or mutable UI label. Resolve and pre-OIDC checks also revalidate the
+first-level bot-authored tag, notes envelope and digest, and exact release body.
+
+## What the bundle does not prove
+
+Self-release evidence does not replace an independent security assessment. It
+does not prove that all vulnerabilities were discovered, authenticate the
+human review field by itself, describe every consumer environment, or make an
+`in_triage` assertion stronger than it is. It also does not make historical
+releases immutable retroactively.
+
+Those limits are intentional. The bundle is strongest when every recorded
+claim is narrow enough to verify and every transition either preserves exact
+bytes or fails closed.

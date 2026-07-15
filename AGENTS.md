@@ -6,7 +6,7 @@ This file gives automated contributors the repository rules needed to work safel
 
 Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub
 Dependency Graph SBOM. Findings come from OSV-compatible services or local
-JSON. Version 0.3.0 renders CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
+JSON. Version 0.3.1 renders CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
 
 The implementation is Python, but domain and product decisions should remain ecosystem-neutral unless an issue narrows the scope. Do not present a planned input, provider, or output format as available.
 
@@ -29,7 +29,8 @@ The implementation is Python, but domain and product decisions should remain eco
 - Go 1.25.8 for the pinned OpenVEX interoperability check
 - Node 24 and npm for pinned CSAF schema and mandatory-test conformance
 
-Python and repository tool versions are in `.tool-versions`. The OpenVEX
+`.tool-versions` pins uv, Node, `actionlint`, and `shellcheck`. The supported
+Python range is recorded in `pyproject.toml` and exercised by CI. The OpenVEX
 interoperability module records Go 1.25.8 and pins `go-vex` 0.2.8 in
 `tests/integration/openvex-go/go.mod`. CSAF conformance dependencies and their
 lockfile live in `tests/integration/csaf-validator/`.
@@ -138,7 +139,9 @@ For a substantial documentation change, use the scorched-earth documentation rev
 
 `.github/workflows/release.yml` derives a version from Conventional Commits and validates the exact `main` commit. The `vexcalibur-dev-automation` GitHub App creates the tag and GitHub Release.
 
-`.github/workflows/pypi.yml` accepts only an automation-authored release at current `main`. It publishes through Trusted Publishing.
+`.github/workflows/pypi.yml` accepts only an automation-authored immutable
+release whose exact tagged commit remains an ancestor of current `main`. It
+publishes through Trusted Publishing.
 
 Follow [docs/how-to/publish-to-pypi.md](docs/how-to/publish-to-pypi.md) for release work. Do not add a manual upload path without a security review.
 

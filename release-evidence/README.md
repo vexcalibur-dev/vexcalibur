@@ -14,7 +14,7 @@ Only explicit `in_triage` findings are accepted by the production generator.
 Do not add private reports, embargoed advisory data, credentials, or customer
 identifiers here.
 
-Maintainers should follow [Build and review self-release
+Maintainers should follow [Build and review local release
 evidence](../docs/how-to/build-release-evidence.md) before changing either JSON
 file. The [release-evidence reference](../docs/reference/release-evidence.md)
-defines the generated bundle and omission rules.
+defines both local and immutable-publication bundles and their omission rules.

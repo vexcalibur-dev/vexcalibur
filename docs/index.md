@@ -20,7 +20,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 - [Generate OpenVEX](how-to/generate-openvex.md)
 - [Generate CSAF VEX](how-to/generate-csaf.md)
 - [Use a private OSV mirror](how-to/use-private-osv-mirror.md)
-- [Build and review self-release evidence](how-to/build-release-evidence.md)
+- [Build and review local release evidence](how-to/build-release-evidence.md)
 - [Publish Vexcalibur to PyPI](how-to/publish-to-pypi.md)
 
 ## Reference
@@ -30,7 +30,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 - [OpenVEX output](reference/openvex-output.md)
 - [CSAF output](reference/csaf-output.md)
 - [Local findings format](reference/local-findings.md)
-- [Release-evidence bundle](reference/release-evidence.md)
+- [Release-evidence contracts](reference/release-evidence.md)
 - [Vulnerability-source provider contract](reference/provider-contract.md)
 - [Python API](reference/python-api.rst)
 
@@ -38,7 +38,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 
 - [Architecture and trust boundaries](explanation/architecture.md)
 - [Project status and compatibility](explanation/project-status.md)
-- [Why Vexcalibur builds its own release evidence](explanation/self-release-evidence.md)
+- [Why Vexcalibur publishes evidence about itself](explanation/self-release-evidence.md)
 
 ## Contributor documentation
 

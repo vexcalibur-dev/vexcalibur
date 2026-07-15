@@ -94,8 +94,8 @@ export VEXCALIBUR_WHEEL="${wheels[0]}"
 make release-evidence-check
 ```
 
-Use the exact wheel-selection and review procedure in [Build and review
-self-release evidence](docs/how-to/build-release-evidence.md). Never convert an
+Use the exact wheel-selection and review procedure in [Build and review local
+release evidence](docs/how-to/build-release-evidence.md). Never convert an
 empty result into `not_affected` or add non-public advisory data to the checked
 inputs.
 
