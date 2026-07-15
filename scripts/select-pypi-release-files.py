@@ -303,7 +303,7 @@ def _copy_distributions_exclusively(
     distributions: Sequence[Distribution], *, output_directory: Path
 ) -> None:
     try:
-        os.mkdir(output_directory, 0o755)
+        os.mkdir(output_directory, 0o700)
     except OSError as exc:
         raise SelectionError(
             f"output directory must be fresh and creatable: {output_directory}: {exc}"
@@ -323,7 +323,7 @@ def _copy_distributions_exclusively(
                 target_descriptor = os.open(
                     distribution.filename,
                     flags,
-                    0o644,
+                    0o600,
                     dir_fd=output_descriptor,
                 )
             except OSError as exc:

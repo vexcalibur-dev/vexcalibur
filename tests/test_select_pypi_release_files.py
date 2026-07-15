@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -100,10 +101,13 @@ def result_document(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
 
 def assert_output_files(root: Path, expected: list[str]) -> None:
     output = root / "selected"
+    assert stat.S_IMODE(output.stat().st_mode) & 0o077 == 0
     assert sorted(path.name for path in output.iterdir()) == sorted(expected)
     for filename in expected:
-        assert (output / filename).read_bytes() == CONTENTS[filename]
-        assert not (output / filename).is_symlink()
+        selected_file = output / filename
+        assert selected_file.read_bytes() == CONTENTS[filename]
+        assert not selected_file.is_symlink()
+        assert stat.S_IMODE(selected_file.stat().st_mode) & 0o077 == 0
 
 
 def test_explicit_missing_response_selects_both_distributions(tmp_path: Path) -> None:
