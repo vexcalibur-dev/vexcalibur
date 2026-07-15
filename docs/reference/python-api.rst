@@ -141,6 +141,38 @@ They keep public OSV behind an explicit opt-in even when a caller injects a
 client. A custom source passed to ``generate_vex_from_source`` must enforce its
 own trust boundary.
 
+``OsvSource`` reserves the ``OSV`` name and every HTTPS URL on the official
+``osv.dev`` origin for the canonical public service. A custom endpoint is
+identified as an
+``OSV-compatible mirror`` at its canonicalized effective base URL. Set both
+``source_name`` and ``source_url`` to publish an explicit HTTPS provenance
+alias for a custom endpoint without exposing an internal endpoint. Neither
+value may be supplied alone. The canonical public endpoint cannot be aliased,
+and a custom endpoint cannot claim the reserved official name or URL.
+
+One ``OsvClient`` query operation has independent per-request and cumulative
+encoded- and decoded-body limits, an overall wall-clock deadline, page and
+token limits, per-query and total vulnerability limits, and a 1,000-query
+request chunk. Requests never follow redirects. Identity responses are
+streamed raw, and gzip responses use bounded decompression with deadline checks
+at each transport chunk. Unicode-canonically equivalent vulnerability IDs are
+deduplicated before mapping; the first ID position and newest ``modified``
+timestamp are retained. IDs containing controls, bidi controls, or line
+separators are rejected. Constructor arguments expose the configurable limits;
+generation additionally caps component-to-vulnerability expansion and
+serialized UTF-8 output.
+
+The lower-level ``findings_from_osv_results`` mapper never infers official OSV
+provenance from an arbitrary result list. Callers must provide ``source_name``,
+``source_url``, and ``analysis_detail`` explicitly. Prefer ``OsvSource`` when
+the effective endpoint should determine guarded official-or-mirror provenance.
+
+Generation helpers apply a conservative allocation-free pre-render estimate to
+the exact built-in renderer classes. It accounts for JSON escaping, repeated
+fields, and synthesized versioned package URLs, so it may reject an input whose
+grouped output would fall below the nominal limit. Custom renderers and
+subclasses retain the exact post-render UTF-8 check.
+
 .. warning::
 
    Constructing ``OsvClient`` directly does not apply the public-OSV consent

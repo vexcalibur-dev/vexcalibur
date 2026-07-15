@@ -20,6 +20,7 @@ from vexcalibur.generate import (
     generate_vex_from_sbom,
     generate_vex_from_source,
 )
+from vexcalibur.render import VexRenderError
 from vexcalibur.sbom import SbomError
 from vexcalibur.sources.osv import (
     OsvClient,
@@ -38,10 +39,17 @@ VALIDATOR = make_schemabased_validator(OutputFormat.JSON, SchemaVersion.V1_6)
 
 
 class FakeOsvClient:
-    def __init__(self, results: list[OsvQueryResult] | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        results: list[OsvQueryResult] | None = None,
+        *,
+        max_vulnerability_id_length: int = 512,
+        **kwargs,
+    ) -> None:
         self.queries: list[OsvPackageQuery] = []
         self.kwargs = kwargs
         self._results = results or []
+        self.max_vulnerability_id_length = max_vulnerability_id_length
 
     def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
         self.queries.extend(queries)
@@ -175,6 +183,55 @@ def test_generate_vex_from_components_preserves_custom_renderer_contract() -> No
     }
 
 
+def test_generate_vex_from_components_enforces_utf8_output_byte_limit(monkeypatch) -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0.0"),
+    )
+    source = FakeVulnerabilitySource(())
+
+    class CustomRenderer:
+        def __init__(self, output: str) -> None:
+            self.output = output
+
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            return self.output
+
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 2)
+
+    assert (
+        generate_vex_from_components(
+            components=(component,),
+            source=source,
+            timestamp=None,
+            renderer=CustomRenderer("é"),
+        )
+        == "é"
+    )
+    with pytest.raises(VexRenderError, match="2 byte output limit"):
+        generate_vex_from_components(
+            components=(component,),
+            source=source,
+            timestamp=None,
+            renderer=CustomRenderer("éx"),
+        )
+    with pytest.raises(VexRenderError, match="valid UTF-8 text"):
+        generate_vex_from_components(
+            components=(component,),
+            source=source,
+            timestamp=None,
+            renderer=CustomRenderer("\ud800"),
+        )
+
+
 def test_source_errors_share_provider_neutral_base_class() -> None:
     from vexcalibur.sources.local import LocalFindingsError
     from vexcalibur.sources.osv import OsvClientError
@@ -209,6 +266,233 @@ def test_generate_vex_from_source_allows_osv_source_with_public_opt_in() -> None
         ("pkg:npm/minimist@0.0.8", None),
         ("pkg:pypi/django@1.2", None),
     ]
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    (
+        "https://api.osv.dev",
+        "https://API.OSV.DEV:443/",
+        "https://api.osv.dev/a/..",
+        "https://api.osv.dev/%2e",
+    ),
+)
+def test_osv_source_reserves_official_provenance_for_canonical_service(base_url: str) -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+    )
+    client = FakeOsvClient(
+        results=[
+            OsvQueryResult(
+                purl=component.purl.to_string(),
+                vulnerabilities=(OsvVulnerabilitySummary(id="CVE-2026-0001"),),
+            )
+        ]
+    )
+
+    findings = OsvSource(
+        client=client,
+        osv_base_url=base_url,
+        allow_public_osv=True,
+    ).findings_for_components((component,))
+
+    assert [(finding.source_name, finding.source_url) for finding in findings] == [
+        ("OSV", "https://osv.dev/")
+    ]
+    assert findings[0].analysis_detail == (
+        "Detected by OSV; manual exploitability analysis required."
+    )
+
+
+def test_osv_source_uses_canonical_effective_mirror_provenance() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+    )
+    client = FakeOsvClient(
+        results=[
+            OsvQueryResult(
+                purl=component.purl.to_string(),
+                vulnerabilities=(OsvVulnerabilitySummary(id="PRIVATE-2026-1"),),
+            )
+        ]
+    )
+
+    findings = OsvSource(
+        client=client,
+        osv_base_url=" https://TÉST.example:443/osv/ ",
+    ).findings_for_components((component,))
+
+    assert [(finding.source_name, finding.source_url) for finding in findings] == [
+        ("OSV-compatible mirror", "https://xn--tst-bma.example/osv")
+    ]
+    assert findings[0].analysis_detail == (
+        "Detected by an OSV-compatible source; manual exploitability analysis required."
+    )
+
+
+def test_osv_source_uses_explicit_privacy_preserving_provenance_alias() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+    )
+    client = FakeOsvClient(
+        results=[
+            OsvQueryResult(
+                purl=component.purl.to_string(),
+                vulnerabilities=(OsvVulnerabilitySummary(id="PRIVATE-2026-1"),),
+            )
+        ]
+    )
+
+    findings = OsvSource(
+        client=client,
+        osv_base_url="https://osv.internal.example/private",
+        source_name=" Example Security Feed ",
+        source_url=" https://security.example.test/vulnerability-data/ ",
+    ).findings_for_components((component,))
+
+    assert [(finding.source_name, finding.source_url) for finding in findings] == [
+        ("Example Security Feed", "https://security.example.test/vulnerability-data")
+    ]
+    assert findings[0].analysis_detail == (
+        "Detected by an OSV-compatible source; manual exploitability analysis required."
+    )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    (
+        "https://API.OSV.DEV:443/",
+        "https://api.osv.dev/a/..",
+        "https://api.osv.dev/%2e",
+    ),
+)
+def test_osv_source_rejects_alias_on_canonical_public_endpoint_before_query(
+    base_url: str,
+) -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+    )
+    client = FakeOsvClient()
+    source = OsvSource(
+        client=client,
+        osv_base_url=base_url,
+        allow_public_osv=True,
+        source_name="Example Security Feed",
+        source_url="https://security.example.test/feed",
+    )
+
+    with pytest.raises(OsvConfigurationError, match="cannot use a provenance alias"):
+        source.findings_for_components((component,))
+
+    assert client.queries == []
+
+
+@pytest.mark.parametrize(
+    ("source_name", "source_url"),
+    (
+        ("OSV", "https://security.example.test/feed"),
+        ("osv", "https://security.example.test/feed"),
+        ("\uff2f\uff33\uff36", "https://security.example.test/feed"),
+        ("Example Security Feed", "https://osv.dev"),
+        ("Example Security Feed", "https://OSV.DEV:443/"),
+        ("Example Security Feed", "https://osv.dev/vulnerability-data"),
+    ),
+)
+def test_osv_source_rejects_reserved_official_provenance_on_mirror(
+    source_name: str,
+    source_url: str,
+) -> None:
+    with pytest.raises(OsvConfigurationError, match="official OSV provenance is reserved"):
+        OsvSource(
+            osv_base_url="https://osv.internal.example",
+            source_name=source_name,
+            source_url=source_url,
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_name", "source_url"),
+    (
+        ("Example Security Feed", None),
+        (None, "https://security.example.test/vulnerability-data"),
+        ("Example\nSecurity Feed", "https://security.example.test/vulnerability-data"),
+    ),
+)
+def test_osv_source_rejects_incomplete_or_output_unsafe_provenance_alias(
+    source_name: str | None,
+    source_url: str | None,
+) -> None:
+    with pytest.raises(OsvConfigurationError):
+        OsvSource(
+            osv_base_url="https://osv.internal.example",
+            source_name=source_name,
+            source_url=source_url,
+        )
+
+
+def test_osv_source_does_not_label_noncanonical_public_host_path_as_official() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+    )
+    client = FakeOsvClient(
+        results=[
+            OsvQueryResult(
+                purl=component.purl.to_string(),
+                vulnerabilities=(OsvVulnerabilitySummary(id="PRIVATE-2026-1"),),
+            )
+        ]
+    )
+
+    findings = OsvSource(
+        client=client,
+        osv_base_url="https://api.osv.dev/private-mirror",
+        allow_public_osv=True,
+    ).findings_for_components((component,))
+
+    assert [(finding.source_name, finding.source_url) for finding in findings] == [
+        ("OSV-compatible mirror", "https://api.osv.dev/private-mirror")
+    ]
+
+
+def test_osv_source_uses_client_vulnerability_id_length_during_mapping() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+    )
+    long_id = "X" * 513
+    client = FakeOsvClient(
+        results=[
+            OsvQueryResult(
+                purl=component.purl.to_string(),
+                vulnerabilities=(OsvVulnerabilitySummary(id=long_id),),
+            )
+        ],
+        max_vulnerability_id_length=len(long_id),
+    )
+
+    findings = OsvSource(
+        client=client,
+        osv_base_url="https://osv.internal.example",
+    ).findings_for_components((component,))
+
+    assert [finding.id for finding in findings] == [long_id]
 
 
 def test_generate_vex_from_sbom_queries_osv_and_renders_vex() -> None:

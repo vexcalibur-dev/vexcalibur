@@ -44,7 +44,12 @@ uv run --frozen vexcalibur generate \
   --output /tmp/vexcalibur-vex.json
 ```
 
-The endpoint must provide the OSV `/v1/querybatch` API used by Vexcalibur. See [Use a private OSV mirror](use-private-osv-mirror.md) for URL rules and failure handling.
+The endpoint must provide the OSV `/v1/querybatch` API used by Vexcalibur. Its
+canonical base URL becomes the finding provenance by default. Use the paired
+`--osv-source-name` and `--osv-source-url` options when the document needs a
+public provenance alias instead. See [Use a private OSV
+mirror](use-private-osv-mirror.md) for URL rules, alias guidance, limits, and
+failure handling.
 
 ## Use public OSV
 

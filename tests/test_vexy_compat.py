@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+import vexcalibur.generate as generate_module
 import vexcalibur.sources.osv as osv_module
 from vexcalibur.compat import vexy
 
@@ -197,6 +198,18 @@ def test_vexy_compat_preflights_existing_output_before_osv(monkeypatch, tmp_path
 
     _assert_cli_result(result=result, expected=_golden_case("output_exists_without_force"))
     assert output_path.read_text(encoding="utf-8") == "existing\n"
+
+
+def test_vexy_compat_reports_output_limit_without_traceback(monkeypatch) -> None:
+    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 1)
+
+    result = runner.invoke(vexy.app, _offline_stdout_args())
+
+    assert result.exit_code == 1
+    assert (
+        "VEX generation failed: VEX input exceeds the conservative 1 byte output limit estimate"
+    ) in result.stderr
+    assert "Traceback" not in _combined_output(result)
 
 
 def test_vexy_compat_requires_force_before_overwriting_output_file(tmp_path: Path) -> None:

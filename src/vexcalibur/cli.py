@@ -213,6 +213,20 @@ def generate(
         str | None,
         typer.Option("--osv-url", help="OSV API base URL. Use this for private OSV mirrors."),
     ] = None,
+    osv_source_name: Annotated[
+        str | None,
+        typer.Option(
+            "--osv-source-name",
+            help="Public provenance name for an OSV-compatible endpoint; requires its URL.",
+        ),
+    ] = None,
+    osv_source_url: Annotated[
+        str | None,
+        typer.Option(
+            "--osv-source-url",
+            help="Public provenance URL for an OSV-compatible endpoint; requires its name.",
+        ),
+    ] = None,
     allow_public_osv: Annotated[
         bool,
         typer.Option(
@@ -288,6 +302,8 @@ def generate(
             offline=offline,
             osv_url=osv_url,
             allow_public_osv=allow_public_osv,
+            osv_source_name=osv_source_name,
+            osv_source_url=osv_source_url,
         )
         if github_repo is not None:
             vex_json = _generate_vex_from_github_input(
@@ -311,6 +327,8 @@ def generate(
                     else source_options.osv_url
                 ),
                 allow_public_osv=source_options.allow_public_osv,
+                osv_source_name=source_options.osv_source_name,
+                osv_source_url=source_options.osv_source_url,
                 renderer=renderer,
             )
         else:
@@ -478,6 +496,7 @@ def _generate_vex_from_github_input(
             osv_base_url=_resolved_osv_url(source_options),
             allow_public_osv=source_options.allow_public_osv,
         )
+    source = _vulnerability_source_from_options(source_options)
 
     components = GithubSbomClient(
         api_url=github_api_url,
@@ -489,7 +508,7 @@ def _generate_vex_from_github_input(
     ).component_identities(repository)
     return generate_vex_from_components(
         components=components,
-        source=_vulnerability_source_from_options(source_options),
+        source=source,
         timestamp=timestamp,
         renderer=renderer,
     )
@@ -503,6 +522,8 @@ def _vulnerability_source_from_options(
     return OsvSource(
         osv_base_url=_resolved_osv_url(source_options),
         allow_public_osv=source_options.allow_public_osv,
+        source_name=source_options.osv_source_name,
+        source_url=source_options.osv_source_url,
     )
 
 

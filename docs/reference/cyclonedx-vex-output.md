@@ -44,7 +44,7 @@ An explicit empty local findings array produces empty `components` and `vulnerab
 
 ## Analysis fields
 
-OSV findings use:
+Official public OSV findings use:
 
 ```json
 {
@@ -70,7 +70,17 @@ CycloneDX ignores the format-specific `action_statement`, `impact_statement`,
 grouping, serialized content, or the document serial number. OpenVEX and CSAF
 use selected fields under their stricter state mappings.
 
-OSV findings use source name `OSV` and URL `https://osv.dev/`. Local findings default to source name `Local` and URL `https://vexcalibur.dev/sources/local`.
+Findings from the canonical public endpoint use source name `OSV`, URL
+`https://osv.dev/`, and the detail shown above. A custom compatible endpoint
+uses source name `OSV-compatible mirror`, its canonicalized base URL, and the
+detail `Detected by an OSV-compatible source; manual exploitability analysis
+required.` The paired `--osv-source-name` and `--osv-source-url` options replace
+the mirror name and URL with an explicit public provenance alias. The `OSV`
+name and every HTTPS URL on the official `osv.dev` origin are reserved for the
+canonical public service.
+
+Local findings default to source name `Local` and URL
+`https://vexcalibur.dev/sources/local`.
 
 ## Updated time
 

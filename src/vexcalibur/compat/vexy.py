@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from vexcalibur.generate import generate_vex_from_local_findings, generate_vex_from_sbom
+from vexcalibur.render import VexRenderError
 from vexcalibur.sbom import SbomError
 from vexcalibur.source_options import (
     GenerateSourceOptionError,
@@ -119,6 +120,20 @@ def main(
         str | None,
         typer.Option("--osv-url", help="OSV API base URL. Use this for private OSV mirrors."),
     ] = None,
+    osv_source_name: Annotated[
+        str | None,
+        typer.Option(
+            "--osv-source-name",
+            help="Public provenance name for an OSV-compatible endpoint; requires its URL.",
+        ),
+    ] = None,
+    osv_source_url: Annotated[
+        str | None,
+        typer.Option(
+            "--osv-source-url",
+            help="Public provenance URL for an OSV-compatible endpoint; requires its name.",
+        ),
+    ] = None,
     allow_public_osv: Annotated[
         bool,
         typer.Option(
@@ -141,6 +156,8 @@ def main(
             offline=offline,
             osv_url=osv_url,
             allow_public_osv=allow_public_osv,
+            osv_source_name=osv_source_name,
+            osv_source_url=osv_source_url,
         )
         sbom_path = _resolve_input_file(input_file)
         resolved_output = _resolve_output(output_file=output_file, force=force)
@@ -156,6 +173,8 @@ def main(
                     else source_options.osv_url
                 ),
                 allow_public_osv=source_options.allow_public_osv,
+                osv_source_name=source_options.osv_source_name,
+                osv_source_url=source_options.osv_source_url,
             )
         else:
             vex_json = generate_vex_from_local_findings(
@@ -182,6 +201,9 @@ def main(
         raise typer.Exit(code=1) from exc
     except OsvClientError as exc:
         typer.echo(f"OSV query failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except VexRenderError as exc:
+        typer.echo(f"VEX generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
 
