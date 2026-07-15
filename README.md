@@ -9,7 +9,7 @@
 
 Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
-Published version 0.1.1 writes CycloneDX 1.6 VEX JSON. The current source tree also writes OpenVEX 0.2.0 JSON.
+Published version 0.2.0 writes CycloneDX 1.6 and OpenVEX 0.2.0 JSON.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
@@ -19,7 +19,7 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 | --- | --- |
 | SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
-| VEX output | CycloneDX 1.6 JSON in published version 0.1.1; OpenVEX 0.2.0 JSON in the current source tree |
+| VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON |
 | Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |
 | Migration | A narrow `vexy` command-line compatibility layer |
 | Python | 3.10–3.14 |
@@ -30,13 +30,11 @@ Create an environment and pin the package version:
 
 ```bash
 python -m venv .venv
-.venv/bin/python -m pip install "vexcalibur==0.1.1"
+.venv/bin/python -m pip install "vexcalibur==0.2.0"
 .venv/bin/vexcalibur --help
 ```
 
 On Windows, use `.venv\Scripts\python` and `.venv\Scripts\vexcalibur`.
-
-Published version 0.1.1 does not include OpenVEX. Use the source checkout below to try it before the next release.
 
 ## Try local generation
 
@@ -76,7 +74,7 @@ PY
 
 See the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html) for the guided version of this example.
 
-CycloneDX remains the default output. The source checkout can create OpenVEX when you add `--format openvex` and identify the document author. Follow the [OpenVEX guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html) for a runnable example and its stricter finding rules.
+CycloneDX remains the default output. Add `--format openvex` and identify the document author to create OpenVEX. Follow the [OpenVEX guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html) for a runnable example and its stricter finding rules.
 
 ## Choose a finding source
 

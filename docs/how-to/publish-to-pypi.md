@@ -129,7 +129,7 @@ Pushing a tag alone does not publish. A manually authored GitHub Release is also
 After the `PyPI` workflow succeeds, install the exact release in a fresh environment:
 
 ```bash
-RELEASE_VERSION=0.1.1
+RELEASE_VERSION=0.2.0
 python -m venv /tmp/vexcalibur-release-check
 /tmp/vexcalibur-release-check/bin/python -m pip install "vexcalibur==$RELEASE_VERSION"
 /tmp/vexcalibur-release-check/bin/python - <<'PY'
