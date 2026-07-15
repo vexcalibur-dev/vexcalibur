@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+from vexcalibur.errors import VexRenderError as VexRenderError
+
+if TYPE_CHECKING:
+    from vexcalibur.document import VexDocument
 
 
 class VexOutputFormat(str, Enum):
@@ -14,10 +18,6 @@ class VexOutputFormat(str, Enum):
 
     CYCLONEDX = "cyclonedx"
     OPENVEX = "openvex"
-
-
-class VexRenderError(ValueError):
-    """Raised when domain findings cannot be rendered as a valid VEX document."""
 
 
 class VexRenderer(Protocol):
@@ -28,6 +28,18 @@ class VexRenderer(Protocol):
         *,
         components: tuple[ComponentIdentity, ...],
         findings: tuple[VulnerabilityFinding, ...],
+        timestamp: datetime | None = None,
+    ) -> str:
+        """Return a serialized VEX document."""
+
+
+class VexDocumentRenderer(Protocol):
+    """Render an immutable, format-neutral VEX document."""
+
+    def render_document(
+        self,
+        *,
+        document: VexDocument,
         timestamp: datetime | None = None,
     ) -> str:
         """Return a serialized VEX document."""

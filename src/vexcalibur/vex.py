@@ -21,11 +21,19 @@ from cyclonedx.model.vulnerability import (
 from cyclonedx.output import make_outputter
 from cyclonedx.schema import OutputFormat, SchemaVersion
 
+from vexcalibur.document import (
+    VexAssertion,
+    VexDocument,
+    VexProduct,
+    analysis_state,
+    product_purl,
+    vex_document_from_findings,
+)
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
 from vexcalibur.render import VexRenderError as VexRenderError
 
-_FindingGroupKey = tuple[str, str, str, VexAnalysisState, str]
-_CycloneDxFindingKey = tuple[str, str, str, str, str, str, str, str]
+_AssertionGroupKey = tuple[str, str, str, VexAnalysisState, str]
+_CycloneDxAssertionKey = tuple[str, str, str, str, str, str, str, str]
 
 
 def render_cyclonedx_vex_json(
@@ -35,37 +43,11 @@ def render_cyclonedx_vex_json(
     timestamp: datetime | None = None,
 ) -> str:
     """Render deterministic CycloneDX VEX JSON for vulnerability findings."""
-    timestamp = _normalize_timestamp(timestamp or datetime.now(tz=timezone.utc))
-    findings = _canonical_findings(findings)
-    _validate_finding_refs(components=components, findings=findings)
-    bom = Bom(
-        serial_number=_serial_number(
-            components=components,
-            findings=findings,
-            timestamp=timestamp,
-        ),
-        metadata=BomMetaData(timestamp=timestamp),
-        components=[
-            _cyclonedx_component(component)
-            for component in _affected_components(components=components, findings=findings)
-        ],
-        vulnerabilities=[
-            _cyclonedx_vulnerability(
-                group_key=group_key,
-                vulnerability_id=group_key[0],
-                source=VulnerabilitySource(name=group_key[1], url=XsUri(group_key[2])),
-                findings=vulnerability_findings,
-            )
-            for group_key, vulnerability_findings in _group_findings(findings)
-        ],
+    return CycloneDxJsonRenderer().render(
+        components=components,
+        findings=findings,
+        timestamp=timestamp,
     )
-
-    outputter = make_outputter(
-        bom=bom,
-        output_format=OutputFormat.JSON,
-        schema_version=SchemaVersion.V1_6,
-    )
-    return _canonical_json(outputter.output_as_string())
 
 
 class CycloneDxJsonRenderer:
@@ -78,12 +60,52 @@ class CycloneDxJsonRenderer:
         findings: tuple[VulnerabilityFinding, ...],
         timestamp: datetime | None = None,
     ) -> str:
-        """Return deterministic CycloneDX 1.6 VEX JSON."""
-        return render_cyclonedx_vex_json(
-            components=components,
-            findings=findings,
+        """Adapt provider findings and return CycloneDX 1.6 VEX JSON."""
+        return self.render_document(
+            document=vex_document_from_findings(components=components, findings=findings),
             timestamp=timestamp,
         )
+
+    def render_document(
+        self,
+        *,
+        document: VexDocument,
+        timestamp: datetime | None = None,
+    ) -> str:
+        """Return deterministic CycloneDX 1.6 JSON for a VEX document."""
+        normalized_timestamp = _normalize_timestamp(timestamp or datetime.now(tz=timezone.utc))
+        assertions = _canonical_assertions(document.assertions)
+        bom = Bom(
+            serial_number=_serial_number(
+                products=document.products,
+                assertions=assertions,
+                timestamp=normalized_timestamp,
+            ),
+            metadata=BomMetaData(timestamp=normalized_timestamp),
+            components=[
+                _cyclonedx_component(product)
+                for product in _affected_products(
+                    products=document.products,
+                    assertions=assertions,
+                )
+            ],
+            vulnerabilities=[
+                _cyclonedx_vulnerability(
+                    group_key=group_key,
+                    vulnerability_id=group_key[0],
+                    source=VulnerabilitySource(name=group_key[1], url=XsUri(group_key[2])),
+                    assertions=vulnerability_assertions,
+                )
+                for group_key, vulnerability_assertions in _group_assertions(assertions)
+            ],
+        )
+
+        outputter = make_outputter(
+            bom=bom,
+            output_format=OutputFormat.JSON,
+            schema_version=SchemaVersion.V1_6,
+        )
+        return _canonical_json(outputter.output_as_string())
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -95,14 +117,14 @@ def parse_timestamp(value: str) -> datetime:
 
 def _cyclonedx_vulnerability(
     *,
-    group_key: _FindingGroupKey,
+    group_key: _AssertionGroupKey,
     vulnerability_id: str,
     source: VulnerabilitySource,
-    findings: tuple[VulnerabilityFinding, ...],
+    assertions: tuple[VexAssertion, ...],
 ) -> Vulnerability:
-    affected_refs = tuple(sorted({finding.component_ref for finding in findings}))
-    updated = _latest_modified_timestamp(findings)
-    representative = findings[0]
+    affected_refs = tuple(sorted({assertion.product.key for assertion in assertions}))
+    updated = _latest_modified_timestamp(assertions)
+    representative = assertions[0]
     return Vulnerability(
         bom_ref=_vulnerability_bom_ref(
             group_key=group_key,
@@ -112,77 +134,65 @@ def _cyclonedx_vulnerability(
         references=[VulnerabilityReference(id=vulnerability_id, source=source)],
         updated=updated,
         analysis=VulnerabilityAnalysis(
-            state=ImpactAnalysisState(representative.analysis_state.value),
+            state=ImpactAnalysisState(analysis_state(representative).value),
             detail=representative.analysis_detail,
         ),
-        affects=[BomTarget(ref=component_ref) for component_ref in affected_refs],
+        affects=[BomTarget(ref=product_ref) for product_ref in affected_refs],
     )
 
 
-def _cyclonedx_component(component: ComponentIdentity) -> Component:
+def _cyclonedx_component(product: VexProduct) -> Component:
     try:
-        component_type = ComponentType(component.type)
+        component_type = ComponentType(product.component_type)
     except ValueError:
         component_type = ComponentType.LIBRARY
     return Component(
-        bom_ref=component.ref,
-        name=component.name,
+        bom_ref=product.key,
+        name=product.name,
         type=component_type,
-        version=component.version,
-        purl=component.purl,
+        version=product.version,
+        purl=product_purl(product),
     )
 
 
-def _affected_components(
+def _affected_products(
     *,
-    components: tuple[ComponentIdentity, ...],
-    findings: tuple[VulnerabilityFinding, ...],
-) -> tuple[ComponentIdentity, ...]:
-    affected_refs = {finding.component_ref for finding in findings}
+    products: tuple[VexProduct, ...],
+    assertions: tuple[VexAssertion, ...],
+) -> tuple[VexProduct, ...]:
+    affected_refs = {assertion.product.key for assertion in assertions}
     return tuple(
         sorted(
-            (component for component in components if component.ref in affected_refs),
-            key=lambda component: component.ref,
+            (product for product in products if product.key in affected_refs),
+            key=lambda product: product.key,
         )
     )
 
 
-def _group_findings(
-    findings: tuple[VulnerabilityFinding, ...],
-) -> tuple[tuple[_FindingGroupKey, tuple[VulnerabilityFinding, ...]], ...]:
-    grouped: dict[_FindingGroupKey, list[VulnerabilityFinding]] = defaultdict(list)
-    for finding in findings:
+def _group_assertions(
+    assertions: tuple[VexAssertion, ...],
+) -> tuple[tuple[_AssertionGroupKey, tuple[VexAssertion, ...]], ...]:
+    grouped: dict[_AssertionGroupKey, list[VexAssertion]] = defaultdict(list)
+    for assertion in assertions:
+        vulnerability = assertion.vulnerability
         grouped[
             (
-                finding.id,
-                finding.source_name,
-                finding.source_url,
-                finding.analysis_state,
-                finding.analysis_detail,
+                vulnerability.id,
+                vulnerability.source_name,
+                vulnerability.source_url,
+                analysis_state(assertion),
+                assertion.analysis_detail,
             )
-        ].append(finding)
+        ].append(assertion)
     return tuple((group_key, tuple(grouped[group_key])) for group_key in sorted(grouped))
 
 
-def _validate_finding_refs(
-    *,
-    components: tuple[ComponentIdentity, ...],
-    findings: tuple[VulnerabilityFinding, ...],
-) -> None:
-    component_refs = {component.ref for component in components}
-    missing_refs = sorted(
-        finding.component_ref for finding in findings if finding.component_ref not in component_refs
-    )
-    if missing_refs:
-        msg = (
-            "findings reference components that are not present in the VEX: "
-            f"{', '.join(missing_refs)}"
-        )
-        raise VexRenderError(msg)
-
-
-def _latest_modified_timestamp(findings: tuple[VulnerabilityFinding, ...]) -> datetime | None:
-    parsed = [finding.modified for finding in findings if finding.modified is not None]
+def _latest_modified_timestamp(assertions: tuple[VexAssertion, ...]) -> datetime | None:
+    parsed = [
+        assertion.source_record_modified_at
+        for assertion in assertions
+        if assertion.source_record_modified_at is not None
+    ]
     if not parsed:
         return None
     return max(parsed)
@@ -196,34 +206,38 @@ def _normalize_timestamp(value: datetime) -> datetime:
 
 def _serial_number(
     *,
-    components: tuple[ComponentIdentity, ...],
-    findings: tuple[VulnerabilityFinding, ...],
+    products: tuple[VexProduct, ...],
+    assertions: tuple[VexAssertion, ...],
     timestamp: datetime,
 ) -> UUID:
     canonical = json.dumps(
         {
             "components": [
                 {
-                    "name": component.name,
-                    "purl": component.purl.to_string(),
-                    "ref": component.ref,
-                    "type": component.type,
-                    "version": component.version,
+                    "name": product.name,
+                    "purl": product_purl(product).to_string(),
+                    "ref": product.key,
+                    "type": product.component_type,
+                    "version": product.version,
                 }
-                for component in _affected_components(components=components, findings=findings)
+                for product in _affected_products(products=products, assertions=assertions)
             ],
             "findings": [
                 {
-                    "analysis_detail": finding.analysis_detail,
-                    "analysis_state": finding.analysis_state.value,
-                    "component_ref": finding.component_ref,
-                    "id": finding.id,
-                    "modified": finding.modified.isoformat() if finding.modified else None,
-                    "purl": finding.purl,
-                    "source_name": finding.source_name,
-                    "source_url": finding.source_url,
+                    "analysis_detail": assertion.analysis_detail,
+                    "analysis_state": analysis_state(assertion).value,
+                    "component_ref": assertion.product.key,
+                    "id": assertion.vulnerability.id,
+                    "modified": (
+                        assertion.source_record_modified_at.isoformat()
+                        if assertion.source_record_modified_at
+                        else None
+                    ),
+                    "purl": product_purl(assertion.product).to_string(),
+                    "source_name": assertion.vulnerability.source_name,
+                    "source_url": assertion.vulnerability.source_url,
                 }
-                for finding in findings
+                for assertion in assertions
             ],
             "timestamp": timestamp.isoformat(),
         },
@@ -233,31 +247,36 @@ def _serial_number(
     return uuid5(NAMESPACE_URL, f"https://vexcalibur.dev/vex/{canonical}")
 
 
-def _canonical_findings(
-    findings: tuple[VulnerabilityFinding, ...],
-) -> tuple[VulnerabilityFinding, ...]:
-    canonical: dict[_CycloneDxFindingKey, VulnerabilityFinding] = {}
-    for finding in sorted(findings, key=_cyclonedx_finding_key):
-        canonical.setdefault(_cyclonedx_finding_key(finding), finding)
+def _canonical_assertions(
+    assertions: tuple[VexAssertion, ...],
+) -> tuple[VexAssertion, ...]:
+    canonical: dict[_CycloneDxAssertionKey, VexAssertion] = {}
+    for assertion in sorted(assertions, key=_cyclonedx_assertion_key):
+        canonical.setdefault(_cyclonedx_assertion_key(assertion), assertion)
     return tuple(canonical.values())
 
 
-def _cyclonedx_finding_key(finding: VulnerabilityFinding) -> _CycloneDxFindingKey:
+def _cyclonedx_assertion_key(assertion: VexAssertion) -> _CycloneDxAssertionKey:
+    vulnerability = assertion.vulnerability
     return (
-        finding.id,
-        finding.source_name,
-        finding.source_url,
-        finding.analysis_state.value,
-        finding.analysis_detail,
-        finding.component_ref,
-        finding.purl,
-        finding.modified.isoformat() if finding.modified else "",
+        vulnerability.id,
+        vulnerability.source_name,
+        vulnerability.source_url,
+        analysis_state(assertion).value,
+        assertion.analysis_detail,
+        assertion.product.key,
+        product_purl(assertion.product).to_string(),
+        (
+            assertion.source_record_modified_at.isoformat()
+            if assertion.source_record_modified_at
+            else ""
+        ),
     )
 
 
 def _vulnerability_bom_ref(
     *,
-    group_key: _FindingGroupKey,
+    group_key: _AssertionGroupKey,
 ) -> str:
     canonical = json.dumps(
         {

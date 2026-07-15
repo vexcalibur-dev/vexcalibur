@@ -42,12 +42,17 @@ The top-level value is an object with one required `findings` array. Unknown fie
 | `action_statement` | No | Omitted | Non-empty remediation or mitigation text. OpenVEX requires it for `exploitable` and rejects it for other states. |
 | `impact_statement` | No | Omitted | Non-empty impact text. OpenVEX requires it for `false_positive` and `not_affected`. It rejects the field for other states. |
 | `fixed_version` | No | Omitted | Non-empty version text. OpenVEX requires it for `resolved` and rejects it for other states. It must match the emitted product package URL version. |
+| `remediation_category` | No | Omitted | One of the remediation categories listed below. Reserved for output formats that represent a machine-readable remediation kind. |
 
 Supported `analysis_state` values are `resolved`, `exploitable`, `in_triage`, `false_positive`, and `not_affected`.
 
-CycloneDX output ignores `action_statement`, `impact_statement`, and `fixed_version`. These fields do not change CycloneDX grouping, content, or document identity.
+Supported `remediation_category` values are `mitigation`, `no_fix_planned`, `none_available`, `vendor_fix`, and `workaround`.
 
-OpenVEX rejects nonidentical assertions for the same vulnerability ID and emitted product package URL. Differences in source, state, analysis detail, evidence fields, or modification time make assertions nonidentical.
+CycloneDX output ignores `action_statement`, `impact_statement`, `fixed_version`, and `remediation_category`. These fields do not change CycloneDX grouping, content, or document identity.
+
+OpenVEX ignores `remediation_category`. It does not change OpenVEX grouping, content, or document identity.
+
+OpenVEX rejects nonidentical assertions for the same vulnerability ID and emitted product package URL. Differences in source, state, analysis detail, action statement, impact statement, fixed version, or modification time make assertions nonidentical.
 
 `modified` describes the source record. CycloneDX maps it to vulnerability `updated`; OpenVEX keeps it in `status_notes` to avoid mislabeling it as a statement revision time.
 

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,54 @@ def test_generate_vex_from_components_uses_provider_neutral_components() -> None
         ("SPDXRef-pypi-django-1.2", "pkg:pypi/django@1.2")
     ]
     assert VALIDATOR.validate_str(generated) is None
+
+
+def test_generate_vex_from_components_preserves_custom_renderer_contract() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0.0"),
+    )
+    finding = VulnerabilityFinding(
+        id="CVE-2026-0001",
+        source_name="Unit Test",
+        source_url="https://security.example.test/CVE-2026-0001",
+        component_ref=component.ref,
+        purl=component.purl.to_string(),
+    )
+    timestamp = parse_timestamp("2026-07-15T00:00:00Z")
+    source = FakeVulnerabilitySource((finding,))
+    received: dict[str, object] = {}
+
+    class CustomRenderer:
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            received.update(
+                components=components,
+                findings=findings,
+                timestamp=timestamp,
+            )
+            return "custom-renderer-output"
+
+    generated = generate_vex_from_components(
+        components=(component,),
+        source=source,
+        timestamp=timestamp,
+        renderer=CustomRenderer(),
+    )
+
+    assert generated == "custom-renderer-output"
+    assert received == {
+        "components": (component,),
+        "findings": (finding,),
+        "timestamp": timestamp,
+    }
 
 
 def test_source_errors_share_provider_neutral_base_class() -> None:

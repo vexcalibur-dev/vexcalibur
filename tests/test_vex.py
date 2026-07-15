@@ -1,19 +1,31 @@
 import json
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
 
-from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.document import VexDocument
+from vexcalibur.domain import (
+    ComponentIdentity,
+    VexAnalysisState,
+    VexRemediationCategory,
+    VulnerabilityFinding,
+)
 from vexcalibur.sbom import load_cyclonedx_json
 from vexcalibur.sources.osv import (
     OsvQueryResult,
     OsvVulnerabilitySummary,
     findings_from_osv_results,
 )
-from vexcalibur.vex import VexRenderError, parse_timestamp, render_cyclonedx_vex_json
+from vexcalibur.vex import (
+    CycloneDxJsonRenderer,
+    VexRenderError,
+    parse_timestamp,
+    render_cyclonedx_vex_json,
+)
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
 GOLDEN_ROOT = Path(__file__).parent / "golden"
@@ -51,6 +63,41 @@ def test_render_cyclonedx_vex_json_matches_golden_and_schema() -> None:
 
     assert generated == (GOLDEN_ROOT / "cyclonedx-vex-simple.json").read_text(encoding="utf-8")
     assert VALIDATOR.validate_str(generated) is None
+
+
+def test_cyclonedx_compatibility_renderer_adapts_then_delegates() -> None:
+    components = load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")
+    finding = VulnerabilityFinding(
+        id="GHSA-test-0001",
+        source_name="OSV",
+        source_url="https://osv.dev/",
+        component_ref=components[0].ref,
+        purl=components[0].purl.to_string(),
+    )
+    timestamp = parse_timestamp("2026-06-23T00:00:00Z")
+    received: dict[str, object] = {}
+
+    class RecordingRenderer(CycloneDxJsonRenderer):
+        def render_document(
+            self,
+            *,
+            document: VexDocument,
+            timestamp: datetime | None = None,
+        ) -> str:
+            received.update(document=document, timestamp=timestamp)
+            return "rendered-document"
+
+    rendered = RecordingRenderer().render(
+        components=components,
+        findings=(finding,),
+        timestamp=timestamp,
+    )
+
+    assert rendered == "rendered-document"
+    assert received["timestamp"] == timestamp
+    document = received["document"]
+    assert isinstance(document, VexDocument)
+    assert document.assertions[0].product.key == components[0].ref
 
 
 def test_render_cyclonedx_vex_json_supports_all_analysis_states() -> None:
@@ -109,6 +156,7 @@ def test_render_cyclonedx_vex_json_ignores_openvex_only_fields_when_deduplicatin
             replace(finding, action_statement="Upgrade the component."),
             replace(finding, impact_statement="The vulnerable code is unreachable."),
             replace(finding, fixed_version="1.2"),
+            replace(finding, remediation_category=VexRemediationCategory.WORKAROUND),
         ),
         timestamp=timestamp,
     )

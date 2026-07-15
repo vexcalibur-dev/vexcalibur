@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from vexcalibur.domain import (
     ComponentIdentity,
     VexAnalysisState,
+    VexRemediationCategory,
     VulnerabilityFinding,
     VulnerabilitySourceError,
 )
@@ -59,6 +60,7 @@ class _LocalFindingModel(BaseModel):
     action_statement: str | None = Field(default=None, min_length=1)
     impact_statement: str | None = Field(default=None, min_length=1)
     fixed_version: str | None = Field(default=None, min_length=1)
+    remediation_category: VexRemediationCategory | None = None
 
     @field_validator("purl")
     @classmethod
@@ -227,6 +229,7 @@ def _finding_from_model(
         action_statement=model.action_statement,
         impact_statement=model.impact_statement,
         fixed_version=model.fixed_version,
+        remediation_category=model.remediation_category,
     )
 
 

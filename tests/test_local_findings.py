@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import vexcalibur.sources.local as local_module
-from vexcalibur.domain import VexAnalysisState
+from vexcalibur.domain import VexAnalysisState, VexRemediationCategory
 from vexcalibur.sbom import load_cyclonedx_json
 from vexcalibur.sources.local import (
     MAX_LOCAL_FINDINGS,
@@ -31,7 +31,8 @@ def test_load_local_findings_maps_component_ref_to_vex_finding(tmp_path: Path) -
               "modified": "2026-01-01T00:00:00-05:00",
               "analysis_state": "not_affected",
               "analysis_detail": "Django is not reachable in this deployment.",
-              "impact_statement": "The vulnerable code is not reachable."
+              "impact_statement": "The vulnerable code is not reachable.",
+              "remediation_category": "workaround"
             }
           ]
         }
@@ -55,6 +56,31 @@ def test_load_local_findings_maps_component_ref_to_vex_finding(tmp_path: Path) -
     assert finding.analysis_state is VexAnalysisState.NOT_AFFECTED
     assert finding.analysis_detail == "Django is not reachable in this deployment."
     assert finding.impact_statement == "The vulnerable code is not reachable."
+    assert finding.remediation_category is VexRemediationCategory.WORKAROUND
+
+
+def test_load_local_findings_rejects_invalid_remediation_category(tmp_path: Path) -> None:
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        """
+        {
+          "findings": [
+            {
+              "id": "CVE-2026-0001",
+              "component_ref": "component:django",
+              "remediation_category": "patch"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LocalFindingsError, match="remediation_category"):
+        load_local_findings(
+            findings_path,
+            components=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        )
 
 
 def test_load_local_findings_maps_unique_purl_to_vex_finding(tmp_path: Path) -> None:

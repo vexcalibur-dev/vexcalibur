@@ -1,6 +1,6 @@
 # Architecture and trust boundaries
 
-Vexcalibur separates package inventory, source access, normalized findings, and VEX rendering. Provider rules stay out of the output writer. Format rules stay out of network clients.
+Vexcalibur separates package inventory, source access, provider findings, atomic assertions, and VEX rendering. Provider rules stay out of the output writer. Format rules stay out of network clients.
 
 ## Generation flow
 
@@ -26,15 +26,26 @@ CycloneDX JSON/XML file       GitHub Dependency Graph SBOM
                          |
                          v
                  selected VexRenderer
-                    /          \
-                   v            v
-          CycloneDX 1.6    OpenVEX 0.2.0
-                   \            /
-                    v          v
-                  VEX JSON document
+                   /             \
+                  v               v
+          custom renderer    built-in adapter
+                  |               |
+                  |               v
+                  |          VexDocument
+                  |      atomic assertions
+                  |               |
+                  |       +-------+-------+
+                  |       |               |
+                  |       v               v
+                  |  CycloneDX 1.6   OpenVEX 0.2.0
+                  |       \               /
+                  +--------+-------------+
+                           |
+                           v
+                    VEX JSON document
 ```
 
-The two inventory paths meet at `ComponentIdentity`. The two finding paths meet at `VulnerabilityFinding`. Every renderer receives the same value types.
+The two inventory paths meet at `ComponentIdentity`. The two finding paths meet at `VulnerabilityFinding`. This remains the documented custom-renderer interface.
 
 ## Inventory boundary
 
@@ -54,6 +65,18 @@ Provider-specific request and parsing logic stays inside the adapter.
 
 `VulnerabilitySourceInputError` means the inventory cannot form valid provider input. Other source failures inherit from `VulnerabilitySourceError`, with provider-specific subclasses for useful error categories.
 
+## Document boundary
+
+The built-in renderers adapt components and findings into an immutable `VexDocument`. Each `VexAssertion` connects one vulnerability to one product. Products keep their source component reference, so two SBOM components with the same package URL remain distinct.
+
+The model uses four broad dispositions: `fixed`, `affected`, `under_investigation`, and `not_affected`. Qualifiers retain narrower provider meaning. For example, `exploitable` becomes `affected` with an `exploitable` qualifier, while `false_positive` becomes `not_affected` with a `false_positive` qualifier.
+
+The adapter rejects duplicate component references, unknown references, and finding package URLs that disagree with their component. It removes exact duplicate assertions but keeps records that differ in source, state, analysis, or evidence. Each renderer decides whether its format can represent those records together.
+
+This model represents generated snapshots only. Vexcalibur still does not read VEX documents or convert between formats.
+
+The document model is an internal pre-1.0 seam. It is not yet a stable public API.
+
 ## Network boundary
 
 An SBOM can expose internal package names, exact versions, and dependency choices. Vexcalibur does not treat a vulnerability lookup as harmless metadata access.
@@ -66,13 +89,15 @@ Fetching a GitHub SBOM is a separate choice. `--github-repo` permits that input 
 
 ## Rendering boundary
 
-`VexRenderer` separates generation from a serialization format. `generate_vex_from_*` helpers use `CycloneDxJsonRenderer` unless a caller supplies another renderer.
+`VexRenderer` separates generation from a serialization format. Its component-and-finding signature remains available to custom renderers. The `generate_vex_from_*` helpers use `CycloneDxJsonRenderer` unless a caller supplies another renderer.
+
+The built-in renderers also implement `VexDocumentRenderer`. Their compatibility method creates the atomic document, then delegates to the document renderer.
 
 In version 0.2.0, `vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders OpenVEX 0.2.0 JSON. Each renderer owns grouping, required metadata, validation, and state mapping.
 
 OSV says that a vulnerability matches a package version; it does not decide exploitability for a particular deployment. OSV findings therefore enter VEX as `in_triage`. A local finding can carry a reviewed state such as `not_affected` or `exploitable`.
 
-The normalized finding boundary is where CSAF can fit next. A new format still needs an explicit semantic mapping. Similar field names do not guarantee that states, products, provenance, or timestamps mean the same thing.
+The atomic document boundary is where another output format can fit. A new format still needs an explicit semantic mapping. Similar field names do not guarantee that states, products, provenance, or timestamps mean the same thing.
 
 Format conversion should expose any loss or default instead of hiding it in serialization code.
 

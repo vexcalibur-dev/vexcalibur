@@ -1,6 +1,6 @@
 # Vulnerability-source provider contract
 
-A provider turns normalized SBOM components into `VulnerabilityFinding` values. Generation then renders those values without knowing the provider's request or storage format.
+A provider turns normalized SBOM components into `VulnerabilityFinding` values. A built-in renderer adapts them into atomic assertions before it writes a format. Neither stage needs the provider's request or storage format.
 
 The Python contract is pre-1.0 and may change between releases.
 
@@ -47,10 +47,15 @@ The method receives the complete normalized component tuple and returns zero or 
 | `action_statement` | `str \| None` | `None` | Remediation or mitigation guidance. OpenVEX requires it only for `exploitable` findings. |
 | `impact_statement` | `str \| None` | `None` | Deployment impact. OpenVEX requires it only for `false_positive` and `not_affected` findings. |
 | `fixed_version` | `str \| None` | `None` | Confirmed fixed product version. OpenVEX requires it only for `resolved` findings. It must match the emitted product package URL version. |
+| `remediation_category` | `VexRemediationCategory \| None` | `None` | Machine-readable remediation kind for formats that support it. CycloneDX and OpenVEX ignore it. |
 
-`component_ref` must equal a reference in the input component tuple. The renderer rejects an unknown reference.
+`remediation_category` accepts `mitigation`, `no_fix_planned`, `none_available`, `vendor_fix`, or `workaround`.
 
-OpenVEX rejects each evidence field on states where it is not required. It also rejects nonidentical assertions for one vulnerability and emitted product. CycloneDX ignores all three evidence fields.
+`component_ref` must equal a reference in the input component tuple. The built-in adapter rejects an unknown reference, a duplicate component reference, or a finding package URL that differs from its component.
+
+OpenVEX rejects `action_statement`, `impact_statement`, and `fixed_version` on states where they are not required. It also rejects nonidentical assertions for one vulnerability and emitted product. CycloneDX ignores those three fields.
+
+The adapter retains `remediation_category`, but CycloneDX and OpenVEX do not serialize it. It does not change their grouping, content, or document identity.
 
 An OpenVEX product must have a version in its package URL or component version field. The renderer rejects an assertion that would identify every package version.
 
@@ -83,9 +88,9 @@ Provider code belongs under `vexcalibur.sources`.
 2. Map `ComponentIdentity` values to provider queries or lookup keys.
 3. Validate each response or local document.
 4. Return `VulnerabilityFinding` values in stable order.
-5. Leave grouping and serialization to a `VexRenderer`.
+5. Leave assertion adaptation, grouping, and serialization to the selected renderer.
 
-Do not duplicate output-format rules in a provider. A renderer owns state mapping, grouping, required fields, and format-specific loss.
+Do not duplicate output-format rules in a provider. For built-in formats, the document adapter owns shared identity checks. A renderer owns grouping, required evidence, and format-specific loss.
 
 ## Tests
 
