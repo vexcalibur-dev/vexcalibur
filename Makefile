@@ -1,4 +1,4 @@
-.PHONY: help install install-docs test test-live installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop lint workflow-lint format typecheck audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop lint workflow-lint format typecheck governance-check audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 UV := uv
 PACKAGE := vexcalibur
@@ -58,6 +58,9 @@ format: ## Format source and tests
 
 typecheck: ## Run mypy
 	$(UV) run --frozen mypy src
+
+governance-check: ## Read and validate live GitHub governance controls
+	$(UV) run --frozen python scripts/check_github_governance.py
 
 audit: ## Audit installed Python dependencies
 	XDG_CACHE_HOME=$${XDG_CACHE_HOME:-/tmp/vexcalibur-cache} $(UV) run --frozen pip-audit --cache-dir $${PIP_AUDIT_CACHE_DIR:-/tmp/vexcalibur-pip-audit-cache}

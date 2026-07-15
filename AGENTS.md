@@ -51,7 +51,8 @@ make check
 Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`,
 `make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`,
 `make build`, `make openvex-interop`, `make csaf-validator-install`,
-`make csaf-interop`, `make installed-csaf-check`, and `make pre-commit`.
+`make csaf-interop`, `make installed-csaf-check`, `make governance-check`, and
+`make pre-commit`.
 
 `make workflow-lint` needs `actionlint` and `shellcheck` on `PATH`.
 
@@ -140,6 +141,13 @@ For a substantial documentation change, use the scorched-earth documentation rev
 `.github/workflows/pypi.yml` accepts only an automation-authored release at current `main`. It publishes through Trusted Publishing.
 
 Follow [docs/how-to/publish-to-pypi.md](docs/how-to/publish-to-pypi.md) for release work. Do not add a manual upload path without a security review.
+
+GitHub organization, repository, environment, and security settings are covered
+by the read-only policy in
+[docs/development/github-governance.md](docs/development/github-governance.md).
+Run `make governance-check` after changing those settings. The command must fail
+if any required endpoint is inaccessible; do not add a stored administrator
+token to CI to make it periodic.
 
 ## Pull requests
 

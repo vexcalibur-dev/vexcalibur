@@ -31,6 +31,14 @@ Run the local quality gate before opening a pull request:
 make check
 ```
 
+Maintainers changing GitHub, release, environment, or security settings must
+also run the read-only live policy check described in [Verify GitHub
+governance](docs/development/github-governance.md):
+
+```bash
+make governance-check
+```
+
 CI also checks formatting and enforces 75 percent branch coverage. Run those two policies explicitly:
 
 ```bash

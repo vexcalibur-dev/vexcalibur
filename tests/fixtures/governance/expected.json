@@ -1,0 +1,332 @@
+{
+  "repository_rulesets": {
+    "vexcalibur": [
+      {
+        "name": "protected main (PR + CI)",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": ["~DEFAULT_BRANCH"],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {"type": "deletion"},
+          {"type": "non_fast_forward"},
+          {
+            "type": "pull_request",
+            "parameters": {
+              "allowed_merge_methods": ["squash", "rebase"],
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_approving_review_count": 0,
+              "required_review_thread_resolution": true
+            }
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "do_not_enforce_on_create": true,
+              "strict_required_status_checks_policy": true,
+              "required_status_checks": [
+                {"context": "CI result", "integration_id": 15368},
+                {"context": "Analyze Python", "integration_id": 15368},
+                {"context": "dependency-review", "integration_id": 15368},
+                {"context": "pre-commit", "integration_id": 15368}
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "restricted release tag creation",
+        "target": "tag",
+        "enforcement": "active",
+        "bypass_actors": [
+          {"actor_id": 4250150, "actor_type": "Integration", "bypass_mode": "always"}
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": ["refs/tags/v*"],
+            "exclude": []
+          }
+        },
+        "rules": [{"type": "creation"}]
+      },
+      {
+        "name": "immutable release tags",
+        "target": "tag",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": ["refs/tags/v*"],
+            "exclude": []
+          }
+        },
+        "rules": [{"type": "update"}, {"type": "deletion"}]
+      }
+    ],
+    "vexcalibur-action": [
+      {
+        "name": "protected main (PR + CI)",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": ["~DEFAULT_BRANCH"],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {"type": "deletion"},
+          {"type": "non_fast_forward"},
+          {
+            "type": "pull_request",
+            "parameters": {
+              "allowed_merge_methods": ["squash", "rebase"],
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_approving_review_count": 0,
+              "required_review_thread_resolution": true
+            }
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "do_not_enforce_on_create": true,
+              "strict_required_status_checks_policy": true,
+              "required_status_checks": [
+                {"context": "CI result", "integration_id": 15368},
+                {"context": "Analyze (actions)", "integration_id": 15368},
+                {"context": "Analyze (python)", "integration_id": 15368}
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "restricted release tag creation",
+        "target": "tag",
+        "enforcement": "active",
+        "bypass_actors": [
+          {"actor_id": 4250150, "actor_type": "Integration", "bypass_mode": "always"}
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": ["refs/tags/v*"],
+            "exclude": []
+          }
+        },
+        "rules": [{"type": "creation"}]
+      },
+      {
+        "name": "immutable release tags",
+        "target": "tag",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": ["refs/tags/v*"],
+            "exclude": []
+          }
+        },
+        "rules": [{"type": "update"}, {"type": "deletion"}]
+      }
+    ],
+    "vexcalibur-orb": [
+      {
+        "name": "protected main (PR + CI)",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": ["~DEFAULT_BRANCH"],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {"type": "deletion"},
+          {"type": "non_fast_forward"},
+          {
+            "type": "pull_request",
+            "parameters": {
+              "allowed_merge_methods": ["squash", "rebase"],
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_approving_review_count": 0,
+              "required_review_thread_resolution": true
+            }
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "do_not_enforce_on_create": true,
+              "strict_required_status_checks_policy": true,
+              "required_status_checks": [
+                {"context": "Quality", "integration_id": 15368},
+                {"context": "Analyze (actions)", "integration_id": 15368},
+                {"context": "Analyze (python)", "integration_id": 15368}
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "restricted release tag creation",
+        "target": "tag",
+        "enforcement": "active",
+        "bypass_actors": [
+          {"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": ["refs/tags/v*"],
+            "exclude": []
+          }
+        },
+        "rules": [{"type": "creation"}]
+      },
+      {
+        "name": "immutable release tags",
+        "target": "tag",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": ["refs/tags/v*"],
+            "exclude": []
+          }
+        },
+        "rules": [{"type": "update"}, {"type": "deletion"}]
+      }
+    ],
+    ".github": [
+      {
+        "name": "protected main (PR + CI)",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": ["~DEFAULT_BRANCH"],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {"type": "deletion"},
+          {"type": "non_fast_forward"},
+          {
+            "type": "pull_request",
+            "parameters": {
+              "allowed_merge_methods": ["squash", "rebase"],
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_approving_review_count": 0,
+              "required_review_thread_resolution": true
+            }
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "do_not_enforce_on_create": true,
+              "strict_required_status_checks_policy": true,
+              "required_status_checks": [
+                {"context": "Validate workflow templates", "integration_id": 15368},
+                {"context": "Smoke Python security commands", "integration_id": 15368},
+                {"context": "Analyze (actions)", "integration_id": 15368}
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "organization_actions_permissions": {
+    "enabled_repositories": "all",
+    "sha_pinning_required": true
+  },
+  "organization_installations": {
+    "installations": [
+      {
+        "app_id": 4250150,
+        "app_slug": "vexcalibur-dev-automation",
+        "target_type": "Organization",
+        "repository_selection": "all",
+        "permissions": {
+          "contents": "write",
+          "metadata": "read"
+        },
+        "suspended_at": null
+      }
+    ]
+  },
+  "organization_immutable_releases": {
+    "enforced_repositories": "all"
+  },
+  "repositories": {
+    "vexcalibur": {"default_branch": "main"},
+    "vexcalibur-action": {"default_branch": "main"},
+    "vexcalibur-orb": {
+      "default_branch": "main",
+      "allow_merge_commit": false,
+      "delete_branch_on_merge": true,
+      "security_and_analysis": {
+        "dependabot_security_updates": {"status": "enabled"},
+        "secret_scanning": {"status": "enabled"},
+        "secret_scanning_push_protection": {"status": "enabled"}
+      }
+    },
+    ".github": {
+      "default_branch": "main"
+    }
+  },
+  "orb_vulnerability_alerts_enabled": true,
+  "orb_automated_security_fixes": {
+    "enabled": true,
+    "paused": false
+  },
+  "orb_private_vulnerability_reporting": {
+    "enabled": true
+  },
+  "codeql_default_setups": {
+    "vexcalibur-action": {
+      "state": "configured",
+      "languages": ["actions", "python"],
+      "query_suite": "extended",
+      "threat_model": "remote_and_local",
+      "schedule": "weekly"
+    },
+    "vexcalibur-orb": {
+      "state": "configured",
+      "languages": ["actions", "python"],
+      "query_suite": "extended",
+      "threat_model": "remote_and_local",
+      "schedule": "weekly"
+    },
+    ".github": {
+      "state": "configured",
+      "languages": ["actions"],
+      "query_suite": "extended",
+      "threat_model": "remote_and_local",
+      "schedule": "weekly"
+    }
+  },
+  "pypi_environment": {
+    "name": "pypi",
+    "can_admins_bypass": true,
+    "protection_rules": [{"type": "branch_policy"}],
+    "deployment_branch_policy": {
+      "protected_branches": false,
+      "custom_branch_policies": true
+    }
+  },
+  "pypi_deployment_branch_policies": {
+    "total_count": 1,
+    "branch_policies": [{"name": "v*", "type": "tag"}]
+  }
+}
