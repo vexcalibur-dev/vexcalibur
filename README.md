@@ -104,6 +104,7 @@ The default public endpoint fails closed without that flag. Fetching an SBOM fro
 - Use the [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html) for flags and failure behavior.
 - Read the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/reference/csaf-output.html) output contract before consuming generated files.
 - Read the [architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html) before adding a source or output format.
+- Read the [self-release evidence design](https://vexcalibur-dev.github.io/vexcalibur/explanation/self-release-evidence.html) or follow its [maintainer runbook](https://vexcalibur-dev.github.io/vexcalibur/how-to/build-release-evidence.html) to inspect the repository-only dogfood foundation.
 - Check [project status](https://vexcalibur-dev.github.io/vexcalibur/explanation/project-status.html) for current limits.
 
 The complete manual is at [vexcalibur-dev.github.io/vexcalibur][vexcalibur-docs].

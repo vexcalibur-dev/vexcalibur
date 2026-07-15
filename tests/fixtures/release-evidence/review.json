@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "review_kind": "synthetic_fixture",
+  "analysis_revision": 1,
+  "reviewed_at": "2026-07-15T17:05:56Z",
+  "reviewed_by": "Automated conformance fixture",
+  "inventory": {
+    "path": "uv.lock",
+    "sha256": "ede5f835723e5bf1:3b7160fbb20e7408:7f7c5dea3b1e18ee:3bbc86168549ca92",
+    "coverage": "cross-platform-reference-runtime"
+  },
+  "findings": {
+    "path": "tests/fixtures/release-evidence/findings.json",
+    "sha256": "9cd9a1ed528f5fdc:dd5a402a2edeb2eb:3231bea6622833f3:c9f71c31e04f6cc8"
+  },
+  "policy": {
+    "allowed_analysis_states": [
+      "in_triage"
+    ]
+  },
+  "conclusion": "Synthetic in_triage finding used only to exercise all release-evidence formats and validators."
+}

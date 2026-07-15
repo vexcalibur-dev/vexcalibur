@@ -1,4 +1,4 @@
-.PHONY: help install install-docs test test-live fuzz-smoke fuzz-coverage installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop lint workflow-lint format typecheck governance-check audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live fuzz-smoke fuzz-coverage installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop release-evidence release-evidence-check lint workflow-lint format typecheck governance-check audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 UV := uv
 PACKAGE := vexcalibur
@@ -10,6 +10,8 @@ NPM ?= npm
 CSAF_VALIDATOR_DIR := tests/integration/csaf-validator
 CSAF_SCHEMA := tests/fixtures/schemas/csaf-2.0.schema.json
 CSAF_SCHEMA_SHA256 := 29c114b35b0a30831f1674f2ab8b3ed9b2890cfeaa63b924ac6ed9d70ef44262
+RELEASE_EVIDENCE_OUTPUT ?= build/release-evidence
+RELEASE_SHA ?= $(shell git rev-parse --verify HEAD)
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -50,6 +52,17 @@ csaf-schema-check: ## Verify the vendored OASIS CSAF 2.0 schema checksum
 
 csaf-interop: csaf-schema-check ## Validate the CSAF golden with all pinned mandatory tests
 	$(NODE) $(CSAF_VALIDATOR_DIR)/validate.mjs tests/golden/csaf-vex-all-analysis-states.json
+
+release-evidence: ## Generate the reviewed self-evidence bundle from VEXCALIBUR_WHEEL
+	scripts/generate-release-evidence.sh \
+		"$(VEXCALIBUR_WHEEL)" \
+		release-evidence/review.json \
+		release-evidence/findings.json \
+		"$(RELEASE_EVIDENCE_OUTPUT)" \
+		"$(RELEASE_SHA)"
+
+release-evidence-check: csaf-validator-install ## Check deterministic zero and all-format fixture bundles
+	scripts/check-release-evidence.sh
 
 lint: ## Run ruff checks
 	$(UV) run --frozen ruff check src tests scripts/*.py docs/conf.py
