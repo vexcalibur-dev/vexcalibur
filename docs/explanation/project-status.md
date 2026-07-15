@@ -24,6 +24,19 @@ secrets, CodeQL, OpenSSF Scorecard, and a bounded weekly Atheris campaign.
 
 OpenVEX goldens pass the pinned official schema and `go-vex` parser.
 
+## Repository-only self-evidence foundation
+
+The repository can build a deterministic local self-release evidence bundle
+from the exact commit, its locked reference runtime, a reviewed local-findings
+snapshot, and an isolated local wheel. The initial public snapshot makes zero
+assertions. CI separately exercises all formats with a synthetic `in_triage`
+finding and checks cross-format equivalence.
+
+This is maintainer tooling, not behavior published in version 0.3.1. It does
+not attach artifacts to GitHub Releases, publish through PyPI, query live OSV,
+or compare the companion Action. Read [Why Vexcalibur builds its own release
+evidence](self-release-evidence.md) for its trust and inventory boundaries.
+
 ## CSAF conformance
 
 CSAF output requires explicit publisher and tracking metadata. It also requires

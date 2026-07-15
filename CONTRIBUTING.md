@@ -83,6 +83,22 @@ The first command uses the committed npm lockfile and
 `npm ci --ignore-scripts`. The other commands check committed and
 installed-wheel output with the same validator.
 
+Changes to `uv.lock`, self-release evidence, format renderers, or the evidence
+scripts must also exercise the installed-wheel evidence fixture:
+
+```bash
+uv build --clear --no-create-gitignore --no-sources
+mapfile -t wheels < <(find dist -maxdepth 1 -type f -name "*.whl" | sort)
+test "${#wheels[@]}" -eq 1
+export VEXCALIBUR_WHEEL="${wheels[0]}"
+make release-evidence-check
+```
+
+Use the exact wheel-selection and review procedure in [Build and review
+self-release evidence](docs/how-to/build-release-evidence.md). Never convert an
+empty result into `not_affected` or add non-public advisory data to the checked
+inputs.
+
 Build the manual after changing documentation, CLI behavior, package metadata, or a public Python API:
 
 ```bash

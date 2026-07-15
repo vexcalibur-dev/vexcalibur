@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "id": "CVE-2099-999999",
+      "purl": "pkg:pypi/httpx@0.28.1",
+      "source_name": "Synthetic release-evidence fixture",
+      "source_url": "https://security.example.test/vulnerabilities/CVE-2099-999999",
+      "modified": "2026-07-15T17:05:56Z",
+      "analysis_state": "in_triage",
+      "analysis_detail": "Synthetic fixture only; impact analysis is intentionally incomplete."
+    }
+  ]
+}

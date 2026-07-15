@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "review_kind": "production",
+  "analysis_revision": 1,
+  "reviewed_at": "2026-07-15T17:05:56Z",
+  "reviewed_by": "@dannysauer",
+  "inventory": {
+    "path": "uv.lock",
+    "sha256": "ede5f835723e5bf1:3b7160fbb20e7408:7f7c5dea3b1e18ee:3bbc86168549ca92",
+    "coverage": "cross-platform-reference-runtime"
+  },
+  "findings": {
+    "path": "release-evidence/findings.json",
+    "sha256": "8aa973100a15bf81:7985395637131e83:8cf84e427be47925:83def923f020f5fa"
+  },
+  "policy": {
+    "allowed_analysis_states": [
+      "in_triage"
+    ]
+  },
+  "conclusion": "No reviewed vulnerability findings are included in analysis revision 1. This is not a claim that the inventory has no vulnerabilities."
+}
