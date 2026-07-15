@@ -4,7 +4,9 @@ This file gives automated contributors the repository rules needed to work safel
 
 ## Project state
 
-Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services or local JSON. Published version 0.2.0 renders CycloneDX 1.6 or OpenVEX 0.2.0 JSON.
+Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub
+Dependency Graph SBOM. Findings come from OSV-compatible services or local
+JSON. Version 0.3.0 renders CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
 
 The implementation is Python, but domain and product decisions should remain ecosystem-neutral unless an issue narrows the scope. Do not present a planned input, provider, or output format as available.
 
@@ -25,8 +27,12 @@ The implementation is Python, but domain and product decisions should remain eco
 - Ruff, strict MyPy, Pytest, `actionlint`, `shellcheck`, `pip-audit`, and `detect-secrets`
 - Sphinx and MyST for the manual
 - Go 1.25.8 for the pinned OpenVEX interoperability check
+- Node 24 and npm for pinned CSAF schema and mandatory-test conformance
 
-Python and repository tool versions are in `.tool-versions`. The interoperability module records Go 1.25.8 and pins `go-vex` 0.2.8 in `tests/integration/openvex-go/go.mod`.
+Python and repository tool versions are in `.tool-versions`. The OpenVEX
+interoperability module records Go 1.25.8 and pins `go-vex` 0.2.8 in
+`tests/integration/openvex-go/go.mod`. CSAF conformance dependencies and their
+lockfile live in `tests/integration/csaf-validator/`.
 
 ## Common commands
 
@@ -42,7 +48,10 @@ Run the local gate:
 make check
 ```
 
-Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`, `make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`, `make build`, `make openvex-interop`, and `make pre-commit`.
+Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`,
+`make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`,
+`make build`, `make openvex-interop`, `make csaf-validator-install`,
+`make csaf-interop`, `make installed-csaf-check`, and `make pre-commit`.
 
 `make workflow-lint` needs `actionlint` and `shellcheck` on `PATH`.
 
@@ -70,11 +79,13 @@ Core modules live under `src/vexcalibur/`:
 | `sbom.py` | Local CycloneDX parsing and component extraction |
 | `github_sbom.py` | GitHub Dependency Graph SBOM access and SPDX extraction |
 | `domain.py` | Provider-neutral components, findings, and source protocol |
+| `document.py` | Immutable format-neutral document, product, and assertion values |
 | `sources/osv.py` | OSV policy, client, parsing, and domain mapping |
 | `sources/local.py` | Local findings validation and matching |
 | `render.py` | Format-neutral renderer protocol and output selector |
 | `vex.py` | CycloneDX 1.6 rendering |
 | `openvex.py` | Native OpenVEX 0.2.0 rendering |
+| `csaf.py` | Native CSAF 2.0 VEX rendering and document metadata |
 | `compat/vexy.py` | Limited legacy command adapter |
 
 Keep provider code in `sources/`. A provider returns domain findings and does not render a VEX format. A renderer consumes domain values and does not query a source.
@@ -101,6 +112,11 @@ Put tests under `tests/`. Mark external calls with `@pytest.mark.live`. Prefer d
 Add regression coverage for a parser, security, or compatibility fix. At an untrusted-data boundary, test malformed and unsafe input as well as success.
 
 OpenVEX changes must pass `make openvex-interop`. The nested Go module pins the official implementation used by that check.
+
+CSAF changes must pass `make csaf-interop` and `make installed-csaf-check`
+after `make csaf-validator-install`. Keep the official OASIS schema check, the
+complete pinned mandatory suite, and the separate filename tests. The Node
+validator is a CI/development dependency, not a Python runtime dependency.
 
 ## Documentation
 
@@ -139,6 +155,9 @@ uv run --frozen ruff check src tests scripts/*.py docs/conf.py
 uv run --frozen mypy src
 make workflow-lint
 make openvex-interop
+make csaf-validator-install
+make csaf-interop
+make installed-csaf-check
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs
 uv build --clear --no-create-gitignore --no-sources

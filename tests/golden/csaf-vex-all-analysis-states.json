@@ -1,0 +1,185 @@
+{
+  "document": {
+    "category": "csaf_vex",
+    "csaf_version": "2.0",
+    "publisher": {
+      "category": "vendor",
+      "name": "ACME Product Security",
+      "namespace": "https://security.example.com"
+    },
+    "title": "ACME component exploitability assessment",
+    "tracking": {
+      "current_release_date": "2026-07-15T00:00:00Z",
+      "generator": {
+        "date": "2026-07-15T00:00:00Z",
+        "engine": {
+          "name": "Vexcalibur",
+          "version": "0.3.0"
+        }
+      },
+      "id": "ACME-VEX-2026-001",
+      "initial_release_date": "2026-07-15T00:00:00Z",
+      "revision_history": [
+        {
+          "date": "2026-07-15T00:00:00Z",
+          "number": "1",
+          "summary": "Initial version."
+        }
+      ],
+      "status": "final",
+      "version": "1"
+    }
+  },
+  "product_tree": {
+    "full_product_names": [
+      {
+        "name": "minimist 0.0.8",
+        "product_id": "CSAFPID-5067e6fe-3ac3-5070-b0e6-6b3e90adb071",
+        "product_identification_helper": {
+          "purl": "pkg:npm/minimist@0.0.8"
+        }
+      },
+      {
+        "name": "django 1.2",
+        "product_id": "CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e",
+        "product_identification_helper": {
+          "purl": "pkg:pypi/django@1.2"
+        }
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "cve": "CVE-2026-0001",
+      "notes": [
+        {
+          "category": "details",
+          "text": "Applicable product IDs: CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e\nAnalysis detail: The vulnerable code path was removed.\nOriginal Vexcalibur analysis state: resolved\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0001)\nSource record modified: 2026-01-01T00:00:00Z\nConfirmed fixed product version: 1.2"
+        }
+      ],
+      "product_status": {
+        "fixed": [
+          "CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e"
+        ]
+      },
+      "references": [
+        {
+          "category": "external",
+          "summary": "Vulnerability source: Contract Test",
+          "url": "https://security.example.test/vulns/CVE-2026-0001"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-0002",
+      "notes": [
+        {
+          "category": "details",
+          "text": "Applicable product IDs: CSAFPID-5067e6fe-3ac3-5070-b0e6-6b3e90adb071\nAnalysis detail: The affected feature is reachable.\nOriginal Vexcalibur analysis state: exploitable\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0002)\nSource record modified: 2026-01-02T00:00:00Z"
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "CSAFPID-5067e6fe-3ac3-5070-b0e6-6b3e90adb071"
+        ]
+      },
+      "references": [
+        {
+          "category": "external",
+          "summary": "Vulnerability source: Contract Test",
+          "url": "https://security.example.test/vulns/CVE-2026-0002"
+        }
+      ],
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Upgrade minimist to version 1.2.8 or later.",
+          "product_ids": [
+            "CSAFPID-5067e6fe-3ac3-5070-b0e6-6b3e90adb071"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-0003",
+      "notes": [
+        {
+          "category": "details",
+          "text": "Applicable product IDs: CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e\nAnalysis detail: Impact analysis is still underway.\nOriginal Vexcalibur analysis state: in_triage\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0003)\nSource record modified: 2026-01-03T00:00:00Z"
+        }
+      ],
+      "product_status": {
+        "under_investigation": [
+          "CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e"
+        ]
+      },
+      "references": [
+        {
+          "category": "external",
+          "summary": "Vulnerability source: Contract Test",
+          "url": "https://security.example.test/vulns/CVE-2026-0003"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-0004",
+      "notes": [
+        {
+          "category": "details",
+          "text": "Applicable product IDs: CSAFPID-5067e6fe-3ac3-5070-b0e6-6b3e90adb071\nAnalysis detail: The source matched a package that is not present at runtime.\nOriginal Vexcalibur analysis state: false_positive\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0004)\nSource record modified: 2026-01-04T00:00:00Z"
+        }
+      ],
+      "product_status": {
+        "known_not_affected": [
+          "CSAFPID-5067e6fe-3ac3-5070-b0e6-6b3e90adb071"
+        ]
+      },
+      "references": [
+        {
+          "category": "external",
+          "summary": "Vulnerability source: Contract Test",
+          "url": "https://security.example.test/vulns/CVE-2026-0004"
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "The source matched a package that is not present at runtime.",
+          "product_ids": [
+            "CSAFPID-5067e6fe-3ac3-5070-b0e6-6b3e90adb071"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-0005",
+      "notes": [
+        {
+          "category": "details",
+          "text": "Applicable product IDs: CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e\nAnalysis detail: The deployment does not enable the affected configuration.\nOriginal Vexcalibur analysis state: not_affected\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0005)\nSource record modified: 2026-01-05T00:00:00Z"
+        }
+      ],
+      "product_status": {
+        "known_not_affected": [
+          "CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e"
+        ]
+      },
+      "references": [
+        {
+          "category": "external",
+          "summary": "Vulnerability source: Contract Test",
+          "url": "https://security.example.test/vulns/CVE-2026-0005"
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "The deployment does not enable the affected configuration.",
+          "product_ids": [
+            "CSAFPID-03e0b21f-2224-5ca7-b492-de00c9efa74e"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -38,26 +38,36 @@ The method receives the complete normalized component tuple and returns zero or 
 | --- | --- | --- | --- |
 | `id` | `str` | Required | Vulnerability identifier. |
 | `source_name` | `str` | Required | Provider or assessment source name. |
-| `source_url` | `str` | Required | Provider or advisory URL accepted by the target renderer. |
+| `source_url` | `str` | Required | Provider or advisory URL accepted by the target renderer. CSAF requires an ASCII RFC 3986 HTTP(S) URI. |
 | `component_ref` | `str` | Required | Reference copied from an input `ComponentIdentity`. |
 | `purl` | `str` | Required | Canonical serialized package URL for that component. This is a string, unlike `ComponentIdentity.purl`. |
 | `modified` | `datetime \| None` | `None` | Source update time. |
 | `analysis_state` | `VexAnalysisState` | `VexAnalysisState.IN_TRIAGE` | VEX disposition for the component and vulnerability. |
 | `analysis_detail` | `str` | `Detected by vulnerability source; manual exploitability analysis required.` | Human-readable analysis basis. |
-| `action_statement` | `str \| None` | `None` | Remediation or mitigation guidance. OpenVEX requires it only for `exploitable` findings. |
-| `impact_statement` | `str \| None` | `None` | Deployment impact. OpenVEX requires it only for `false_positive` and `not_affected` findings. |
-| `fixed_version` | `str \| None` | `None` | Confirmed fixed product version. OpenVEX requires it only for `resolved` findings. It must match the emitted product package URL version. |
-| `remediation_category` | `VexRemediationCategory \| None` | `None` | Machine-readable remediation kind for formats that support it. CycloneDX and OpenVEX ignore it. |
+| `action_statement` | `str \| None` | `None` | Remediation or mitigation guidance. OpenVEX and CSAF require it for `exploitable` findings. |
+| `impact_statement` | `str \| None` | `None` | Deployment impact. OpenVEX and CSAF require it for `false_positive` and `not_affected` findings. |
+| `fixed_version` | `str \| None` | `None` | Confirmed fixed product version. OpenVEX and CSAF require it for `resolved` findings. It must match the emitted product package URL version. |
+| `remediation_category` | `VexRemediationCategory \| None` | `None` | Machine-readable remediation kind. CSAF requires it for `exploitable` findings; CycloneDX and OpenVEX ignore it. |
 
 `remediation_category` accepts `mitigation`, `no_fix_planned`, `none_available`, `vendor_fix`, or `workaround`.
 
 `component_ref` must equal a reference in the input component tuple. The built-in adapter rejects an unknown reference, a duplicate component reference, or a finding package URL that differs from its component.
 
-OpenVEX rejects `action_statement`, `impact_statement`, and `fixed_version` on states where they are not required. It also rejects nonidentical assertions for one vulnerability and emitted product. CycloneDX ignores those three fields.
+OpenVEX and CSAF reject `action_statement`, `impact_statement`, and
+`fixed_version` on states where they are not required. OpenVEX rejects
+nonidentical assertions for one vulnerability and emitted product. CSAF groups
+same-effective-status provenance and evidence, but rejects contradictory
+effective statuses for that pair. CSAF also requires `remediation_category` on
+`exploitable` and rejects it on other states. CycloneDX ignores all four
+evidence fields.
 
-The adapter retains `remediation_category`, but CycloneDX and OpenVEX do not serialize it. It does not change their grouping, content, or document identity.
+The adapter retains `remediation_category`. CSAF serializes it as the category
+of a product-scoped remediation. CycloneDX and OpenVEX do not serialize it, so
+it does not change their grouping, content, or document identity.
 
-An OpenVEX product must have a version in its package URL or component version field. The renderer rejects an assertion that would identify every package version.
+An OpenVEX or CSAF product must have a version in its package URL or component
+version field. Those renderers reject an assertion that would identify every
+package version.
 
 ## Errors
 

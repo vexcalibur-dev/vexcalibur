@@ -13,6 +13,12 @@ Install these prerequisites:
 
 OpenVEX renderer changes also need Go 1.25.8. The version and the `go-vex` 0.2.8 dependency are recorded in `tests/integration/openvex-go/go.mod`. Other Python and documentation work does not require Go locally.
 
+CSAF renderer, golden, or conformance changes also need Node 24 and npm. The
+exact tool version is in `.tool-versions`; the validator version and integrity
+are pinned under `tests/integration/csaf-validator/`. Python-only and
+documentation work does not require Node locally unless it changes a tested
+CSAF example.
+
 Activate the pinned tools with `mise`, `asdf`, or an equivalent version manager. Then install the locked dependencies:
 
 ```bash
@@ -43,6 +49,19 @@ Run the pinned official OpenVEX parser after changing that renderer or its golde
 ```bash
 make openvex-interop
 ```
+
+Install and run the pinned CSAF mandatory-test suite after changing its
+renderer, schema, goldens, or runnable example:
+
+```bash
+make csaf-validator-install
+make csaf-interop
+make installed-csaf-check
+```
+
+The first command uses the committed npm lockfile and
+`npm ci --ignore-scripts`. The other commands check committed and
+installed-wheel output with the same validator.
 
 Build the manual after changing documentation, CLI behavior, package metadata, or a public Python API:
 

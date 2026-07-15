@@ -8,6 +8,14 @@ import typer
 from packageurl import PackageURL
 from rich.console import Console
 
+from vexcalibur.csaf import (
+    CSAF_VERSION,
+    Csaf20DocumentMetadata,
+    Csaf20VexJsonRenderer,
+    CsafDocumentStatus,
+    CsafPublisherCategory,
+    csaf_filename,
+)
 from vexcalibur.domain import VulnerabilitySource
 from vexcalibur.generate import (
     generate_vex_from_components,
@@ -134,6 +142,55 @@ def generate(
             help="Optional OpenVEX document author role.",
         ),
     ] = None,
+    csaf_version: Annotated[
+        str | None,
+        typer.Option(
+            "--csaf-version",
+            help="CSAF specification version. Defaults to 2.0 with --format csaf.",
+        ),
+    ] = None,
+    csaf_document_id: Annotated[
+        str | None,
+        typer.Option(
+            "--csaf-document-id",
+            help="Publisher-controlled CSAF document tracking ID.",
+        ),
+    ] = None,
+    csaf_document_title: Annotated[
+        str | None,
+        typer.Option(
+            "--csaf-document-title",
+            help="Human-readable CSAF document title.",
+        ),
+    ] = None,
+    csaf_publisher_name: Annotated[
+        str | None,
+        typer.Option(
+            "--csaf-publisher-name",
+            help="Name of the CSAF document publisher.",
+        ),
+    ] = None,
+    csaf_publisher_namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--csaf-publisher-namespace",
+            help="Absolute URL controlled by the CSAF publisher.",
+        ),
+    ] = None,
+    csaf_publisher_category: Annotated[
+        CsafPublisherCategory | None,
+        typer.Option(
+            "--csaf-publisher-category",
+            help="CSAF publisher category.",
+        ),
+    ] = None,
+    csaf_document_status: Annotated[
+        CsafDocumentStatus | None,
+        typer.Option(
+            "--csaf-document-status",
+            help="CSAF document status. Defaults to draft with --format csaf.",
+        ),
+    ] = None,
     findings_file: Annotated[
         Path | None,
         typer.Option(
@@ -217,6 +274,14 @@ def generate(
             output_format=output_format,
             author=author,
             author_role=author_role,
+            csaf_version=csaf_version,
+            csaf_document_id=csaf_document_id,
+            csaf_document_title=csaf_document_title,
+            csaf_publisher_name=csaf_publisher_name,
+            csaf_publisher_namespace=csaf_publisher_namespace,
+            csaf_publisher_category=csaf_publisher_category,
+            csaf_document_status=csaf_document_status,
+            output_file=output_file,
         )
         source_options = resolve_generate_source_options(
             findings_file=findings_file,
@@ -315,7 +380,78 @@ def _renderer_from_generate_options(
     output_format: VexOutputFormat,
     author: str | None,
     author_role: str | None,
+    csaf_version: str | None,
+    csaf_document_id: str | None,
+    csaf_document_title: str | None,
+    csaf_publisher_name: str | None,
+    csaf_publisher_namespace: str | None,
+    csaf_publisher_category: CsafPublisherCategory | None,
+    csaf_document_status: CsafDocumentStatus | None,
+    output_file: Path | None,
 ) -> VexRenderer | None:
+    csaf_option_values = {
+        "--csaf-version": csaf_version,
+        "--csaf-document-id": csaf_document_id,
+        "--csaf-document-title": csaf_document_title,
+        "--csaf-publisher-name": csaf_publisher_name,
+        "--csaf-publisher-namespace": csaf_publisher_namespace,
+        "--csaf-publisher-category": csaf_publisher_category,
+        "--csaf-document-status": csaf_document_status,
+    }
+    supplied_csaf_options = sorted(
+        option for option, value in csaf_option_values.items() if value is not None
+    )
+
+    if output_format is VexOutputFormat.CSAF:
+        if author is not None or author_role is not None:
+            msg = "--author and --author-role require --format openvex"
+            raise GenerateSourceOptionError(msg)
+        if csaf_version is not None and csaf_version != CSAF_VERSION:
+            msg = f"--csaf-version must be {CSAF_VERSION}"
+            raise GenerateSourceOptionError(msg)
+
+        required_values = {
+            "--csaf-document-id": csaf_document_id,
+            "--csaf-document-title": csaf_document_title,
+            "--csaf-publisher-name": csaf_publisher_name,
+            "--csaf-publisher-namespace": csaf_publisher_namespace,
+            "--csaf-publisher-category": csaf_publisher_category,
+        }
+        missing = sorted(option for option, value in required_values.items() if value is None)
+        if missing:
+            msg = f"{', '.join(missing)} required with --format csaf"
+            raise GenerateSourceOptionError(msg)
+
+        if (
+            csaf_document_id is None
+            or csaf_document_title is None
+            or csaf_publisher_name is None
+            or csaf_publisher_namespace is None
+            or csaf_publisher_category is None
+        ):
+            raise AssertionError("CSAF required option validation failed")
+
+        metadata = Csaf20DocumentMetadata(
+            document_id=csaf_document_id,
+            title=csaf_document_title,
+            publisher_name=csaf_publisher_name,
+            publisher_namespace=csaf_publisher_namespace,
+            publisher_category=csaf_publisher_category,
+            status=csaf_document_status or CsafDocumentStatus.DRAFT,
+        )
+        if output_file is not None:
+            expected_filename = csaf_filename(metadata.document_id)
+            if output_file.name != expected_filename:
+                msg = (
+                    f"--output basename must be {expected_filename!r} for CSAF document "
+                    f"ID {metadata.document_id!r}"
+                )
+                raise GenerateSourceOptionError(msg)
+        return Csaf20VexJsonRenderer(metadata=metadata)
+
+    if supplied_csaf_options:
+        msg = f"{', '.join(supplied_csaf_options)} require --format csaf"
+        raise GenerateSourceOptionError(msg)
     if output_format is VexOutputFormat.OPENVEX:
         if author is None:
             msg = "--author is required with --format openvex"
