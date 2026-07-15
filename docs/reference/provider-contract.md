@@ -32,13 +32,15 @@ The method receives the complete normalized component tuple and returns zero or 
 | `purl` | `packageurl.PackageURL` | Parsed package URL |
 | `type` | `str` | CycloneDX component type; defaults to `library` |
 
+The effective component version comes from the PURL when the PURL is versioned. Otherwise it comes from `version`. When both fields supply a version, Vexcalibur compares the decoded PURL version with `version` and rejects the component unless they are equal. Percent encoding that decodes to the same version is not a conflict.
+
 ## Vulnerability finding
 
 | Field | Type | Required or default | Meaning |
 | --- | --- | --- | --- |
 | `id` | `str` | Required | Vulnerability identifier. |
 | `source_name` | `str` | Required | Provider or assessment source name. |
-| `source_url` | `str` | Required | Provider or advisory URL accepted by the target renderer. CSAF requires an ASCII RFC 3986 HTTP(S) URI. |
+| `source_url` | `str` | Required | Provider or advisory URL with no username or password. CSAF requires an ASCII RFC 3986 HTTP(S) URI. |
 | `component_ref` | `str` | Required | Reference copied from an input `ComponentIdentity`. |
 | `purl` | `str` | Required | Canonical serialized package URL for that component. This is a string, unlike `ComponentIdentity.purl`. |
 | `modified` | `datetime \| None` | `None` | Source update time. |
@@ -52,6 +54,8 @@ The method receives the complete normalized component tuple and returns zero or 
 `remediation_category` accepts `mitigation`, `no_fix_planned`, `none_available`, `vendor_fix`, or `workaround`.
 
 `component_ref` must equal a reference in the input component tuple. The built-in adapter rejects an unknown reference, a duplicate component reference, or a finding package URL that differs from its component.
+
+Do not place credentials, signed-download secrets, or access tokens in `source_url`. The shared adapter and document boundary reject URL userinfo without copying it into an error. Query values are format-visible and are not a secret-storage mechanism.
 
 OpenVEX and CSAF reject `action_statement`, `impact_statement`, and
 `fixed_version` on states where they are not required. OpenVEX rejects

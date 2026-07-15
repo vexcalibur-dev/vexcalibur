@@ -4,6 +4,7 @@ import httpx
 import pytest
 from packageurl import PackageURL
 
+from vexcalibur.domain import ComponentIdentity, VulnerabilitySourceInputError
 from vexcalibur.sources.osv import (
     OsvClient,
     OsvClientError,
@@ -11,6 +12,7 @@ from vexcalibur.sources.osv import (
     OsvPackageQuery,
     OsvResponseError,
     osv_client_for_url,
+    osv_queries_for_components,
 )
 from vexcalibur.vex import parse_timestamp
 
@@ -649,6 +651,43 @@ def test_query_rejects_invalid_json_response() -> None:
 
     with pytest.raises(OsvResponseError, match="must be JSON"):
         client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    (
+        (b'{"vulns":[],"vulns":[]}', "duplicate JSON object keys"),
+        (
+            b'{"vulns":[{"id":"GHSA-test-0001","id":"GHSA-test-0002"}]}',
+            "duplicate JSON object keys",
+        ),
+        (b'{"extra":' + b"[" * 2_000 + b"]" * 2_000 + b"}", "too deeply nested"),
+        (b'{"extra":' + b"1" * 1_001 + b"}", "oversized JSON integer"),
+        (b"\xff", "UTF-8 JSON"),
+    ),
+)
+def test_query_normalizes_strict_json_failures(document: bytes, message: str) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=document))
+    client = OsvClient(
+        base_url="https://osv.example.test",
+        client=httpx.Client(transport=transport),
+    )
+
+    with pytest.raises(OsvResponseError, match=message):
+        client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+
+def test_osv_queries_defensively_reject_conflicting_component_versions() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0"),
+    )
+    object.__setattr__(component, "version", "2.0")
+
+    with pytest.raises(VulnerabilitySourceInputError, match="conflicting version identity"):
+        osv_queries_for_components((component,))
 
 
 def test_query_wraps_http_errors() -> None:

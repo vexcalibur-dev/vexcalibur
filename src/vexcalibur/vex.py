@@ -28,6 +28,7 @@ from vexcalibur.document import (
     VexProduct,
     analysis_state,
     product_purl,
+    validate_vex_document,
     vex_document_from_findings,
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
@@ -75,6 +76,7 @@ class CycloneDxJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Return deterministic CycloneDX 1.6 JSON for a VEX document."""
+        validate_vex_document(document)
         normalized_timestamp = _normalize_timestamp(timestamp or datetime.now(tz=timezone.utc))
         assertions = _canonical_assertions(document.assertions)
         bom = Bom(

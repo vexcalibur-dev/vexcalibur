@@ -28,17 +28,23 @@ compatibility helper.
    * - ``load_cyclonedx_sbom``
      - CycloneDX JSON or XML 1.4, 1.5, or 1.6. JSON must be UTF-8. XML may use
        a parser-detected encoding.
-     - Rejects files over 10 MiB, more than 10,000 components, nesting beyond
-       50 component levels, malformed package URLs, duplicate returned
-       references, and XML DTD, entity, or external-reference declarations.
-       Components without package URLs are omitted.
+     - Requires a regular file target and reads at most 10 MiB from one opened
+       descriptor. Symbolic links to regular files are accepted. Rejects more
+       than 10,000 components, nesting beyond 50 component levels,
+       contradictory explicit and package URL versions, malformed package
+       URLs, duplicate returned references, and XML DTD, entity, or
+       external-reference declarations. Components without package URLs are
+       omitted.
    * - ``load_cyclonedx_json``
      - UTF-8 CycloneDX JSON 1.4, 1.5, or 1.6.
-     - Applies the same file, component, nesting, package URL, and reference
-       checks as ``load_cyclonedx_sbom``.
+     - Applies the same file, component, nesting, package URL, version, and
+       reference checks as ``load_cyclonedx_sbom``. JSON also rejects duplicate
+       keys, more than 100 nested arrays or objects, and integer literals longer
+       than 1,000 decimal digits.
    * - ``component_identities_from_github_spdx_sbom``
      - A decoded GitHub Dependency Graph SPDX 2.3 JSON response.
-     - Applies the component, package URL, and reference checks. It omits
+     - Applies the component, package URL, version, and reference checks. It
+       rejects multiple distinct package URLs for one SPDX package and omits
        packages without package URLs and the repository package itself.
 
 All three return component identities sorted by package URL and reference.

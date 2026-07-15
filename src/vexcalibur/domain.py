@@ -14,6 +14,19 @@ DEFAULT_ANALYSIS_DETAIL = (
 )
 
 
+class ComponentVersionError(ValueError):
+    """Raised when a component carries contradictory version identities."""
+
+
+def canonical_component_version(*, version: str | None, purl: PackageURL) -> str | None:
+    """Return the effective version after checking explicit and PURL values."""
+    purl_version = purl.version
+    if version is not None and purl_version is not None and version != purl_version:
+        msg = f"component version {version!r} does not match package URL version {purl_version!r}"
+        raise ComponentVersionError(msg)
+    return purl_version if purl_version is not None else version
+
+
 class VexAnalysisState(str, Enum):
     """Vulnerability analysis states supported by the domain model."""
 
@@ -43,6 +56,9 @@ class ComponentIdentity:
     version: str | None
     purl: PackageURL
     type: str = "library"
+
+    def __post_init__(self) -> None:
+        canonical_component_version(version=self.version, purl=self.purl)
 
 
 @dataclass(frozen=True)

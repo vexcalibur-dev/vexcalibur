@@ -19,6 +19,7 @@ from vexcalibur.document import (
     VexDocument,
     VexProduct,
     analysis_state,
+    validate_vex_document,
     versioned_product_purl,
     vex_document_from_findings,
 )
@@ -217,6 +218,7 @@ def _render_csaf_document(
     tool_version: str,
     timestamp: datetime,
 ) -> str:
+    validate_vex_document(document)
     if not document.assertions:
         msg = "CSAF output requires at least one vulnerability finding"
         raise CsafRenderError(msg)

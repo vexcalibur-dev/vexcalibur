@@ -7,7 +7,7 @@ import pytest
 from cyclonedx.output import OutputFormat, SchemaVersion
 from cyclonedx.validation import make_schemabased_validator
 
-from vexcalibur.document import VexDocument
+from vexcalibur.document import VexDocument, vex_document_from_findings
 from vexcalibur.domain import (
     ComponentIdentity,
     VexAnalysisState,
@@ -168,7 +168,7 @@ def test_render_cyclonedx_vex_json_uses_source_qualified_vulnerability_bom_refs(
     component = ComponentIdentity(
         ref="component:demo",
         name="demo",
-        version="1.0.0",
+        version="0.0.8",
         purl=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")[0].purl,
     )
     findings = (
@@ -202,7 +202,7 @@ def test_render_cyclonedx_vex_json_uses_analysis_qualified_vulnerability_bom_ref
     component = ComponentIdentity(
         ref="component:demo",
         name="demo",
-        version="1.0.0",
+        version="0.0.8",
         purl=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")[0].purl,
     )
     findings = (
@@ -241,7 +241,7 @@ def test_render_cyclonedx_vex_json_rejects_unknown_component_refs() -> None:
     component = ComponentIdentity(
         ref="component:demo",
         name="demo",
-        version="1.0.0",
+        version="0.0.8",
         purl=load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")[0].purl,
     )
     finding = VulnerabilityFinding(
@@ -268,3 +268,50 @@ def test_render_cyclonedx_vex_json_without_findings_is_schema_valid() -> None:
     )
 
     assert VALIDATOR.validate_str(generated) is None
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    (
+        "https://audit-user@example.test/advisory",
+        "https://audit-user:super-secret@example.test/advisory",  # pragma: allowlist secret
+        "https://audit%2Duser:super%2Dsecret@example.test/advisory",  # pragma: allowlist secret
+    ),
+)
+def test_cyclonedx_renderer_rejects_source_url_userinfo_without_echoing_it(
+    source_url: str,
+) -> None:
+    components = load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")
+    finding = VulnerabilityFinding(
+        id="CVE-2026-0001",
+        source_name="Internal Review",
+        source_url=source_url,
+        component_ref=components[0].ref,
+        purl=components[0].purl.to_string(),
+    )
+
+    with pytest.raises(VexRenderError, match="must not include userinfo") as captured:
+        render_cyclonedx_vex_json(components=components, findings=(finding,))
+
+    assert "audit" not in str(captured.value)
+
+
+def test_cyclonedx_document_renderer_rejects_conflicting_product_version() -> None:
+    components = load_cyclonedx_json(FIXTURE_ROOT / "cyclonedx-json-simple.json")
+    finding = VulnerabilityFinding(
+        id="CVE-2026-0001",
+        source_name="Internal Review",
+        source_url="https://security.example.test/advisory",
+        component_ref=components[0].ref,
+        purl=components[0].purl.to_string(),
+    )
+    document = vex_document_from_findings(components=components, findings=(finding,))
+    product = replace(document.products[0], version="9.9")
+    document = replace(
+        document,
+        products=(product,),
+        assertions=(replace(document.assertions[0], product=product),),
+    )
+
+    with pytest.raises(VexRenderError, match="conflicting version identity"):
+        CycloneDxJsonRenderer().render_document(document=document)

@@ -50,11 +50,15 @@ The two inventory paths meet at `ComponentIdentity`. The two finding paths meet 
 
 ## Inventory boundary
 
-`vexcalibur.sbom` handles local CycloneDX JSON and XML. It applies file-size, nesting, component-count, package URL, duplicate-reference, and XML hardening checks before it returns components.
+`vexcalibur.sbom` handles local CycloneDX JSON and XML. A shared input reader opens each path once in nonblocking mode, verifies the opened target is a regular file, and reads no more than the configured limit from that descriptor. Symbolic links to regular files remain usable, while FIFOs, devices, and links to them fail before a read can block.
 
-`vexcalibur.github_sbom` handles GitHub's asynchronous Dependency Graph API. It requests the SPDX 2.3 JSON report and waits for the download. It then validates the response and extracts package URL references. Both loaders produce the same component shape.
+A shared JSON decoder rejects duplicate keys, excessive nesting, oversized integers, invalid UTF-8, and malformed syntax for CycloneDX, local findings, GitHub SPDX, and OSV responses. CycloneDX XML uses its hardened XML path. The inventory loaders also apply component-count, package URL, duplicate-reference, and XML checks before they return components.
+
+`vexcalibur.github_sbom` handles GitHub's asynchronous Dependency Graph API. It requests the SPDX 2.3 JSON report and waits for the download. It then validates the response and extracts package URL references. Multiple equivalent references collapse to their canonical package URL; multiple distinct package URLs for one package are ambiguous and rejected. Both loaders produce the same component shape.
 
 Components without package URLs do not cross this boundary. Source adapters need package identity, and a VEX `affects` entry needs a stable component reference.
+
+The component model has one version rule across local files, GitHub SPDX, OSV queries, and rendering. A PURL version is authoritative when present. A separate CycloneDX `version` or SPDX `versionInfo` is the fallback for an unversioned PURL. When both exist, their decoded values must match.
 
 ## Finding-source boundary
 
@@ -72,7 +76,7 @@ The built-in renderers adapt components and findings into an immutable `VexDocum
 
 The model uses four broad dispositions: `fixed`, `affected`, `under_investigation`, and `not_affected`. Qualifiers retain narrower provider meaning. For example, `exploitable` becomes `affected` with an `exploitable` qualifier, while `false_positive` becomes `not_affected` with a `false_positive` qualifier.
 
-The adapter rejects duplicate component references, unknown references, and finding package URLs that disagree with their component. It removes exact duplicate assertions but keeps records that differ in source, state, analysis, or evidence. Each renderer decides whether its format can represent those records together.
+The adapter rejects duplicate component references, unknown references, finding package URLs that disagree with their component, contradictory product versions, and vulnerability source URLs containing userinfo. It removes exact duplicate assertions but keeps records that differ in source, state, analysis, or evidence. Each renderer decides whether its format can represent those records together.
 
 This model represents generated snapshots only. Vexcalibur still does not read VEX documents or convert between formats.
 

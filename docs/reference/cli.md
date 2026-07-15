@@ -78,9 +78,11 @@ Local input accepts CycloneDX 1.4, 1.5, and 1.6. JSON must be UTF-8. XML must ha
 
 XML input rejects DTD, entity, and external-reference declarations.
 
-Local files and GitHub report downloads are limited to 10 MiB. A document may contain at most 10,000 components and 50 component nesting levels. Parsed components with package URLs must have unique references.
+Local inventory input must resolve to a regular file. A symbolic link to a regular file is accepted; FIFOs, devices, sockets, directories, and links to those objects are rejected before content is read. Vexcalibur reads at most 10 MiB from the same opened descriptor that it inspects. GitHub report downloads have the same byte limit.
 
-GitHub input requests an asynchronous SPDX 2.3 JSON report and extracts package URL references. The repository package itself and packages without package URLs are omitted.
+JSON input rejects duplicate object keys, more than 100 nested arrays or objects, and integer literals longer than 1,000 decimal digits. A document may contain at most 10,000 components and 50 component nesting levels. Parsed components with package URLs must have unique references.
+
+GitHub input requests an asynchronous SPDX 2.3 JSON report and extracts package URL references. The repository package itself and packages without package URLs are omitted. A package with multiple distinct package URL references is rejected.
 
 ### Finding source
 
@@ -94,7 +96,7 @@ Choose one source mode:
 
 `--offline` currently requires `--findings-file`. A findings file cannot be combined with `--osv-url` or `--allow-public-osv`.
 
-OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, or GitHub SPDX `versionInfo`. The command fails instead of treating an empty query set as authoritative.
+OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, or GitHub SPDX `versionInfo`. When an inventory supplies both an explicit version and a PURL version, their decoded values must match. The command rejects a contradiction and fails instead of treating an empty query set as authoritative.
 
 An explicit empty local findings array is valid for CycloneDX output. OpenVEX
 and CSAF reject it because their standalone VEX documents need at least one
