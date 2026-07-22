@@ -1,0 +1,50 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "timezone": "America/Chicago",
+  "schedule": ["* 8-11 * * 1"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "enabledManagers": ["github-actions", "npm", "pep621"],
+  "constraints": {
+    "uv": "0.11.17"
+  },
+  "vulnerabilityAlerts": {
+    "enabled": false
+  },
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**"
+  ],
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "lockFileMaintenance": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "Group reviewable GitHub Actions updates.",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Group reviewable Python updates.",
+      "matchManagers": ["pep621"],
+      "groupName": "Python dependencies"
+    },
+    {
+      "description": "Group and automerge CSAF validator minor and patch updates.",
+      "matchManagers": [
+        "npm"
+      ],
+      "groupName": "CSAF validator npm",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    }
+  ]
+}

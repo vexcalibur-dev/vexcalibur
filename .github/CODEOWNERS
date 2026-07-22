@@ -3,7 +3,7 @@
 
 # These paths control CI, releases, publication, and the policy used to detect drift.
 /.github/CODEOWNERS @dannysauer
-/.github/dependabot.yml @dannysauer
+/renovate.json @dannysauer
 /.github/workflows/ @dannysauer
 /scripts/check_github_governance.py @dannysauer
 /scripts/next-release-tag.sh @dannysauer
