@@ -19,6 +19,9 @@ def test_renovate_scans_the_csaf_validator_package() -> None:
         "**/vendor/**",
     ]
     assert configuration["prHourlyLimit"] == 2
+    assert configuration["minimumReleaseAge"] == "5 days"
+    assert configuration["minimumReleaseAgeBehaviour"] == "timestamp-required"
+    assert configuration["internalChecksFilter"] == "strict"
     assert configuration["enabledManagers"] == ["github-actions", "npm", "pep621"]
     assert configuration["constraints"] == {"uv": tool_versions["uv"]}
     assert configuration["vulnerabilityAlerts"] == {"enabled": False}
@@ -41,6 +44,7 @@ def test_renovate_scans_the_csaf_validator_package() -> None:
             ],
             "groupName": "CSAF validator npm",
             "matchUpdateTypes": ["minor", "patch"],
+            "minimumReleaseAge": "14 days",
             "automerge": True,
         },
     ]

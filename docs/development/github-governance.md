@@ -75,6 +75,12 @@ Orb, and `.github`. Action and Orb scan Actions and Python; `.github` scans
 Actions. Core uses its checked-in advanced CodeQL workflow instead of default
 setup.
 
+Renovate waits five days before it creates a branch for a normal dependency
+update. It requires a registry release timestamp and leaves pending updates off
+the branch and pull-request queues. Dependabot security fixes are not delayed.
+Core's isolated CSAF validator fixture is the only automated update path, and
+it waits fourteen days before Renovate can merge a minor or patch update.
+
 Each of the four repositories commits a `CODEOWNERS` file. [Core's
 file](https://github.com/vexcalibur-dev/vexcalibur/blob/main/.github/CODEOWNERS)
 records `@dannysauer` as the primary owner and repeats ownership for workflows,

@@ -9,6 +9,9 @@
   "labels": ["dependencies"],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
+  "minimumReleaseAge": "5 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "internalChecksFilter": "strict",
   "enabledManagers": ["github-actions", "npm", "pep621"],
   "constraints": {
     "uv": "0.11.17"
@@ -44,6 +47,7 @@
       ],
       "groupName": "CSAF validator npm",
       "matchUpdateTypes": ["minor", "patch"],
+      "minimumReleaseAge": "14 days",
       "automerge": true
     }
   ]
