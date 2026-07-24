@@ -1,13 +1,22 @@
 # Vexcalibur
 
 Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
-documents. Version 0.3.1 reads CycloneDX files or a GitHub Dependency Graph
-SBOM. It collects findings from OSV-compatible services or local JSON. It
-writes CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
+documents. It reads CycloneDX files or a GitHub Dependency Graph SBOM, then
+collects findings from OSV-compatible services or local JSON. It writes
+CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
 
 Public OSV access fails closed. Vexcalibur sends package URLs and versions to `https://api.osv.dev` only when a command includes `--allow-public-osv`.
 
 Vexcalibur is pre-1.0. Pin an exact release and review the [project status](explanation/project-status.md) before depending on a public contract.
+
+## Automation targets
+
+- [GitHub Actions](https://github.com/vexcalibur-dev/vexcalibur-action) uses the released companion Action to run Vexcalibur in a workflow.
+- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) has a development preview of the companion orb. It does not have a production registry release yet.
+
+Read the integration repository before choosing a release pin. Its
+compatibility and release documentation describes the package versions it has
+tested and whether the integration is ready for production use.
 
 ## Tutorials
 

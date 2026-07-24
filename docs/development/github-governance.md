@@ -106,8 +106,10 @@ Future releases are immutable, but release notes and assets created before that
 organization policy remain legacy-mutable; their tag refs are protected. The
 `pypi` environment has no independent reviewer because the organization
 currently has one maintainer, and its administrator-bypass setting remains
-enabled. Orb publication still depends on the external CircleCI account,
-namespace, context, and token setup described in its repository issue tracker.
+enabled. Orb publication uses a CircleCI namespace and an `orb-publishing`
+context restricted to the orb project. Before the first immutable registry
+release, maintainers still need to choose the identity allowed to create its
+production tag.
 
 ## When to run it
 

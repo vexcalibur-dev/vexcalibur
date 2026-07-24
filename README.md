@@ -9,8 +9,8 @@
 
 Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
-Version 0.3.1 writes CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
-output uses the `csaf_vex` profile.
+Vexcalibur writes CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF output
+uses the `csaf_vex` profile.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
@@ -21,9 +21,19 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 | SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
 | VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile |
-| Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |
+| Automation targets | Released [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action); [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) development preview |
 | Migration | A narrow `vexy` command-line compatibility layer |
 | Python | 3.10–3.14 |
+
+## Run in CI
+
+The companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
+runs Vexcalibur in GitHub Actions and has immutable releases. The
+[CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) provides a
+development preview of the same command-line workflow. It does not have a
+production registry release yet, so don't use its preview reference in a
+production pipeline. Each integration repository documents its inputs,
+tested package pairing, and release status.
 
 ## Install a release
 
@@ -31,10 +41,13 @@ Create an environment and pin the package version:
 
 ```bash
 python -m venv .venv
-.venv/bin/python -m pip install "vexcalibur==0.3.1"
+.venv/bin/python -m pip install "vexcalibur==X.Y.Z"
 .venv/bin/vexcalibur --help
 ```
 
+Replace `X.Y.Z` with the exact release you reviewed on
+[PyPI](https://pypi.org/project/vexcalibur/#history) or
+[GitHub](https://github.com/vexcalibur-dev/vexcalibur/releases).
 On Windows, use `.venv\Scripts\python` and `.venv\Scripts\vexcalibur`.
 
 ## Try local generation
