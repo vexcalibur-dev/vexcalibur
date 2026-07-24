@@ -9,6 +9,6 @@
     "validate": "node validate.mjs"
   },
   "devDependencies": {
-    "@secvisogram/csaf-validator-lib": "2.0.27"
+    "@secvisogram/csaf-validator-lib": "2.0.28"
   }
 }
