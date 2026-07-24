@@ -2,7 +2,7 @@
 
 Vexcalibur has published releases and supports the workflows in this manual. It has not reached 1.0, so those releases do not yet promise a stable CLI or Python API.
 
-Pin exact package and action versions in automation. Do not use a mutable branch for a production workflow.
+Pin exact package and released integration versions in automation. Do not use a mutable branch or development integration reference for a production workflow.
 
 ## Published in version 0.3.1
 
@@ -16,7 +16,11 @@ Pin exact package and action versions in automation. Do not use a mutable branch
 - CSAF 2.0 JSON output with the `csaf_vex` profile
 - repeatable serialization when the SBOM, findings, and timestamp are controlled
 - a limited `vexy` compatibility executable
-- a released companion GitHub Action
+- a released companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
+
+The companion [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb)
+has a development preview for integration testing. It does not have a
+production registry release yet.
 
 The repository runs its Python, package, documentation, and deterministic
 parser-property gates on every change. Supply-chain checks cover dependencies,
@@ -24,7 +28,7 @@ secrets, CodeQL, OpenSSF Scorecard, and a bounded weekly Atheris campaign.
 
 OpenVEX goldens pass the pinned official schema and `go-vex` parser.
 
-## Self-release evidence after version 0.3.1
+## Self-release evidence added after version 0.3.1
 
 Repository tooling can build a deterministic local schema-1 bundle and an
 immutable-publication schema-2 bundle from the exact commit, locked reference
@@ -41,7 +45,7 @@ statically until a real release. The initial production review makes zero
 assertions; a separate synthetic `in_triage` fixture exercises CycloneDX,
 OpenVEX, and CSAF equivalence.
 
-This is maintainer and release tooling added after 0.3.1, not a new 0.3.1 package
+This is maintainer and release tooling added after 0.3.1, not a new package
 API. Read [Why Vexcalibur publishes evidence about
 itself](self-release-evidence.md) for its trust, isolation, and recovery
 boundaries.

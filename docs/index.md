@@ -9,6 +9,15 @@ Public OSV access fails closed. Vexcalibur sends package URLs and versions to `h
 
 Vexcalibur is pre-1.0. Pin an exact release and review the [project status](explanation/project-status.md) before depending on a public contract.
 
+## Automation targets
+
+- [GitHub Actions](https://github.com/vexcalibur-dev/vexcalibur-action) uses the released companion Action to run Vexcalibur in a workflow.
+- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) has a development preview of the companion orb. It does not have a production registry release yet.
+
+Read the integration repository before choosing a release pin. Its
+compatibility and release documentation describes the package versions it has
+tested and whether the integration is ready for production use.
+
 ## Tutorials
 
 - [Generate your first VEX document](tutorials/quickstart.md)
