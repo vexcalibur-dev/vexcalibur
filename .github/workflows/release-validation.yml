@@ -113,7 +113,7 @@ jobs:
           ref: ${{ inputs.release-sha }}
 
       - name: Install workflow tools
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
         with:
           version: "v2026.6.12"
           github_token: ""
@@ -431,7 +431,7 @@ jobs:
           ref: ${{ inputs.release-sha }}
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tests/integration/openvex-go/go.mod
           cache-dependency-path: tests/integration/openvex-go/go.sum
@@ -972,7 +972,7 @@ jobs:
       - name: Reject a missing wheel URI hash
         id: missing-hash
         continue-on-error: true
-        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        uses: vexcalibur-dev/vexcalibur-action@a006fe93f069fd1f8f2989cdff060082f1ca4a0a
         with:
           package-spec: ${{ steps.package.outputs.unhashed-wheel-uri }}
           allow-development-package-spec: "true"
@@ -983,7 +983,7 @@ jobs:
       - name: Reject an incorrect wheel URI hash
         id: wrong-hash
         continue-on-error: true
-        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        uses: vexcalibur-dev/vexcalibur-action@a006fe93f069fd1f8f2989cdff060082f1ca4a0a
         with:
           package-spec: ${{ steps.package.outputs.wrong-wheel-uri }}
           allow-development-package-spec: "true"
@@ -994,7 +994,7 @@ jobs:
       - name: Reject an unhashed source-distribution fallback
         id: sdist-fallback
         continue-on-error: true
-        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        uses: vexcalibur-dev/vexcalibur-action@a006fe93f069fd1f8f2989cdff060082f1ca4a0a
         with:
           package-spec: ${{ steps.package.outputs.unhashed-sdist-uri }}
           allow-development-package-spec: "true"
@@ -1015,7 +1015,7 @@ jobs:
           test "${SDIST_FALLBACK_OUTCOME}" = failure
 
       - name: Generate CycloneDX VEX through the pinned Action
-        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        uses: vexcalibur-dev/vexcalibur-action@a006fe93f069fd1f8f2989cdff060082f1ca4a0a
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
@@ -1034,7 +1034,7 @@ jobs:
 
       - name: Generate OpenVEX through the pinned Action
         if: needs.publication-inventory.outputs.assertion-count != '0'
-        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        uses: vexcalibur-dev/vexcalibur-action@a006fe93f069fd1f8f2989cdff060082f1ca4a0a
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
@@ -1059,7 +1059,7 @@ jobs:
 
       - name: Generate CSAF through the pinned Action
         if: needs.publication-inventory.outputs.assertion-count != '0'
-        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        uses: vexcalibur-dev/vexcalibur-action@a006fe93f069fd1f8f2989cdff060082f1ca4a0a
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
@@ -1187,7 +1187,7 @@ jobs:
         run: uv sync --frozen --no-install-project --group dev
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tests/integration/openvex-go/go.mod
           cache-dependency-path: tests/integration/openvex-go/go.sum
