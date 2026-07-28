@@ -705,21 +705,90 @@ jobs:
 
           notes_path="${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"
           release_path="${RUNNER_TEMP}/github-release.json"
-          if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
-            > "${release_path}" 2>/dev/null; then
-            if ! gh release create "${RELEASE_TAG}" \
+
+          resolve_release_by_tag() {
+            local owner repository query_path release_id
+            owner="${GITHUB_REPOSITORY%%/*}"
+            repository="${GITHUB_REPOSITORY#*/}"
+            query_path="${RUNNER_TEMP}/github-release-query.json"
+            if [[ -z "${owner}" || -z "${repository}" || "${repository}" == */* ]]; then
+              echo "GITHUB_REPOSITORY is malformed." >&2
+              return 2
+            fi
+            # GraphQL variable names must stay literal for gh to bind them.
+            # shellcheck disable=SC2016
+            if ! gh api graphql \
+              -f query='query($owner:String!,$repository:String!,$tag:String!){
+                repository(owner:$owner,name:$repository){
+                  release(tagName:$tag){databaseId}
+                }
+              }' \
+              -F owner="${owner}" \
+              -F repository="${repository}" \
+              -F tag="${RELEASE_TAG}" > "${query_path}"; then
+              echo "Could not resolve GitHub Release ${RELEASE_TAG}." >&2
+              return 2
+            fi
+            if ! jq -e '
+              type == "object" and
+              (has("errors") | not) and
+              ((.data | type) == "object") and
+              ((.data.repository | type) == "object") and
+              (.data.repository | has("release")) and
+              (
+                .data.repository.release == null or
+                (
+                  (.data.repository.release | type) == "object" and
+                  (
+                    .data.repository.release.databaseId as $id |
+                    ($id | type) == "number" and $id > 0 and $id == ($id | floor)
+                  )
+                )
+              )' "${query_path}" >/dev/null; then
+              echo "GitHub returned a malformed release query." >&2
+              return 2
+            fi
+            if jq -e '.data.repository.release == null' "${query_path}" >/dev/null; then
+              return 1
+            fi
+            release_id="$(jq -r '.data.repository.release.databaseId' "${query_path}")"
+            if [[ ! "${release_id}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "GitHub returned a malformed release id." >&2
+              return 2
+            fi
+            if ! gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              > "${release_path}"; then
+              echo "Could not read GitHub Release ${RELEASE_TAG}." >&2
+              return 2
+            fi
+            if ! jq -e --argjson id "${release_id}" '.id == $id' \
+              "${release_path}" >/dev/null; then
+              echo "GitHub returned a release that does not match its resolved ID." >&2
+              return 2
+            fi
+          }
+
+          resolve_status=0
+          resolve_release_by_tag || resolve_status=$?
+          if ((resolve_status > 1)); then
+            exit 1
+          fi
+          if ((resolve_status == 1)); then
+            # A failed create can mean a concurrent recovery won the race. The
+            # exact resolver and complete state check below decide whether it is safe.
+            gh release create "${RELEASE_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
               --draft \
               --verify-tag \
               --target "${RELEASE_SHA}" \
               --title "${RELEASE_TAG}" \
-              --notes-file "${RUNNER_TEMP}/release-notes/vexcalibur-release-notes.md"; then
-              # A concurrent recovery is harmless only when it produced the exact
-              # release state checked below.
-              :
+              --notes-file "${notes_path}" >/dev/null || :
+            resolve_status=0
+            resolve_release_by_tag || resolve_status=$?
+            if ((resolve_status != 0)); then
+              echo "Could not create or reconcile GitHub Release ${RELEASE_TAG}." >&2
+              exit 1
             fi
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
-              > "${release_path}"
           fi
 
           if ! jq -e \
