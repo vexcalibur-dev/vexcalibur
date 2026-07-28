@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import stat
 import subprocess
@@ -142,9 +143,27 @@ def _write_zero_publication_inventory(
 
 def _write_zero_vex_output(path: Path) -> None:
     path.mkdir()
-    (path / "vex.cdx.json").write_text(
-        release_evidence.canonical_json(
-            {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1}
+    document = release_evidence.canonical_json(
+        {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1}
+    )
+    (path / "vex.cdx.json").write_text(document)
+    (path / "vex.cdx.execution.json").write_text(
+        release_evidence._canonical_execution_report_json(
+            {
+                "analysis_state_counts": {},
+                "command": "generate",
+                "component_count": 1,
+                "document": {
+                    "bytes": len(document.encode()),
+                    "sha256": hashlib.sha256(document.encode()).hexdigest(),
+                },
+                "finding_count": 0,
+                "finding_source": "local_file",
+                "inventory_source": "sbom_file",
+                "output_format": "cyclonedx",
+                "schema_version": 1,
+                "vexcalibur_version": "0.4.0",
+            }
         )
     )
 
@@ -831,11 +850,120 @@ def test_publication_finalization_rejects_action_mismatch_before_copy(
     direct_output = tmp_path / "direct-output"
     _write_zero_vex_output(direct_output)
     action_output = tmp_path / "action-output"
-    action_output.mkdir()
-    (action_output / "vex.cdx.json").write_text("different\n")
+    _write_zero_vex_output(action_output)
+    changed_document = b"different\n"
+    (action_output / "vex.cdx.json").write_bytes(changed_document)
+    action_report_path = action_output / "vex.cdx.execution.json"
+    action_report = release_evidence.load_json(action_report_path)
+    action_report["document"] = {
+        "bytes": len(changed_document),
+        "sha256": hashlib.sha256(changed_document).hexdigest(),
+    }
+    action_report_path.write_text(release_evidence._canonical_execution_report_json(action_report))
     bundle = tmp_path / "publication"
 
     with pytest.raises(release_evidence.EvidenceError, match="Action output differs"):
+        release_evidence.finalize_publication_bundle(
+            output_dir=bundle,
+            inventory_dir=inventory,
+            wheel_path=wheel,
+            sdist_path=sdist,
+            direct_output_dir=direct_output,
+            action_output_dir=action_output,
+            release_tag="v0.4.0",
+            action_commit=release_evidence.PUBLICATION_ACTION_COMMIT,
+            expected_wheel_sha256=release_evidence.sha256_file(wheel),
+            expected_sdist_sha256=release_evidence.sha256_file(sdist),
+        )
+
+    assert not bundle.exists()
+
+
+def test_publication_finalization_rejects_invalid_execution_report(
+    tmp_path: Path,
+) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+    for output in (direct_output, action_output):
+        report_path = output / "vex.cdx.execution.json"
+        report = release_evidence.load_json(report_path)
+        report["document"]["sha256"] = "0" * 64
+        report_path.write_text(release_evidence._canonical_execution_report_json(report))
+    bundle = tmp_path / "publication"
+
+    with pytest.raises(release_evidence.EvidenceError, match="document binding"):
+        release_evidence.finalize_publication_bundle(
+            output_dir=bundle,
+            inventory_dir=inventory,
+            wheel_path=wheel,
+            sdist_path=sdist,
+            direct_output_dir=direct_output,
+            action_output_dir=action_output,
+            release_tag="v0.4.0",
+            action_commit=release_evidence.PUBLICATION_ACTION_COMMIT,
+            expected_wheel_sha256=release_evidence.sha256_file(wheel),
+            expected_sdist_sha256=release_evidence.sha256_file(sdist),
+        )
+
+    assert not bundle.exists()
+
+
+def test_publication_finalization_rejects_coherently_forged_component_counts(
+    tmp_path: Path,
+) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+    for output in (direct_output, action_output):
+        report_path = output / "vex.cdx.execution.json"
+        report = release_evidence.load_json(report_path)
+        report["component_count"] = 999_999
+        report_path.write_text(release_evidence._canonical_execution_report_json(report))
+    bundle = tmp_path / "publication"
+
+    with pytest.raises(release_evidence.EvidenceError, match="component count"):
+        release_evidence.finalize_publication_bundle(
+            output_dir=bundle,
+            inventory_dir=inventory,
+            wheel_path=wheel,
+            sdist_path=sdist,
+            direct_output_dir=direct_output,
+            action_output_dir=action_output,
+            release_tag="v0.4.0",
+            action_commit=release_evidence.PUBLICATION_ACTION_COMMIT,
+            expected_wheel_sha256=release_evidence.sha256_file(wheel),
+            expected_sdist_sha256=release_evidence.sha256_file(sdist),
+        )
+
+    assert not bundle.exists()
+
+
+def test_publication_finalization_rejects_noncanonical_execution_report_bytes(
+    tmp_path: Path,
+) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+    for output in (direct_output, action_output):
+        report_path = output / "vex.cdx.execution.json"
+        report = release_evidence.load_json(report_path)
+        report_path.write_text(release_evidence.canonical_json(report))
+    bundle = tmp_path / "publication"
+
+    with pytest.raises(release_evidence.EvidenceError, match="not canonical JSON"):
         release_evidence.finalize_publication_bundle(
             output_dir=bundle,
             inventory_dir=inventory,

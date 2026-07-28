@@ -8,7 +8,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import ParseResult, quote, urlparse
 
 import httpx
@@ -39,6 +39,14 @@ class GithubSbomConfigurationError(GithubSbomError):
 
 class GithubSbomClientError(GithubSbomError):
     """Raised when GitHub's SBOM API cannot return usable data."""
+
+
+class GithubSbomComponentLoader(Protocol):
+    """Load normalized components from one GitHub repository SBOM."""
+
+    def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
+        """Return normalized components for ``OWNER/REPO``."""
+        ...
 
 
 @dataclass(frozen=True)

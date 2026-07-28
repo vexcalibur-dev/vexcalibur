@@ -4,6 +4,9 @@ Vexcalibur separates package inventory, source access, provider findings, atomic
 
 ## Generation flow
 
+This diagram traces inventory through one finding source and one renderer. The
+report-aware path retains the normalized values used at those boundaries.
+
 ```text
 CycloneDX JSON/XML file       GitHub Dependency Graph SBOM
         |                                 |
@@ -43,10 +46,28 @@ CycloneDX JSON/XML file       GitHub Dependency Graph SBOM
                   +--------+--------------+------+
                            |
                            v
-                    VEX JSON document
+                    GenerationResult
+                       /         \
+                      v           v
+              VEX JSON bytes   complete context?
+                               /            \
+                             no              yes
+                             |                |
+                             v                v
+                    report unavailable   execution report
+                                       counts, categories,
+                                         digest, and size
 ```
 
 The two inventory paths meet at `ComponentIdentity`. The two finding paths meet at `VulnerabilityFinding`. This remains the documented custom-renderer interface.
+
+Generation returns an immutable `GenerationResult` before either output is
+written. It contains the rendered document plus the normalized components and
+findings used by the renderer. Its UTF-8 bytes are calculated once, when a
+caller first needs them. Built-in workflows also retain source categories and
+the selected format, so an execution report cannot relabel a completed
+operation. Custom sources and renderers can provide the same context explicitly
+when Vexcalibur cannot infer it.
 
 ## Inventory boundary
 
@@ -54,7 +75,7 @@ The two inventory paths meet at `ComponentIdentity`. The two finding paths meet 
 
 A shared JSON decoder rejects duplicate keys, excessive nesting, oversized integers, invalid UTF-8, and malformed syntax for CycloneDX, local findings, GitHub SPDX, and OSV responses. CycloneDX XML uses its hardened XML path. The inventory loaders also apply component-count, package URL, duplicate-reference, and XML checks before they return components.
 
-`vexcalibur.github_sbom` handles GitHub's asynchronous Dependency Graph API. It requests the SPDX 2.3 JSON report and waits for the download. It then validates the response and extracts package URL references. Multiple equivalent references collapse to their canonical package URL; multiple distinct package URLs for one package are ambiguous and rejected. Both loaders produce the same component shape.
+`vexcalibur.github_sbom` handles GitHub's asynchronous Dependency Graph API. It requests the SPDX 2.3 JSON report and waits for the download. It then validates the response and extracts package URL references. Multiple equivalent references collapse to their canonical package URL; multiple distinct package URLs for one package are ambiguous and rejected. Both loaders produce the same component fields.
 
 Components without package URLs do not cross this boundary. Source adapters need package identity, and a VEX `affects` entry needs a stable component reference.
 
@@ -85,7 +106,7 @@ The adapter rejects duplicate component references, unknown references, finding 
 
 This model represents generated snapshots only. Vexcalibur still does not read VEX documents or convert between formats.
 
-The document model is an internal pre-1.0 seam. It is not yet a stable public API.
+The document model is an internal pre-1.0 model. It is not yet a stable public API.
 
 ## Network boundary
 
@@ -165,6 +186,58 @@ does not claim they are statement revision times. CSAF likewise keeps them in
 vulnerability notes rather than document tracking dates. The CycloneDX
 renderer can place them in vulnerability `updated` because that field describes
 the vulnerability record.
+
+## Execution-report boundary
+
+`vexcalibur.generation_result` derives a report from one `GenerationResult`.
+It does not parse the rendered VEX document. Known inventory, source, and
+format facts come from the generation path, so a caller-supplied context cannot
+contradict them. Explicit context uses a `custom` category for an inventory,
+source, or renderer that Vexcalibur cannot classify. This records the extension
+without assigning it a built-in identity.
+
+Counts come from the normalized domain values. The digest and byte size use the
+same cached UTF-8 bytes that the report-aware CLI path emits.
+
+The report-aware file writer uses one private lock below each destination's
+parent directory. It acquires the needed directory locks in a stable order and
+holds them until it has published both files. This serializes report-aware
+writes that share a parent, but it also gives every process the same lock
+without relying on locale-sensitive filename normalization. The report remains
+the final success marker.
+
+The file-output path follows this order:
+
+```text
+GenerationResult
+      |
+      +--> stage report bytes (private temporary file)
+      |
+      +--> stage VEX bytes (private temporary file)
+      |
+      +--> acquire output and report directory locks in stable order
+              |
+              +--> publish VEX
+              |
+              +--> recheck report aliases and parent identities
+              |
+              +--> publish report last
+```
+
+An error before VEX publication removes both temporary files. An error after
+VEX publication can leave a valid VEX file without a report, so consumers must
+require exit status `0` and a valid report. The report is never published
+before the document it describes.
+
+Standard output is different. Vexcalibur writes and flushes those bytes
+directly before it acquires the report lock, so it cannot stage or roll back a
+partial stream write.
+
+The report omits package names and URLs, vulnerability IDs, repository names,
+filesystem paths, provider URLs, credentials, and exception text. Counts,
+categories, the package version, and a document digest can still be sensitive
+build metadata. The closed-world schema and fixed size limit make the report
+bounded, but they do not make it public data.
 
 ## Legacy command boundary
 

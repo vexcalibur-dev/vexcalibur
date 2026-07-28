@@ -28,6 +28,7 @@ source_suffix = {
     ".rst": "restructuredtext",
 }
 master_doc = "index"
+templates_path = ["_templates"]
 exclude_patterns = [
     "_build",
     "Thumbs.db",
@@ -38,6 +39,7 @@ exclude_patterns = [
 html_theme = "alabaster"
 html_title = "Vexcalibur"
 html_baseurl = "https://vexcalibur-dev.github.io/vexcalibur/"
+html_extra_path = ["execution-report-v1.schema.json"]
 
 autodoc_typehints = "description"
 autodoc_typehints_format = "short"
@@ -50,15 +52,16 @@ intersphinx_mapping = {
 }
 
 
-def _copy_vendored_markdown(app: Sphinx, exception: Exception | None) -> None:
-    # The vendored guide uses upstream HTML anchors that MyST cannot validate.
+def _copy_static_documents(app: Sphinx, exception: Exception | None) -> None:
     if exception is not None or app.builder.format != "html":
         return
-    source = Path(app.srcdir) / "external" / "google-python-style-guide.md"
-    target = Path(app.outdir) / "external" / "google-python-style-guide.md"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    copy2(source, target)
+    # The vendored guide uses upstream HTML anchors that MyST cannot validate.
+    for relative_path in (Path("external/google-python-style-guide.md"),):
+        source = Path(app.srcdir) / relative_path
+        target = Path(app.outdir) / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        copy2(source, target)
 
 
 def setup(app: Sphinx) -> None:
-    app.connect("build-finished", _copy_vendored_markdown)
+    app.connect("build-finished", _copy_static_documents)

@@ -13,20 +13,26 @@ The `CI` workflow runs on pull requests and pushes to `main`:
 | --- | --- |
 | Quality | Frozen lock, Ruff formatting and linting, strict MyPy |
 | Tests | Offline suite on Python 3.10 through 3.14 |
+| Native report behavior | Fail-closed installed-wheel checks on Windows; report transactions and installed wheel and source distribution checks on macOS with Python 3.10 and 3.14 |
 | Parser properties | Deterministic Hypothesis smoke profile with a five-minute bound |
 | Packaging | Wheel and source distribution, installed `vexcalibur` and `vexy` entry points |
 | OpenVEX | Generated and installed-wheel output through pinned `go-vex` 0.2.8 |
-| CSAF | OASIS schema plus all 42 mandatory tests from pinned `@secvisogram/csaf-validator-lib` 2.0.27 on Node 24 |
+| CSAF | OASIS schema plus all 42 mandatory tests from pinned `@secvisogram/csaf-validator-lib` 2.0.27 on Node 24; installed wheel and source distribution checks on Python 3.10 and 3.14 |
 | Local evidence | Schema-1 zero-finding and synthetic all-format bundles, generated twice and byte-compared |
-| Publication contract | Publication-only run using synthetic tag `v0.0.0` and only read-only, unprivileged `GITHUB_TOKEN` permissions; builds schema-2 assets but does not publish |
-| Documentation | Warning-free Sphinx build |
+| Documentation | Warning-free Sphinx build, published-schema check, rendered accessibility checks, and executable execution-report examples |
 | Security | `pip-audit`, base-branch-aware secret scanning, and dedicated CodeQL/dependency-review workflows |
 
-The publication-contract caller grants only `contents: read` and
-`actions: read`. The reusable workflow skips duplicate quality, matrix, and
-documentation work in `publication-only` mode but still executes its build,
-inventory, direct CLI, pinned Action, and fresh-finalizer boundaries. No App
-token or PyPI OIDC permission exists in that path.
+Ordinary CI does not run the cross-job publication graph. That graph uploads a
+lock-derived software bill of materials (SBOM), generated VEX, and execution
+reports to GitHub, so the release workflow must pass
+`allow-public-evidence-upload: true` before any publication job can start. Pull
+requests still run the local schema-1 evidence fixtures without uploading that
+inventory.
+
+During a release, the pinned Action runs one synthetic finding through
+CycloneDX, OpenVEX, and CSAF. That check does not depend on the production
+review's finding count, so a zero-finding release still exercises every report
+format.
 
 The `CI result` job combines all ordinary required results into the status
 selected by the protected `main` ruleset. CodeQL, dependency review, and
@@ -42,6 +48,63 @@ Run the complete offline test suite:
 uv sync --frozen
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 ```
+
+Execution-report changes have three native gates:
+
+| Environment | Prerequisite | Command | Success signal |
+| --- | --- | --- | --- |
+| Linux or macOS source checkout | Python, plus `uv sync --frozen` | `uv run --frozen pytest -q tests/test_execution_report_destination.py tests/test_execution_report_destination_cli.py tests/test_execution_report_destination_locks.py tests/test_execution_report_hardening.py tests/test_generation_output.py tests/test_generation_output_concurrency.py tests/test_cli_execution_report.py` | Pytest exits `0`; Windows-only cases are skipped |
+| Linux or macOS installed wheel | Bash, GNU Make, Python, and `uv` | `make installed-cli-check` | The script exits `0` after importing and running the installed wheel |
+| Windows source checkout | PowerShell, Python, and `uv sync --frozen` | The commands below | Both test and installed-wheel commands exit `0` |
+
+On Windows, run the same fail-closed checks as CI, then install the local wheel
+with dependencies exported from `uv.lock`. The commands use a unique temporary
+directory and remove it in `finally`, including the wheel and virtual
+environment:
+
+```powershell
+$ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSVersion -lt [Version]"7.3") {
+  throw "PowerShell 7.3 or newer is required"
+}
+$PSNativeCommandUseErrorActionPreference = $true
+$work = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
+$dist = Join-Path $work "dist"
+$venv = Join-Path $work "venv"
+$requirements = Join-Path $work "runtime-requirements.txt"
+try {
+  New-Item -ItemType Directory -Path $dist | Out-Null
+  uv run --frozen pytest -q `
+    tests/test_execution_report_destination.py::test_native_windows_report_request_fails_closed `
+    tests/test_cli_execution_report.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output
+  uv build --out-dir $dist --no-create-gitignore --no-sources
+  $wheels = @(Get-ChildItem -Path $dist -Filter *.whl)
+  if ($wheels.Count -ne 1) {
+    throw "Expected exactly one wheel in $dist, found $($wheels.Count)"
+  }
+  uv export `
+    --quiet `
+    --frozen `
+    --no-dev `
+    --no-emit-project `
+    --no-annotate `
+    --output-file $requirements
+  python scripts/append_locked_wheel_requirement.py `
+    $wheels[0].FullName `
+    $requirements
+  uv venv $venv
+  $python = Join-Path $venv "Scripts/python.exe"
+  uv pip sync --require-hashes --python $python $requirements
+  & $python tests/integration/check_installed_windows.py
+} finally {
+  Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+}
+```
+
+The native-command preference turns every nonzero `uv`, Python, and pytest exit
+into a terminating error. The Windows contract rejects report requests without
+changing either output, then proves that ordinary installed-wheel generation
+still works.
 
 Run CSAF conformance:
 
@@ -95,26 +158,44 @@ reproduce CI.
 
 `.github/workflows/release-validation.yml` accepts an exact commit, tag, and
 version. Its ordinary mode runs repository gates before publication jobs. Its
-publication-only mode runs just the immutable-asset contract.
+publication-only mode runs just the immutable-asset contract. Both modes
+require the caller to consent explicitly to uploading the dependency inventory
+and generated evidence.
 
 The publication graph has five independent roles:
 
-1. `build` checks out the exact source, creates a temporary local release tag,
-   builds once with commit-derived `SOURCE_DATE_EPOCH`, validates both archives,
-   and exports their exact hashes.
+1. `build` checks out the exact source and verifies or creates the intended
+   release tag on that commit without deleting or reassigning any existing tag.
+   It hash-syncs the PEP 517 backend, builds offline with the commit-derived
+   `SOURCE_DATE_EPOCH`, validates both archives, and exports their exact hashes.
 2. `publication-inventory` does not download, install, or execute either
    distribution and does not invoke the Action. It exports strict constraints
    and a normalized SBOM from `uv.lock`, then prepares the reviewed oracle.
 3. `direct-vex` has no repository checkout or GitHub permission. It installs
-   the hash-bound wheel with the oracle constraints and emits only VEX files.
+   the hash-bound wheel with the oracle constraints, then emits VEX files and
+   their execution reports.
 4. `action-vex` also has no checkout or GitHub permission. It runs the companion
-Action at a full commit and requires missing or incorrect wheel hashes to fail,
-including an unhashed source-distribution fallback attempt. It then emits only
-VEX files from the correctly hash-bound wheel.
+   Action at a full commit and requires missing or incorrect wheel hashes to
+   fail, including an unhashed source-distribution fallback attempt. A failed
+   generation must remove its stale report. Successful generations emit the
+   same VEX files and reports as the direct CLI.
 5. `publication-assets` runs fresh with `contents: read` and `actions: read`. It
    verifies every producer artifact through GitHub's API and archive digest,
-   independently reproduces the lock exports, requires direct/Action byte
-   equivalence, runs official validators, and creates a fresh flat asset set.
+   independently reproduces the lock exports, validates each report's counts
+   and document digest, requires direct/Action byte equivalence, runs official
+   validators, and creates a fresh flat asset set.
+
+Each source-distribution matrix cell also uses two environments. The first
+hash-syncs the exact PEP 517 tools from the `sdist-build` lock group and builds
+the candidate sdist into a wheel with `uv` in offline, no-isolation mode. The
+second hash-syncs that derived wheel and the runtime dependencies into a clean
+environment before running the installed CLI checks. This prevents an index
+from selecting unreviewed build requirements during validation.
+
+The canonical release build uses the same backend rule. It hash-syncs the
+`sdist-build` group before the build, then disables build isolation and network
+access. The release digests therefore bind artifacts produced by the reviewed
+backend bytes, not another copy selected from an index during the build.
 
 GitHub archive digests are same-run transport checks. The published schema-2
 manifest records stable canonical payload digests so retrying validation for an

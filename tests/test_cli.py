@@ -7,9 +7,11 @@ from packageurl import PackageURL
 from typer.testing import CliRunner
 
 import vexcalibur.csaf as csaf_module
+import vexcalibur.generate_command as generate_command
 from vexcalibur import cli
 from vexcalibur.compat import vexy
 from vexcalibur.domain import ComponentIdentity
+from vexcalibur.generation_result import GenerationResult
 from vexcalibur.source_options import GenerateSourceOptions
 from vexcalibur.sources.osv import (
     OsvClientError,
@@ -379,8 +381,8 @@ def test_generate_accepts_github_repo_source(monkeypatch) -> None:
         assert kwargs["token_env"] == "TOKEN"  # noqa: S105
         return "resolved-token"
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
-    monkeypatch.setattr(cli, "resolve_github_token", fake_resolve_github_token)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "resolve_github_token", fake_resolve_github_token)
     monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     result = runner.invoke(
@@ -406,6 +408,84 @@ def test_generate_accepts_github_repo_source(monkeypatch) -> None:
     assert '"bomFormat": "CycloneDX"' in result.output
 
 
+def test_github_sbom_fetch_waits_for_osv_provenance_validation(monkeypatch) -> None:
+    def unexpected_token_resolution(**kwargs) -> str:
+        raise AssertionError("invalid OSV provenance must fail before GitHub authentication")
+
+    class UnexpectedGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("invalid OSV provenance must fail before GitHub client creation")
+
+    monkeypatch.setattr(
+        generate_command,
+        "resolve_github_token",
+        unexpected_token_resolution,
+    )
+    monkeypatch.setattr(
+        generate_command,
+        "GithubSbomClient",
+        UnexpectedGithubSbomClient,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--allow-public-osv",
+            "--osv-source-name",
+            "Example Security Feed",
+            "--osv-source-url",
+            "https://security.example.test/vulnerability-data",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "canonical public OSV endpoint cannot use a provenance alias" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("arguments", "diagnostic"),
+    (
+        (("--github-repo", "not-a-repository"), "OWNER/REPO"),
+        (
+            (
+                "--github-repo",
+                "vexcalibur-dev/vexcalibur",
+                "--github-api-url",
+                "http://github.example.test/api/v3",
+            ),
+            "HTTPS URL",
+        ),
+    ),
+)
+def test_invalid_github_inventory_options_fail_before_token_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: tuple[str, ...],
+    diagnostic: str,
+) -> None:
+    token_resolutions: list[dict[str, object]] = []
+
+    def unexpected_token_resolution(**kwargs: object) -> str:
+        token_resolutions.append(kwargs)
+        raise AssertionError("invalid GitHub options must fail before authentication")
+
+    monkeypatch.setattr(
+        generate_command,
+        "resolve_github_token",
+        unexpected_token_resolution,
+    )
+
+    result = runner.invoke(cli.app, ["generate", *arguments])
+
+    assert result.exit_code == 1
+    assert diagnostic in result.output
+    assert "Traceback" not in result.output
+    assert token_resolutions == []
+
+
 def test_generate_accepts_github_repo_with_local_findings(
     monkeypatch,
     tmp_path: Path,
@@ -424,7 +504,7 @@ def test_generate_accepts_github_repo_with_local_findings(
                 ),
             )
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
     findings_path = tmp_path / "findings.json"
     findings_path.write_text(
         """
@@ -465,6 +545,15 @@ def test_generate_requires_input_file_or_github_repo() -> None:
 
     assert result.exit_code == 1
     assert "either INPUT_FILE or --github-repo is required" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_validates_input_before_renderer_options() -> None:
+    result = runner.invoke(cli.app, ["generate", "--format", "openvex"])
+
+    assert result.exit_code == 1
+    assert "either INPUT_FILE or --github-repo is required" in result.output
+    assert "--author is required" not in result.output
     assert "Traceback" not in result.output
 
 
@@ -509,7 +598,7 @@ def test_generate_reports_github_sbom_errors_without_traceback(monkeypatch) -> N
         def component_identities(self, repository: str):
             raise cli.GithubSbomError("GitHub SBOM API GET failed")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
 
     result = runner.invoke(
         cli.app,
@@ -533,7 +622,7 @@ def test_generate_requires_public_osv_opt_in_before_fetching_github_sbom(monkeyp
         def __init__(self, *, api_url: str, token: str | None) -> None:
             raise AssertionError("GitHub SBOM should not be fetched before OSV policy validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
 
     result = runner.invoke(
         cli.app,
@@ -623,8 +712,8 @@ def test_documented_github_repo_generate_examples_execute(
             return None
         return "resolved-token"
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
-    monkeypatch.setattr(cli, "resolve_github_token", fake_resolve_github_token)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "resolve_github_token", fake_resolve_github_token)
     monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
 
     args = _documented_vexcalibur_generate_args(marker)
@@ -1135,10 +1224,14 @@ def test_generate_reports_local_findings_errors_without_traceback(tmp_path: Path
 
 
 def test_generate_writes_output_file(monkeypatch, tmp_path: Path) -> None:
-    def fake_generate_vex_from_sbom(**kwargs) -> str:
-        return "{}\n"
+    def fake_generate_vex_from_sbom(**kwargs) -> GenerationResult:
+        return GenerationResult("{}\n", (), ())
 
-    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
+    monkeypatch.setattr(
+        generate_command,
+        "generate_vex_from_sbom_result",
+        fake_generate_vex_from_sbom,
+    )
     output_path = tmp_path / "vex.json"
 
     result = runner.invoke(
@@ -1161,11 +1254,15 @@ def test_generate_writes_output_file(monkeypatch, tmp_path: Path) -> None:
 def test_generate_accepts_xml_input_file(monkeypatch) -> None:
     captured_input_files: list[Path] = []
 
-    def fake_generate_vex_from_sbom(**kwargs) -> str:
+    def fake_generate_vex_from_sbom(**kwargs) -> GenerationResult:
         captured_input_files.append(kwargs["input_file"])
-        return "{}\n"
+        return GenerationResult("{}\n", (), ())
 
-    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
+    monkeypatch.setattr(
+        generate_command,
+        "generate_vex_from_sbom_result",
+        fake_generate_vex_from_sbom,
+    )
 
     result = runner.invoke(
         cli.app,
@@ -1238,10 +1335,14 @@ def test_generate_reports_output_write_errors_without_traceback(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    def fake_generate_vex_from_sbom(**kwargs) -> str:
-        return "{}\n"
+    def fake_generate_vex_from_sbom(**kwargs) -> GenerationResult:
+        return GenerationResult("{}\n", (), ())
 
-    monkeypatch.setattr(cli, "generate_vex_from_sbom", fake_generate_vex_from_sbom)
+    monkeypatch.setattr(
+        generate_command,
+        "generate_vex_from_sbom_result",
+        fake_generate_vex_from_sbom,
+    )
 
     result = runner.invoke(
         cli.app,
@@ -1315,7 +1416,7 @@ def test_generate_openvex_requires_author_before_network(monkeypatch) -> None:
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before OpenVEX option validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
 
     result = runner.invoke(
         cli.app,
@@ -1495,7 +1596,7 @@ def test_generate_csaf_lists_every_missing_required_option_before_network(monkey
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before CSAF option validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
 
     result = runner.invoke(
         cli.app,
@@ -1550,7 +1651,7 @@ def test_generate_csaf_rejects_unsupported_version_before_network(monkeypatch) -
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before CSAF option validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
 
     result = runner.invoke(
         cli.app,
@@ -1619,7 +1720,7 @@ def test_generate_csaf_rejects_invalid_namespace_before_network(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before CSAF option validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
 
     result = runner.invoke(
         cli.app,
@@ -1648,7 +1749,7 @@ def test_generate_rejects_csaf_metadata_with_other_formats_before_network(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before format option validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
     args = [
         "generate",
         "--github-repo",
@@ -1678,7 +1779,7 @@ def test_generate_csaf_rejects_openvex_metadata_before_network(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before format option validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
 
     result = runner.invoke(
         cli.app,
@@ -1708,7 +1809,7 @@ def test_generate_csaf_enforces_output_filename_before_network(
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before filename validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
     output_path = tmp_path / "wrong-name.json"
 
     result = runner.invoke(
@@ -1742,7 +1843,7 @@ def test_generate_csaf_rejects_document_id_line_terminators_before_filename_and_
         def __init__(self, **kwargs) -> None:
             raise AssertionError("GitHub must not be contacted before CSAF ID validation")
 
-    monkeypatch.setattr(cli, "GithubSbomClient", FakeGithubSbomClient)
+    monkeypatch.setattr(generate_command, "GithubSbomClient", FakeGithubSbomClient)
     output_path = tmp_path / "acme_vex.json"
 
     result = runner.invoke(

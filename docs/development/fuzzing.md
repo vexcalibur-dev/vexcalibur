@@ -10,7 +10,7 @@ audit, and CodeQL remain separate controls.
 
 ## What the harness covers
 
-Every target calls production parsing code. The shared oracle runs the same
+Every target calls production boundary code. The shared oracle runs the same
 input twice and compares a normalized outcome. Documented boundary exceptions
 are rejections. Any other exception, assertion failure, timeout, or process
 failure is a crash to investigate.
@@ -23,6 +23,8 @@ failure is a crash to investigate.
 | `local` | Local findings loader | Selectors, URLs, timestamps, enums, and component matching have typed failures. |
 | `osv` | OSV response transport and query parsers | Identity, valid and malformed gzip, HTTP errors, pagination, evolving fields, and terminal-safe vulnerability IDs are covered without network access. |
 | `identity` | CycloneDX component normalization | Equivalent generated JSON and XML produce the same component identity. |
+| `report` | Generation execution-report serialization and schema validation | Strict UTF-8, canonical JSON, schema validation, and the rendered-document digest and byte count remain deterministic. The harness checks that bounded synthetic reports stay below 16 KiB; ordinary regression tests cover rejection at the exact size boundary. |
+| `consumer` | Published execution-report consumer | Arbitrary report bytes are either rejected by a typed parser or validate deterministically against a matching document. Schema bytes must match the reviewed schema exactly before validation, so substituted schemas and external references never run. |
 
 Inputs are synthetic. The harness never calls GitHub, OSV, or another service.
 Do not add private SBOMs, credentials, embargoed vulnerability data, or customer

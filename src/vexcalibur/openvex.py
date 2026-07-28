@@ -20,6 +20,7 @@ from vexcalibur.document import (
     vex_document_from_findings,
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.generation_context import ExecutionReportOutputFormat
 from vexcalibur.render import VexRenderError
 
 OPENVEX_SPEC_VERSION = "0.2.0"
@@ -61,6 +62,14 @@ class OpenVexJsonRenderer:
 
     author: str
     role: str | None = None
+
+    def _vexcalibur_execution_report_output_format(
+        self,
+    ) -> ExecutionReportOutputFormat | None:
+        """Return the format only for the built-in renderer implementation."""
+        if type(self) is not OpenVexJsonRenderer:
+            return None
+        return ExecutionReportOutputFormat.OPENVEX
 
     def __post_init__(self) -> None:
         author, role = _validate_document_metadata(author=self.author, role=self.role)

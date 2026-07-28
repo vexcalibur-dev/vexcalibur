@@ -86,8 +86,8 @@ Run the repository gates:
 ```bash
 uv lock --check
 uv sync --frozen --extra docs
-uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
-uv run --frozen ruff check src tests scripts/*.py docs/conf.py
+uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py
+uv run --frozen ruff check src tests scripts/*.py docs/conf.py docs/examples/*.py
 uv run --frozen mypy src
 make workflow-lint
 uv run --frozen pytest -m "not live" --cov-fail-under=75
@@ -136,9 +136,9 @@ is left intact for explicit recovery.
 
 The workflow builds the wheel and source distribution once, creates the
 candidate-free inventory, generates VEX independently with the installed wheel
-and full-commit-pinned companion Action, and finalizes a flat schema-2 asset
-set on a fresh runner. Release notes cross a separate digest and secret-scan
-boundary.
+and full-commit-pinned companion Action, validates an execution report for each
+document, and finalizes a flat schema-2 asset set on a fresh runner. Release
+notes cross a separate digest and secret-scan boundary.
 
 Only after all proposed bytes are verified does the final job mint a short-lived
 App token. It creates an annotated bot-authored tag whose canonical JSON message
@@ -213,6 +213,7 @@ It downloads all schema-2 assets and verifies:
 - wheel and source-distribution names, metadata, version, source identity, and
   archive safety;
 - installed-wheel behavior;
+- execution-report provenance, counts, size, and document digests;
 - CycloneDX, official OpenVEX, and strict CSAF validation; and
 - exact hashes already present on PyPI.
 

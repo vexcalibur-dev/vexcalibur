@@ -151,6 +151,7 @@ jobs:
       release-tag: ${{ needs.resolve.outputs.tag }}
       release-version: ${{ needs.resolve.outputs.version }}
       publication-only: ${{ needs.resolve.outputs.mode == 'recovery' }}
+      allow-public-evidence-upload: true
 
   generate-release-notes:
     name: Generate release notes

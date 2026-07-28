@@ -4,15 +4,31 @@ A provider turns normalized SBOM components into `VulnerabilityFinding` values. 
 
 The Python contract is pre-1.0 and may change between releases.
 
+This reference covers both first-party sources maintained with Vexcalibur and
+external sources owned by an embedding application. External source code stays
+in the embedding's package and implements the same public protocol.
+
 ## Protocol
 
 A source implements `vexcalibur.domain.VulnerabilitySource`:
 
 ```python
-from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+from typing import Literal
+
+from vexcalibur.domain import (
+    ComponentIdentity,
+    ExecutionReportFindingSourceDeclaration,
+    VulnerabilityFinding,
+)
+from vexcalibur.generation_result import FindingSourceCategory
 
 
-class ExampleSource:
+class ExampleSource(ExecutionReportFindingSourceDeclaration):
+    def execution_report_finding_source(
+        self,
+    ) -> Literal[FindingSourceCategory.CUSTOM]:
+        return FindingSourceCategory.CUSTOM
+
     def findings_for_components(
         self,
         components: tuple[ComponentIdentity, ...],
@@ -20,7 +36,18 @@ class ExampleSource:
         ...
 ```
 
-The method receives the complete normalized component tuple and returns zero or more immutable findings.
+`findings_for_components` receives the complete normalized component tuple and
+returns zero or more immutable findings.
+
+`execution_report_finding_source` is optional. Implement it when the provider
+supports generation execution reports but does not match a built-in source
+category. Vexcalibur records `custom` without exposing the provider name or
+endpoint. If the provider omits the method, callers must supply a complete
+`GenerationExecutionContext` before they request a report.
+
+Custom providers can return only `FindingSourceCategory.CUSTOM`. Vexcalibur
+reserves `local_file`, `public_osv`, and `custom_osv` for its built-in source
+implementations.
 
 ## Component identity
 
@@ -103,9 +130,11 @@ The OSV source implements this policy with `--allow-public-osv` and `--osv-url`.
 
 An offline source should not create a network client. It should define limits for local data and reject ambiguous component matches.
 
-## Implementation shape
+## Implementation contract
 
-Provider code belongs under `vexcalibur.sources`.
+First-party provider code belongs under `src/vexcalibur/sources`. An external
+provider remains in the embedding's package; it does not need to modify or
+install modules into the `vexcalibur` namespace.
 
 1. Validate configuration before I/O.
 2. Map `ComponentIdentity` values to provider queries or lookup keys.
@@ -122,6 +151,10 @@ mapping, and CLI error reporting. A paginated network source also needs
 exact-limit and limit-plus-one body tests, compressed and chunked responses,
 error-body limits, repeated and oversized tokens, pagination floods, record
 deduplication, total deadlines, and expansion-limit tests.
+
+First-party providers put these tests in the Vexcalibur suite. External
+providers run the equivalent contract and integration tests in their owning
+package.
 
 Run offline tests before opening a pull request:
 

@@ -35,7 +35,7 @@ def _repository(tmp_path: Path) -> Path:
     return repository
 
 
-def test_synthetic_ci_tag_isolated_from_real_and_conflicting_tags(tmp_path: Path) -> None:
+def test_creating_a_release_tag_preserves_every_existing_tag(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     first_sha = _commit(repository, "first\n")
     _git(repository, "tag", "v0.0.0", first_sha)
@@ -43,24 +43,25 @@ def test_synthetic_ci_tag_isolated_from_real_and_conflicting_tags(tmp_path: Path
     _git(repository, "tag", "--annotate", "v9.9.9", "--message", "real release", release_sha)
 
     subprocess.run(  # noqa: S603 - reviewed repository script and test-owned inputs
-        [str(SCRIPT), "v0.0.0", release_sha, "true"],
+        [str(SCRIPT), "v1.2.3", release_sha],
         cwd=repository,
         check=True,
     )
 
-    assert _git(repository, "tag", "--list") == "v0.0.0"
-    assert _git(repository, "rev-parse", "v0.0.0^{commit}") == release_sha
-    assert _git(repository, "describe", "--tags", "--exact-match", "HEAD") == "v0.0.0"
+    assert _git(repository, "tag", "--list") == "v0.0.0\nv1.2.3\nv9.9.9"
+    assert _git(repository, "rev-parse", "v0.0.0^{commit}") == first_sha
+    assert _git(repository, "rev-parse", "v1.2.3^{commit}") == release_sha
+    assert _git(repository, "rev-parse", "v9.9.9^{commit}") == release_sha
 
 
-def test_normal_mode_rejects_an_existing_tag_on_another_commit(tmp_path: Path) -> None:
+def test_rejects_an_existing_tag_on_another_commit(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     first_sha = _commit(repository, "first\n")
     _git(repository, "tag", "v1.2.3", first_sha)
     release_sha = _commit(repository, "release\n")
 
     completed = subprocess.run(  # noqa: S603 - reviewed repository script and test-owned inputs
-        [str(SCRIPT), "v1.2.3", release_sha, "false"],
+        [str(SCRIPT), "v1.2.3", release_sha],
         cwd=repository,
         check=False,
         capture_output=True,

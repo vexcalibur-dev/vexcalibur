@@ -11,6 +11,11 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_VALIDATION_WORKFLOW = ROOT / ".github" / "workflows" / "release-validation.yml"
@@ -338,24 +343,189 @@ def test_reusable_validation_exposes_exact_byte_and_artifact_bindings() -> None:
     assert "value: ${{ jobs.publication-assets.outputs.artifact-digest }}" in validation
 
 
-def test_ci_requires_the_credentialless_publication_contract() -> None:
+def test_installed_cli_checks_wheel_and_sdist_on_every_supported_python() -> None:
+    installed = _job(_validation_text(), "installed-cli")
+
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in installed
+    assert 'distribution: ["wheel", "sdist"]' in installed
+    assert "python-version: ${{ matrix.python-version }}" in installed
+    assert "VEXCALIBUR_DISTRIBUTION:" in installed
+    assert "VEXCALIBUR_EXPECTED_PYTHON: ${{ matrix.python-version }}" in installed
+    assert "steps.dist.outputs[matrix.distribution]" in installed
+    assert "VEXCALIBUR_WHEEL:" not in installed
+    assert "make installed-cli-check" in installed
+
+
+def test_sdist_validation_hash_locks_build_tools_and_builds_offline() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    build_requirements = pyproject["build-system"]["requires"]
+    locked_build_requirements = pyproject["dependency-groups"]["sdist-build"]
+    installer = (ROOT / "scripts" / "install-locked-distribution.sh").read_text(encoding="utf-8")
+
+    assert locked_build_requirements == build_requirements
+    assert "VEXCALIBUR_EXPECTED_PYTHON" in installer
+    assert 'python find "${python_find_args[@]}"' in installer
+    export = installer.index("--only-group sdist-build")
+    build_sync = installer.index("pip sync", export)
+    build = installer.index('"$uv_bin" build', build_sync)
+    runtime_sync = installer.rindex("pip sync")
+    assert export < build_sync < build < runtime_sync
+    assert "--require-hashes" in installer[build_sync:build]
+    assert "--only-binary :all:" in installer[build_sync:build]
+    assert "--no-build-isolation" in installer[build:runtime_sync]
+    assert "--offline" in installer[build:runtime_sync]
+    assert "mapfile" not in installer
+    assert "shopt -s nullglob" in installer
+    assert 'distribution="${built_wheels[0]}"' in installer[build:runtime_sync]
+    assert '"$uv_bin" venv --python "$python_bin" "$venv_dir"' in installer
+    assert "--only-binary :all:" in installer[runtime_sync:]
+
+
+def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> None:
+    build = _job(_validation_text(), "build")
+    export = build.index("--only-group sdist-build")
+    sync = build.index("uv pip sync", export)
+    package_build = build.index("uv build", sync)
+
+    assert export < sync < package_build
+    assert "--require-hashes" in build[sync:package_build]
+    assert "--only-binary :all:" in build[sync:package_build]
+    assert "--no-build-isolation" in build[package_build:]
+    assert "--offline" in build[package_build:]
+
+
+def test_ci_does_not_upload_release_evidence_without_a_release() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
-    publication = _job(ci, "publication-contract")
     result = _job(ci, "ci")
 
-    assert "uses: ./.github/workflows/release-validation.yml" in publication
-    assert "actions: read" in publication
-    assert "contents: read" in publication
-    assert "release-sha: ${{ github.sha }}" in publication
-    assert "release-tag: v0.0.0" in publication
-    assert "release-version: 0.0.0" in publication
-    assert "publication-only: true" in publication
-    assert "synthetic-ci-version: true" in publication
-    assert "id-token: write" not in publication
-    assert "secrets:" not in publication
+    assert "uses: ./.github/workflows/release-validation.yml" not in ci
+    assert "publication-contract" not in ci
+    assert "needs.publication-contract.result" not in result
 
-    assert "publication-contract" in result
-    assert "needs.publication-contract.result" in result
+
+def test_release_requires_explicit_public_evidence_upload_consent() -> None:
+    validation = _validation_text()
+    consent = _job(validation, "consent")
+    release_validation = _job(_workflow_text(), "validation")
+
+    assert "allow-public-evidence-upload:" in validation
+    assert "required: true" in validation
+    assert "ALLOW_PUBLIC_EVIDENCE_UPLOAD" in consent
+    assert "explicit consent to upload public evidence" in consent
+    assert "needs: consent" in _job(validation, "build")
+    assert "allow-public-evidence-upload: true" in release_validation
+
+
+def test_windows_installed_wheel_is_included_in_hash_locked_sync() -> None:
+    windows = _job(CI_WORKFLOW.read_text(encoding="utf-8"), "execution-report-windows")
+    checkout = _step(windows, "Checkout")
+    installed = _step(windows, "Verify installed-wheel Windows behavior")
+
+    assert 'python-version: ["3.10", "3.14"]' in windows
+    assert "python-version: ${{ matrix.python-version }}" in windows
+    assert "fetch-depth: 0" in checkout
+    assert '$ErrorActionPreference = "Stop"' in installed
+    assert "$PSNativeCommandUseErrorActionPreference = $true" in installed
+    assert 'if ($PSVersionTable.PSVersion -lt [Version]"7.3")' in installed
+    append = installed.index("append_locked_wheel_requirement.py")
+    sync = installed.index("uv pip sync --require-hashes")
+    assert append < sync
+    assert "uv pip install" not in installed
+
+
+def test_macos_runs_native_lock_and_concurrency_contracts() -> None:
+    macos = _job(CI_WORKFLOW.read_text(encoding="utf-8"), "execution-report-macos")
+    native = _step(macos, "Verify native POSIX report transactions")
+    installed = _step(macos, "Verify installed-distribution report generation")
+
+    assert 'python-version: ["3.10", "3.14"]' in macos
+    assert "tests/test_execution_report_destination_locks.py" in native
+    assert "tests/test_generation_output_concurrency.py" in native
+    assert "dist-macos/*.whl" in installed
+    assert "dist-macos/*.tar.gz" in installed
+    assert "VEXCALIBUR_DISTRIBUTION=" in installed
+
+
+def test_candidate_publication_contract_runs_installed_distribution_matrix() -> None:
+    installed = _job(_validation_text(), "installed-cli")
+
+    assert "needs.build.result == 'success'" in installed
+    assert "!inputs.publication-only" not in installed
+
+
+def test_csaf_conformance_covers_wheel_and_sdist_on_boundary_pythons() -> None:
+    csaf_checker = (ROOT / "scripts" / "check-installed-csaf.sh").read_text(encoding="utf-8")
+    assert "VEXCALIBUR_DISTRIBUTION:-${VEXCALIBUR_WHEEL:-}" in csaf_checker
+    assert '"$repo_root/scripts/install-locked-distribution.sh"' in csaf_checker
+    for workflow in (
+        CI_WORKFLOW.read_text(encoding="utf-8"),
+        _validation_text(),
+    ):
+        csaf = _job(workflow, "csaf-conformance")
+        assert 'python-version: ["3.10", "3.14"]' in csaf
+        assert 'distribution: ["wheel", "sdist"]' in csaf
+        assert "python-version: ${{ matrix.python-version }}" in csaf
+        assert "VEXCALIBUR_DISTRIBUTION:" in csaf
+        assert "VEXCALIBUR_EXPECTED_PYTHON: ${{ matrix.python-version }}" in csaf
+        assert "make installed-csaf-check" in csaf
+        assert "VEXCALIBUR_WHEEL:" not in csaf
+
+
+def test_pinned_action_consumer_validates_success_and_failure_reports() -> None:
+    validation = _validation_text()
+    direct = _job(validation, "direct-vex")
+    action = _job(validation, "action-vex")
+    finalizer = _job(validation, "publication-assets")
+    direct_validation = _step(direct, "Validate direct execution reports")
+    action_validation = _step(action, "Validate Action execution reports")
+    failed_validation = _step(
+        action,
+        "Require failed generation to leave no success artifacts",
+    )
+    synthetic_validation = _step(
+        action,
+        "Validate synthetic Action report conformance",
+    )
+    final_validation = _step(finalizer, "Verify downloaded artifact bindings")
+
+    assert direct.count("--execution-report") == 3
+    assert action.count("--execution-report") == 7
+    for job, metadata_step_name in (
+        (direct, "Record direct VEX artifact name"),
+        (action, "Record Action VEX artifact name"),
+    ):
+        assert "vex.cdx.execution.json" in job
+        assert "vex.openvex.execution.json" in job
+        assert "vexcalibur-vex.execution.json" in job
+        metadata = _step(job, metadata_step_name)
+        assert ".vexcalibur-locks" in metadata
+        assert "directory.lock" in metadata
+        assert 'test "$(stat --format=%a -- "${lock_dir}")" = 700' in metadata
+        assert 'test "$(stat --format=%a -- "${lock_dir}/directory.lock")" = 600' in metadata
+        assert '! -type f ! -path "${lock_dir}"' in metadata
+    for validation_step in (direct_validation, action_validation):
+        assert "-m vexcalibur.execution_report_validation" in validation_step
+        assert "--format cyclonedx" in validation_step
+        assert "formats+=(--format openvex --format csaf)" in validation_step
+        assert '--finding-count "${ASSERTION_COUNT}"' in validation_step
+    assert "failed-generation-action.outcome" in failed_validation
+    assert 'test "${FAILED_GENERATION_OUTCOME}" = failure' in failed_validation
+    assert "failed.execution.json" in failed_validation
+    for output_format in ("cyclonedx", "openvex", "csaf"):
+        assert f"--format {output_format}" in synthetic_validation
+    assert "-m vexcalibur.execution_report_validation" in synthetic_validation
+    assert "--finding-count 1" in synthetic_validation
+    for step_name in (
+        "Generate synthetic CycloneDX report through the pinned Action",
+        "Generate synthetic OpenVEX report through the pinned Action",
+        "Generate synthetic CSAF report through the pinned Action",
+    ):
+        assert "if:" not in _step(action, step_name)
+    assert final_validation.count("expected_vex_files=") == 2
+    assert final_validation.count("vex.cdx.execution.json") == 2
+    assert final_validation.count("vex.openvex.execution.json") == 1
+    assert final_validation.count("vexcalibur-vex.execution.json") == 1
+    assert 'test "${actual_vex_files}" = "${expected_vex_files}"' in final_validation
 
 
 def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None:
@@ -366,14 +536,14 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     action = _job(validation, "action-vex")
     finalizer = _job(validation, "publication-assets")
 
-    assert "needs:" not in build
+    assert "needs: consent" in build
     assert "contents: read" in build
     assert "actions: write" not in build
     assert "id-token: write" not in build
     assert "actions/checkout@" in build
     assert "persist-credentials: false" in build
     assert "scripts/prepare-local-release-tag.sh" in build
-    assert "inputs.synthetic-ci-version" in build
+    assert "synthetic-ci-version" not in build
     assert "scripts/normalize-sdist.py" in build
     assert "normalized-sdist-second-pass.tar.gz" in build
     assert 'cmp -- "${normalized_once}" "${normalized_twice}"' in build
@@ -400,6 +570,7 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "permissions: {}" in action
     assert "actions/checkout@" not in action
     assert "vexcalibur-dev/vexcalibur-action@" in action
+    assert "action-validator-venv" in action
     assert "Upload only Action VEX output" in action
 
     for producer in ("build", "publication-inventory", "direct-vex", "action-vex"):
@@ -407,7 +578,8 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert finalizer.count("actions/download-artifact@") == 4
     assert "finalize-publication" in finalizer
     assert "verify-publication" in finalizer
-    assert helper_sync in finalizer
+    assert "uv sync --frozen --group dev" in finalizer
+    assert "--no-install-project" not in finalizer
 
 
 def test_publication_inventory_never_consumes_or_executes_the_candidate() -> None:

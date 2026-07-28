@@ -1,0 +1,769 @@
+from __future__ import annotations
+
+import os
+import socket
+import stat
+from pathlib import Path
+
+import pytest
+
+import vexcalibur.execution_report_destination as destination_module
+import vexcalibur.execution_report_staging as staging_module
+from vexcalibur.execution_report_destination import (
+    BoundFileDestination,
+    BoundFileDestinationError,
+)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_destination_replaces_stale_file_with_exact_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report.json"
+    path.write_text('{"stale":true}\n', encoding="utf-8")
+
+    destination = BoundFileDestination.prepare(path, remove_existing=True)
+    assert not path.exists()
+    destination.write_bytes(b'{"schema_version":1}\n')
+
+    assert path.read_bytes() == b'{"schema_version":1}\n'
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_destination_mode_is_exact_under_restrictive_umask(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report.json"
+    previous_umask = os.umask(0o777)
+    try:
+        BoundFileDestination.prepare(path).write_bytes(b"report")
+    finally:
+        os.umask(previous_umask)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.read_bytes() == b"report"
+    lock_directory = tmp_path / destination_module.LOCK_DIRECTORY_NAME
+    assert lock_directory.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_symlink_loop_parent_is_a_controlled_destination_error(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.symlink_to(second, target_is_directory=True)
+    second.symlink_to(first, target_is_directory=True)
+
+    with pytest.raises(
+        BoundFileDestinationError,
+        match="could not resolve destination parent directory",
+    ):
+        BoundFileDestination.prepare(first / "report.json")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_replace_failure_leaves_no_destination_or_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    path.write_text('{"stale":true}\n', encoding="utf-8")
+    destination = BoundFileDestination.prepare(path, remove_existing=True)
+
+    def fail_replace(*args: object, **kwargs: object) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(destination_module.os, "replace", fail_replace)
+
+    with pytest.raises(BoundFileDestinationError, match="replace failed"):
+        destination.write_bytes(b"replacement")
+
+    assert not path.exists()
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_cancellation_during_staging_fsync_removes_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    parent_descriptor = destination._parent_descriptor
+
+    def cancel_fsync(descriptor: int) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(destination_module.os, "fsync", cancel_fsync)
+
+    with pytest.raises(KeyboardInterrupt):
+        destination.write_bytes(b"private report")
+
+    assert not path.exists()
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+    with pytest.raises(OSError):
+        os.fstat(parent_descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_cancellation_during_temporary_file_setup_removes_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    parent_descriptor = destination._parent_descriptor
+
+    def cancel_fchmod(descriptor: int, mode: int) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(destination_module.os, "fchmod", cancel_fchmod)
+
+    with pytest.raises(KeyboardInterrupt):
+        destination.write_bytes(b"private report")
+
+    assert not path.exists()
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+    with pytest.raises(OSError):
+        os.fstat(parent_descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_cancellation_during_staging_cleanup_closes_all_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    bound_parent_descriptor = destination._parent_descriptor
+    staging_descriptors: list[int] = []
+    real_create = BoundFileDestination._create_temporary_file
+
+    def observe_temporary_file(
+        self: BoundFileDestination,
+        parent_descriptor: int,
+    ) -> tuple[int, str]:
+        result = real_create(self, parent_descriptor)
+        staging_descriptors.extend((parent_descriptor, result[0]))
+        return result
+
+    def fail_fsync(descriptor: int) -> None:
+        raise OSError("staging fsync failed")
+
+    def cancel_cleanup(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        BoundFileDestination,
+        "_create_temporary_file",
+        observe_temporary_file,
+    )
+    monkeypatch.setattr(destination_module.os, "fsync", fail_fsync)
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        cancel_cleanup,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        destination.write_bytes(b"private report")
+
+    for descriptor in (*staging_descriptors, bound_parent_descriptor):
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_stage_scope_cancellation_removes_staged_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    staging_descriptors: tuple[int, int] = ()
+    with pytest.raises(KeyboardInterrupt), destination.stage_bytes(b"private report") as staged:
+        staging_descriptors = (staged.parent_fd, staged.temporary_fd)
+        raise KeyboardInterrupt
+
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+    for descriptor in staging_descriptors:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_stage_scope_exit_removes_private_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    with destination.stage_bytes(b"private report") as staged:
+        parent_descriptor = staged.parent_fd
+        temporary_descriptor = staged.temporary_fd
+
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+    for descriptor in (parent_descriptor, temporary_descriptor):
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_parent_swap_cannot_redirect_destination(
+    tmp_path: Path,
+) -> None:
+    report_parent = tmp_path / "report-parent"
+    report_parent.mkdir()
+    moved_parent = tmp_path / "moved-report-parent"
+    redirected_parent = tmp_path / "redirected-parent"
+    redirected_parent.mkdir()
+    victim = redirected_parent / "execution-report.json"
+    victim.write_bytes(b"original bytes")
+    destination = BoundFileDestination.prepare(
+        report_parent / victim.name,
+        protected_paths=(victim,),
+        remove_existing=True,
+    )
+
+    report_parent.rename(moved_parent)
+    report_parent.symlink_to(redirected_parent, target_is_directory=True)
+
+    with pytest.raises(
+        BoundFileDestinationError,
+        match="parent directory changed",
+    ):
+        destination.write_bytes(b"replacement")
+
+    assert victim.read_bytes() == b"original bytes"
+    assert not (moved_parent / victim.name).exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_intermediate_parent_symlink_retarget_cannot_redirect_destination(
+    tmp_path: Path,
+) -> None:
+    first_parent = tmp_path / "first"
+    first_parent.mkdir()
+    second_parent = tmp_path / "second"
+    second_parent.mkdir()
+    parent_link = tmp_path / "current"
+    parent_link.symlink_to(first_parent, target_is_directory=True)
+    destination = BoundFileDestination.prepare(parent_link / "report.json")
+
+    with destination.stage_bytes(b"replacement") as staged:
+        parent_link.unlink()
+        parent_link.symlink_to(second_parent, target_is_directory=True)
+        with pytest.raises(BoundFileDestinationError, match="parent directory changed"):
+            staged.commit()
+
+    assert not (first_parent / "report.json").exists()
+    assert not (second_parent / "report.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_retargeted_parent_alias_check_uses_bound_directory(
+    tmp_path: Path,
+) -> None:
+    original_parent = tmp_path / "original"
+    original_parent.mkdir()
+    moved_parent = tmp_path / "moved"
+    decoy_parent = tmp_path / "decoy"
+    parent_link = tmp_path / "current"
+    parent_link.symlink_to(original_parent, target_is_directory=True)
+    destination = BoundFileDestination.prepare(parent_link / "report.json")
+    redirected_stdout = tmp_path / "stdout.json"
+    redirected_stdout.write_bytes(b"stdout")
+
+    original_parent.rename(moved_parent)
+    decoy_parent.mkdir()
+    original_parent.symlink_to(decoy_parent, target_is_directory=True)
+    parent_link.unlink()
+    parent_link.symlink_to(moved_parent, target_is_directory=True)
+    (moved_parent / "report.json").hardlink_to(redirected_stdout)
+
+    descriptor = os.open(redirected_stdout, os.O_WRONLY)
+    try:
+        assert destination.aliases_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+        destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_live_parent_descriptor_rejects_a_precreated_replacement(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    destination = BoundFileDestination.prepare(parent / "report.json")
+    retained_stat = os.fstat(destination._parent_descriptor)
+    replacement_stat = replacement.stat()
+    assert (replacement_stat.st_dev, replacement_stat.st_ino) != (
+        retained_stat.st_dev,
+        retained_stat.st_ino,
+    )
+
+    parent.rmdir()
+    replacement.rename(parent)
+
+    with pytest.raises(BoundFileDestinationError, match="parent directory changed"):
+        destination.write_bytes(b"replacement")
+
+    assert not (parent / "report.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_replaced_staging_entry_is_not_published(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report.json"
+    attacker_file = tmp_path / "attacker.json"
+    attacker_file.write_bytes(b"attacker controlled")
+    destination = BoundFileDestination.prepare(path)
+
+    with destination.stage_bytes(b"expected report") as staged:
+        os.unlink(staged.temporary_name, dir_fd=staged.parent_fd)
+        os.symlink(
+            attacker_file,
+            staged.temporary_name,
+            dir_fd=staged.parent_fd,
+        )
+
+        with pytest.raises(BoundFileDestinationError, match="staged file changed"):
+            staged.commit()
+
+    destination.close()
+    assert not path.exists()
+    assert attacker_file.read_bytes() == b"attacker controlled"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_symlink_destination_replaces_only_the_link(tmp_path: Path) -> None:
+    target = tmp_path / "target.json"
+    target.write_bytes(b"protected target")
+    path = tmp_path / "execution-report.json"
+    path.symlink_to(target)
+
+    BoundFileDestination.prepare(path, remove_existing=True).write_bytes(b"report")
+
+    assert path.read_bytes() == b"report"
+    assert not path.is_symlink()
+    assert target.read_bytes() == b"protected target"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_hardlink_destination_replaces_only_the_named_link(tmp_path: Path) -> None:
+    target = tmp_path / "target.json"
+    target.write_bytes(b"protected target")
+    path = tmp_path / "execution-report.json"
+    path.hardlink_to(target)
+
+    BoundFileDestination.prepare(path, remove_existing=True).write_bytes(b"report")
+
+    assert path.read_bytes() == b"report"
+    assert target.read_bytes() == b"protected target"
+    assert path.stat().st_ino != target.stat().st_ino
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_staged_file_mode_change_prevents_publication(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+
+    with destination.stage_bytes(b"expected report") as staged:
+        os.fchmod(staged.temporary_fd, 0o644)
+
+        with pytest.raises(BoundFileDestinationError, match="mode changed"):
+            staged.commit()
+
+    destination.close()
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_post_replace_mode_change_removes_unverified_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    real_replace = destination_module.os.replace
+
+    def replace_then_change_mode(*args: object, **kwargs: object) -> None:
+        real_replace(*args, **kwargs)
+        path.chmod(0o644)
+
+    monkeypatch.setattr(destination_module.os, "replace", replace_then_change_mode)
+
+    with pytest.raises(BoundFileDestinationError, match="published file changed"):
+        destination.write_bytes(b"expected report")
+
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_post_replace_directory_fsync_failure_fails_and_removes_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path, remove_existing=True)
+    real_fsync = destination_module.os.fsync
+    calls = 0
+
+    def fail_second_fsync(descriptor: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("directory fsync failed")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(destination_module.os, "fsync", fail_second_fsync)
+
+    with pytest.raises(BoundFileDestinationError, match="directory fsync failed"):
+        destination.write_bytes(b"replacement")
+
+    assert calls == 3
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_cancellation_after_replace_removes_unverified_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    real_replace = destination_module.os.replace
+
+    def replace_then_cancel(*args: object, **kwargs: object) -> None:
+        real_replace(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(destination_module.os, "replace", replace_then_cancel)
+
+    with pytest.raises(KeyboardInterrupt):
+        destination.write_bytes(b"replacement")
+
+    assert not path.exists()
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_interrupted_rollback_retries_without_losing_cleanup_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    real_fsync = staging_module.os.fsync
+    real_remove = staging_module._remove_matching_destination
+    fsync_calls = 0
+    rollback_interrupted = False
+
+    def fail_directory_fsync(descriptor: int) -> None:
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 2:
+            raise OSError("directory fsync failed")
+        real_fsync(descriptor)
+
+    def interrupt_first_rollback(*args: object, **kwargs: object) -> bool:
+        nonlocal rollback_interrupted
+        if not rollback_interrupted:
+            rollback_interrupted = True
+            raise KeyboardInterrupt("rollback interrupted")
+        return real_remove(*args, **kwargs)
+
+    monkeypatch.setattr(staging_module.os, "fsync", fail_directory_fsync)
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        interrupt_first_rollback,
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="rollback interrupted"):
+        destination.write_bytes(b"replacement")
+
+    assert rollback_interrupted
+    assert not path.exists()
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_parent_swap_after_replace_rolls_back_through_bound_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "output"
+    moved_parent = tmp_path / "moved-output"
+    parent.mkdir()
+    path = parent / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    real_verify_parent_path = BoundFileDestination.verify_parent_path
+    swapped = False
+
+    def swap_after_replace(bound: BoundFileDestination) -> None:
+        nonlocal swapped
+        if bound is destination and not swapped and path.exists():
+            parent.rename(moved_parent)
+            parent.mkdir()
+            swapped = True
+        real_verify_parent_path(bound)
+
+    monkeypatch.setattr(
+        BoundFileDestination,
+        "verify_parent_path",
+        swap_after_replace,
+    )
+
+    with pytest.raises(BoundFileDestinationError, match="parent directory changed"):
+        destination.write_bytes(b"replacement")
+
+    assert swapped
+    assert not (moved_parent / path.name).exists()
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_post_replace_failure_preserves_a_concurrent_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    replacement = tmp_path / "replacement.json"
+    destination = BoundFileDestination.prepare(path)
+    real_fsync = destination_module.os.fsync
+    calls = 0
+
+    def fail_after_concurrent_replace(descriptor: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            replacement.write_bytes(b"other writer")
+            os.replace(replacement, path)
+            raise OSError("directory fsync failed")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(
+        destination_module.os,
+        "fsync",
+        fail_after_concurrent_replace,
+    )
+
+    with pytest.raises(BoundFileDestinationError, match="directory fsync failed"):
+        destination.write_bytes(b"this writer")
+
+    assert path.read_bytes() == b"other writer"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_stale_unlink_directory_fsync_failure_is_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    path.write_bytes(b"stale")
+
+    def fail_fsync(descriptor: int) -> None:
+        raise OSError("directory fsync failed")
+
+    monkeypatch.setattr(destination_module.os, "fsync", fail_fsync)
+
+    with pytest.raises(BoundFileDestinationError, match="could not remove stale"):
+        BoundFileDestination.prepare(path, remove_existing=True)
+
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_fifo_destination_is_rejected_without_removal(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report"
+    os.mkfifo(path)
+
+    with pytest.raises(BoundFileDestinationError, match="regular file"):
+        BoundFileDestination.prepare(path, remove_existing=True)
+
+    assert path.exists()
+    assert stat.S_ISFIFO(path.lstat().st_mode)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_fifo_created_after_staging_is_not_replaced(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report"
+    destination = BoundFileDestination.prepare(path)
+
+    with destination.stage_bytes(b"report") as staged:
+        os.mkfifo(path)
+        with pytest.raises(BoundFileDestinationError, match="regular file"):
+            staged.commit()
+
+    destination.close()
+    assert stat.S_ISFIFO(path.lstat().st_mode)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_unix_socket_destination_is_rejected_without_removal(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(path))
+
+        with pytest.raises(BoundFileDestinationError, match="regular file"):
+            BoundFileDestination.prepare(path, remove_existing=True)
+
+        assert path.exists()
+        assert stat.S_ISSOCK(path.lstat().st_mode)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_device_destination_is_rejected_without_replacement() -> None:
+    path = Path("/dev/null")
+    if not path.exists() or not stat.S_ISCHR(path.stat().st_mode):
+        pytest.skip("/dev/null is not an available character device")
+
+    with pytest.raises(BoundFileDestinationError, match="regular file"):
+        BoundFileDestination.prepare(path)
+
+    assert stat.S_ISCHR(path.stat().st_mode)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_normalized_filename_and_hardlink_aliases_are_rejected(tmp_path: Path) -> None:
+    protected = tmp_path / "SBOM-\N{LATIN SMALL LETTER E WITH ACUTE}.json"
+    protected.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(BoundFileDestinationError, match="must not replace"):
+        BoundFileDestination.prepare(
+            tmp_path / "sbom-e\N{COMBINING ACUTE ACCENT}.json",
+            protected_paths=(protected,),
+            remove_existing=True,
+        )
+
+    hardlink = tmp_path / "hardlink.json"
+    hardlink.hardlink_to(protected)
+    with pytest.raises(BoundFileDestinationError, match="must not replace"):
+        BoundFileDestination.prepare(
+            hardlink,
+            protected_paths=(protected,),
+            remove_existing=True,
+        )
+
+    assert protected.read_text(encoding="utf-8") == "{}\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_open_regular_file_descriptor_alias_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "redirected-stdout.json"
+    path.write_bytes(b"stdout")
+    descriptor = os.open(path, os.O_WRONLY)
+    try:
+        with pytest.raises(BoundFileDestinationError, match="standard output"):
+            BoundFileDestination.prepare(
+                path,
+                protected_descriptors=((descriptor, "standard output"),),
+                remove_existing=True,
+            )
+    finally:
+        os.close(descriptor)
+
+    assert path.read_bytes() == b"stdout"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_open_fifo_descriptor_alias_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "redirected-stdout"
+    os.mkfifo(path)
+    descriptor = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        with pytest.raises(BoundFileDestinationError, match="standard output"):
+            BoundFileDestination.prepare(
+                path,
+                protected_descriptors=((descriptor, "standard output"),),
+                remove_existing=True,
+            )
+    finally:
+        os.close(descriptor)
+
+    assert path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_maximum_length_destination_uses_bounded_temporary_name(tmp_path: Path) -> None:
+    name_max = os.pathconf(tmp_path, "PC_NAME_MAX")
+    if name_max < 64:
+        pytest.skip("filesystem filename limit is too small for the staging contract")
+    path = tmp_path / ("r" * name_max)
+
+    BoundFileDestination.prepare(path).write_bytes(b"report")
+
+    assert path.read_bytes() == b"report"
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+
+
+def test_windows_report_requests_fail_before_touching_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    path.write_text('{"stale":true}\n', encoding="utf-8")
+    monkeypatch.setattr(destination_module.os, "name", "nt")
+
+    with pytest.raises(BoundFileDestinationError, match="not supported on Windows"):
+        BoundFileDestination.prepare(path, remove_existing=True)
+
+    assert path.read_text(encoding="utf-8") == '{"stale":true}\n'
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows contract")
+def test_native_windows_report_request_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "execution-report.json"
+    path.write_text('{"stale":true}\n', encoding="utf-8")
+
+    with pytest.raises(BoundFileDestinationError, match="not supported on Windows"):
+        BoundFileDestination.prepare(path, remove_existing=True)
+
+    assert path.read_text(encoding="utf-8") == '{"stale":true}\n'
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_bound_destinations_detect_same_normalized_name(tmp_path: Path) -> None:
+    report = BoundFileDestination.prepare(tmp_path / "VEX.json")
+    output = BoundFileDestination.prepare(tmp_path / "vex.json")
+
+    assert report.aliases(output)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_swapped_output_parent_cannot_bypass_alias_check(tmp_path: Path) -> None:
+    report_parent = tmp_path / "report-parent"
+    report_parent.mkdir()
+    output_parent = tmp_path / "output-parent"
+    output_parent.mkdir()
+    moved_output_parent = tmp_path / "moved-output-parent"
+    report = BoundFileDestination.prepare(report_parent / "vex.json")
+
+    output_parent.rename(moved_output_parent)
+    output_parent.symlink_to(report_parent, target_is_directory=True)
+    output = BoundFileDestination.prepare(output_parent / "vex.json")
+
+    assert report.aliases(output)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_close_failure_does_not_escape_destination_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    real_close = destination_module.os.close
+
+    def close_then_fail(descriptor: int) -> None:
+        real_close(descriptor)
+        raise OSError("close failed")
+
+    monkeypatch.setattr(destination_module.os, "close", close_then_fail)
+
+    destination.verify_parent_path()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_nul_destination_path_is_a_controlled_error(tmp_path: Path) -> None:
+    path = Path(f"{tmp_path}/execution\0report.json")
+
+    with pytest.raises(BoundFileDestinationError, match="NUL byte"):
+        BoundFileDestination.prepare(path)

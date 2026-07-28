@@ -25,6 +25,8 @@ MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_METADATA_BYTES = 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+MAX_NORMALIZED_SBOM_COMPONENTS = 10_000
+MAX_NORMALIZED_SBOM_COMPONENT_DEPTH = 50
 MAX_WHEEL_SCM_METADATA_BYTES = 64 * 1024
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 GROUPED_SHA256_PATTERN = re.compile(r"^(?:[0-9a-f]{16}:){3}[0-9a-f]{16}$")
@@ -207,6 +209,19 @@ def _object_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def canonical_json(document: object) -> str:
     """Serialize one canonical, reviewable JSON document."""
     return f"{json.dumps(document, indent=2, sort_keys=True)}\n"
+
+
+def _canonical_execution_report_json(document: object) -> str:
+    """Serialize one execution report according to its public byte contract."""
+    return (
+        json.dumps(
+            document,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def release_timestamp(source_date_epoch: int) -> str:
@@ -708,6 +723,20 @@ def _expected_evidence_payload_names(assertion_count: int) -> set[str]:
     return names
 
 
+def _expected_execution_report_names(assertion_count: int) -> set[str]:
+    if assertion_count < 0:
+        raise EvidenceError("assertion count must not be negative")
+    names = {"vex.cdx.execution.json"}
+    if assertion_count > 0:
+        names.update(
+            {
+                "vex.openvex.execution.json",
+                "vexcalibur-vex.execution.json",
+            }
+        )
+    return names
+
+
 def _expected_format_manifest(
     assertion_count: int,
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
@@ -1073,12 +1102,46 @@ def _verify_generated_vex(
         )
 
 
+def _verify_execution_reports(
+    *,
+    output_dir: Path,
+    assertion_count: int,
+    expected_component_count: int,
+    release_version: str,
+) -> None:
+    from vexcalibur.execution_report_validation import (
+        ExecutionReportValidationError,
+        validate_execution_reports,
+    )
+    from vexcalibur.generation_context import ExecutionReportOutputFormat
+
+    formats = [ExecutionReportOutputFormat.CYCLONEDX]
+    if assertion_count > 0:
+        formats.extend(
+            [
+                ExecutionReportOutputFormat.OPENVEX,
+                ExecutionReportOutputFormat.CSAF,
+            ]
+        )
+    try:
+        validate_execution_reports(
+            output_dir,
+            formats=tuple(formats),
+            expected_version=release_version,
+            expected_finding_count=assertion_count,
+            expected_component_count=expected_component_count,
+        )
+    except ExecutionReportValidationError as exc:
+        raise EvidenceError(str(exc)) from exc
+
+
 def _expected_publication_validation(assertion_count: int) -> dict[str, str]:
     return {
         "action_local_wheel_equivalence": "passed",
         "cross_format_assertion_equivalence": (
             "passed" if assertion_count > 0 else "not_applicable_without_assertions"
         ),
+        "execution_reports": "passed",
         "installed_local_wheel": "passed",
         "production_state_policy": PRODUCTION_STATE_POLICY,
         "sbom_cyclonedx_1_5_schema": "passed",
@@ -1145,12 +1208,27 @@ def finalize_publication_bundle(
     generated_artifacts = _generated_format_artifacts(
         {"formats": formats}, assertion_count=len(findings)
     )
+    generation_artifacts = generated_artifacts | _expected_execution_report_names(len(findings))
     direct_files = _bundle_files(direct_output_dir, excluded=set())
     action_files = _bundle_files(action_output_dir, excluded=set())
-    if {path.name for path in direct_files} != generated_artifacts:
+    if {path.name for path in direct_files} != generation_artifacts:
         raise EvidenceError("direct-wheel output file set differs from the format contract")
-    if {path.name for path in action_files} != generated_artifacts:
+    if {path.name for path in action_files} != generation_artifacts:
         raise EvidenceError("Action output file set differs from the format contract")
+    sbom = _require_dict(load_json(inventory_dir / "sbom.cdx.json"), field="SBOM")
+    expected_component_count = _normalized_sbom_component_count(sbom)
+    _verify_execution_reports(
+        output_dir=direct_output_dir,
+        assertion_count=len(findings),
+        expected_component_count=expected_component_count,
+        release_version=release_version,
+    )
+    _verify_execution_reports(
+        output_dir=action_output_dir,
+        assertion_count=len(findings),
+        expected_component_count=expected_component_count,
+        release_version=release_version,
+    )
     action_by_name = {path.name: path for path in action_files}
     for direct_file in direct_files:
         action_file = action_by_name[direct_file.name]
@@ -1163,7 +1241,7 @@ def finalize_publication_bundle(
     _verify_generated_vex(
         output_dir=direct_output_dir,
         findings=findings,
-        sbom=_require_dict(load_json(inventory_dir / "sbom.cdx.json"), field="SBOM"),
+        sbom=sbom,
     )
     build_payload_sha256 = _payload_sha256([wheel_path, sdist_path])
     inventory_payload_sha256 = _payload_sha256(
@@ -1385,7 +1463,8 @@ def verify_publication_bundle(
         {"formats": _expected_format_manifest(len(findings))[0]},
         assertion_count=len(findings),
     )
-    generated_paths = [bundle_dir / name for name in sorted(generated_names)]
+    generation_names = generated_names | _expected_execution_report_names(len(findings))
+    generated_paths = [bundle_dir / name for name in sorted(generation_names)]
     generated_payload_sha256 = _payload_sha256(generated_paths)
     build_payload_sha256 = _payload_sha256(
         [
@@ -1478,13 +1557,17 @@ def verify_publication_bundle(
     if actual_distributions != expected_distributions:
         raise EvidenceError("publication distribution set is incomplete")
 
-    expected_names = _expected_evidence_payload_names(len(findings)) | {
-        expected_wheel_name,
-        expected_sdist_name,
-        "uv.lock",
-        "manifest.json",
-        "SHA256SUMS",
-    }
+    expected_names = (
+        _expected_evidence_payload_names(len(findings))
+        | {
+            expected_wheel_name,
+            expected_sdist_name,
+            "uv.lock",
+            "manifest.json",
+            "SHA256SUMS",
+        }
+        | _expected_execution_report_names(len(findings))
+    )
     actual_names = {path.name for path in _bundle_files(bundle_dir, excluded=set())}
     if actual_names != expected_names:
         raise EvidenceError(
@@ -1563,6 +1646,12 @@ def verify_publication_bundle(
             _require_dict(load_json(bundle_dir / "vex.openvex.json"), field="OpenVEX"),
             _require_dict(load_json(bundle_dir / "vexcalibur-vex.json"), field="CSAF"),
         )
+    _verify_execution_reports(
+        output_dir=bundle_dir,
+        assertion_count=len(findings),
+        expected_component_count=_normalized_sbom_component_count(sbom_document),
+        release_version=release_version,
+    )
     expected_validation = _expected_publication_validation(len(findings))
     if manifest.get("validation") != expected_validation:
         raise EvidenceError("publication validation record differs from the checked contract")
@@ -1859,6 +1948,54 @@ def _reviewed_assertions(
             raise EvidenceError(f"reviewed findings resolve to duplicate assertion {assertion!r}")
         assertions.add(assertion)
     return assertions
+
+
+def _normalized_sbom_component_count(sbom: dict[str, Any]) -> int:
+    """Derive Vexcalibur's normalized component count without running the candidate."""
+    metadata = _require_dict(sbom.get("metadata"), field="SBOM metadata")
+    roots = list(_dict_items(sbom.get("components", []), field="SBOM components"))
+    root_component = metadata.get("component")
+    if root_component is not None:
+        roots.append(_require_dict(root_component, field="SBOM root component"))
+
+    stack = [(component, 0) for component in reversed(roots)]
+    component_refs: set[str] = set()
+    identities: set[tuple[str, str]] = set()
+    visited = 0
+    while stack:
+        component, depth = stack.pop()
+        if depth > MAX_NORMALIZED_SBOM_COMPONENT_DEPTH:
+            raise EvidenceError("SBOM exceeds the normalized component nesting limit")
+        visited += 1
+        if visited > MAX_NORMALIZED_SBOM_COMPONENTS:
+            raise EvidenceError("SBOM exceeds the normalized component count limit")
+
+        children = list(
+            _dict_items(
+                component.get("components", []),
+                field="SBOM child components",
+            )
+        )
+        stack.extend((child, depth + 1) for child in reversed(children))
+
+        raw_purl = component.get("purl")
+        if raw_purl is None:
+            continue
+        purl = _canonical_purl(raw_purl, field="SBOM component purl")
+        raw_ref = component.get("bom-ref")
+        component_ref = (
+            purl
+            if raw_ref is None
+            else _require_nonempty_string(raw_ref, field="SBOM component bom-ref")
+        )
+        if component_ref in component_refs:
+            raise EvidenceError(f"SBOM contains duplicate component reference {component_ref!r}")
+        component_refs.add(component_ref)
+        identities.add((component_ref, purl))
+
+    if not identities:
+        raise EvidenceError("SBOM contains no normalized components")
+    return len(identities)
 
 
 def _canonical_purl(value: Any, *, field: str) -> str:

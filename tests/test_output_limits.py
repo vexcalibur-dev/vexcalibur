@@ -1,18 +1,28 @@
 from datetime import datetime
+from typing import Literal
 
 import pytest
 from packageurl import PackageURL
 
+from vexcalibur import generate as generate_module
 from vexcalibur.csaf import (
     Csaf20DocumentMetadata,
     Csaf20VexJsonRenderer,
     CsafPublisherCategory,
 )
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
-from vexcalibur.generate import generate_vex_from_components
+from vexcalibur.generate import (
+    ExecutionReportOutputFormat,
+    generate_vex_from_components,
+    generate_vex_from_components_result,
+)
 from vexcalibur.openvex import OpenVexJsonRenderer
 from vexcalibur.render import VexRenderer, VexRenderError
 from vexcalibur.vex import CycloneDxJsonRenderer
+
+
+def test_production_vex_output_limit_is_25_mib() -> None:
+    assert generate_module.MAX_VEX_OUTPUT_BYTES == 25 * 1024 * 1024
 
 
 class _StaticSource:
@@ -247,3 +257,101 @@ def test_builtin_renderer_subclass_uses_exact_post_render_limit(
         )
 
     assert render_was_called is True
+
+
+def test_report_format_capability_does_not_enable_preflight_budgeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    render_was_called = False
+
+    class RegisteredRenderer(CycloneDxJsonRenderer):
+        def execution_report_output_format(
+            self,
+        ) -> Literal[ExecutionReportOutputFormat.CUSTOM]:
+            return ExecutionReportOutputFormat.CUSTOM
+
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            nonlocal render_was_called
+            render_was_called = True
+            return "{}\n"
+
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="A" * 1_024,
+        version="1.0.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0.0"),
+    )
+    finding = VulnerabilityFinding(
+        id="CVE-2026-0001",
+        source_name="Unit Test",
+        source_url="https://security.example.test/vulnerabilities",
+        component_ref=component.ref,
+        purl=component.purl.to_string(),
+    )
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64)
+
+    result = generate_vex_from_components_result(
+        components=(component,),
+        source=_StaticSource((finding,)),
+        timestamp=None,
+        renderer=RegisteredRenderer(),
+    )
+
+    assert result.rendered_document == "{}\n"
+    assert render_was_called is True
+
+
+@pytest.mark.parametrize(
+    ("rendered", "should_succeed"),
+    (
+        ("a" * 62 + "\N{LATIN SMALL LETTER E WITH ACUTE}", True),
+        ("a" * 63 + "\N{LATIN SMALL LETTER E WITH ACUTE}", False),
+    ),
+)
+def test_custom_renderer_limit_counts_exact_utf8_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+    rendered: str,
+    should_succeed: bool,
+) -> None:
+    class CustomRenderer:
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            return rendered
+
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0.0"),
+    )
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64)
+
+    if should_succeed:
+        assert (
+            generate_vex_from_components(
+                components=(component,),
+                source=_StaticSource(()),
+                timestamp=None,
+                renderer=CustomRenderer(),
+            )
+            == rendered
+        )
+    else:
+        with pytest.raises(VexRenderError, match="64 byte output limit"):
+            generate_vex_from_components(
+                components=(component,),
+                source=_StaticSource(()),
+                timestamp=None,
+                renderer=CustomRenderer(),
+            )

@@ -19,6 +19,7 @@ from vexcalibur.domain import (
     VulnerabilityFinding,
     VulnerabilitySourceError,
 )
+from vexcalibur.generation_context import FindingSourceCategory
 from vexcalibur.input_file import BoundedFileReadError, read_bounded_regular_file
 from vexcalibur.json_boundary import JsonFailureKind, StrictJsonError, strict_json_loads
 from vexcalibur.url_policy import UrlUserinfoError, reject_url_userinfo
@@ -39,6 +40,14 @@ class LocalFindingsSource:
     """Vulnerability source backed by a local findings JSON document."""
 
     path: Path
+
+    def _vexcalibur_execution_report_finding_source(
+        self,
+    ) -> FindingSourceCategory | None:
+        """Return provenance only for the built-in source implementation."""
+        if type(self) is not LocalFindingsSource:
+            return None
+        return FindingSourceCategory.LOCAL_FILE
 
     def findings_for_components(
         self,

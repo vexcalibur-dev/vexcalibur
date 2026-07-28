@@ -181,13 +181,15 @@ Every publication bundle contains:
 | `runtime-constraints.txt` | Strict runtime installation contract |
 | `review.json` and `findings.json` | Exact reviewed inputs |
 | `vex.cdx.json` | Byte-identical output from the installed wheel and pinned Action |
+| `vex.cdx.execution.json` | Schema-1 report bound to the CycloneDX document bytes |
 | `vexcalibur-VERSION-py3-none-any.whl` | Exact checked wheel later eligible for PyPI |
 | `vexcalibur-VERSION.tar.gz` | Exact checked source distribution later eligible for PyPI |
 | `manifest.json` | Closed-world schema-2 publication record |
 | `SHA256SUMS` | Sorted digest inventory for every other release asset |
 
 `vex.openvex.json` and `vexcalibur-vex.json` are additionally present when the
-review contains at least one assertion.
+review contains at least one assertion. Their reports are
+`vex.openvex.execution.json` and `vexcalibur-vex.execution.json`.
 
 The schema-2 verifier rejects unknown fields. The top-level fields are exactly:
 
@@ -216,8 +218,8 @@ The generator contains exactly `distribution`, `sdist_filename`,
 commit; and `wheel_source_dirty` is `false`.
 
 The schema-2 validation record contains the six schema-1 fields plus
-`action_local_wheel_equivalence: passed`. All other values and the
-zero-assertion cross-format exception are unchanged.
+`action_local_wheel_equivalence: passed` and `execution_reports: passed`. All
+other values and the zero-assertion cross-format exception are unchanged.
 
 `publication` has exactly these fields:
 
@@ -242,7 +244,7 @@ The `action` record contains exactly:
 | `job` | `action-vex` |
 | `output_equivalence` | `byte_for_byte` |
 | `package_spec` | `file_uri_with_sha256_fragment` |
-| `payload_sha256` | Canonical payload digest of the generated VEX files |
+| `payload_sha256` | Canonical payload digest of the generated VEX files and execution reports |
 | `repository` | `vexcalibur-dev/vexcalibur-action` |
 
 Schema-2 creation currently requires Action commit
@@ -256,7 +258,8 @@ For each producer, the finalizer sorts the relevant
 canonical JSON serializer, and records the SHA-256 as `payload_sha256`. The
 inventory payload covers the five reviewed inventory files, the build payload
 covers the wheel and source distribution, and the direct and Action payloads
-cover the generated VEX files. The latter two digests must be equal.
+cover the generated VEX files and execution reports. The latter two digests
+must be equal.
 
 GitHub Actions archive digests are checked while artifacts cross jobs. They are
 deliberately absent from the published manifest because the archive envelope is

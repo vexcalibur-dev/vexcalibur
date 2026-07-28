@@ -6,7 +6,7 @@ This file gives automated contributors the repository rules needed to work safel
 
 Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files or a GitHub
 Dependency Graph SBOM. Findings come from OSV-compatible services or local
-JSON. Version 0.3.1 renders CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
+JSON. It renders CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
 
 The implementation is Python, but domain and product decisions should remain ecosystem-neutral unless an issue narrows the scope. Do not present a planned input, provider, or output format as available.
 
@@ -52,8 +52,8 @@ make check
 Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`,
 `make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`,
 `make build`, `make openvex-interop`, `make csaf-validator-install`,
-`make csaf-interop`, `make installed-csaf-check`, `make governance-check`, and
-`make pre-commit`.
+`make csaf-interop`, `make installed-cli-check`, `make installed-csaf-check`,
+`make governance-check`, and `make pre-commit`.
 
 `make workflow-lint` needs `actionlint` and `shellcheck` on `PATH`.
 
@@ -78,6 +78,10 @@ Core modules live under `src/vexcalibur/`:
 | --- | --- |
 | `cli.py` | Typer commands and user-facing errors |
 | `generate.py` | Workflow orchestration |
+| `generate_command.py` | Validated CLI generation requests |
+| `generation_result.py` | Immutable generation results and report models |
+| `generation_output.py` | VEX and report publication transactions |
+| `execution_report_destination.py` | Descriptor-bound POSIX file writes |
 | `sbom.py` | Local CycloneDX parsing and component extraction |
 | `github_sbom.py` | GitHub Dependency Graph SBOM access and SPDX extraction |
 | `domain.py` | Provider-neutral components, findings, and source protocol |
@@ -161,10 +165,11 @@ Before merging a meaningful change, run or confirm:
 ```bash
 uv lock --check
 uv sync --frozen --extra docs
-uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
-uv run --frozen ruff check src tests scripts/*.py docs/conf.py
+uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py
+uv run --frozen ruff check src tests scripts/*.py docs/conf.py docs/examples/*.py
 uv run --frozen mypy src
 make workflow-lint
+make installed-cli-check
 make openvex-interop
 make csaf-validator-install
 make csaf-interop

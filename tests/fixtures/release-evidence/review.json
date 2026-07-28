@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "review_kind": "synthetic_fixture",
-  "analysis_revision": 1,
-  "reviewed_at": "2026-07-15T17:05:56Z",
+  "analysis_revision": 2,
+  "reviewed_at": "2026-07-30T00:58:39Z",
   "reviewed_by": "Automated conformance fixture",
   "inventory": {
     "path": "uv.lock",
-    "sha256": "ede5f835723e5bf1:3b7160fbb20e7408:7f7c5dea3b1e18ee:3bbc86168549ca92",
+    "sha256": "abe1bef4728b8a47:bc3f7e0ad55d2286:3debfcb9a3c17aff:4ca67fae85061691",
     "coverage": "cross-platform-reference-runtime"
   },
   "findings": {

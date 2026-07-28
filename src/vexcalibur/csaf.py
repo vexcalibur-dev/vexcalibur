@@ -30,6 +30,7 @@ from vexcalibur.domain import (
     VulnerabilityFinding,
 )
 from vexcalibur.errors import VexRenderError
+from vexcalibur.generation_context import ExecutionReportOutputFormat
 from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
 CSAF_VERSION = "2.0"
@@ -129,6 +130,14 @@ class Csaf20VexJsonRenderer:
 
     metadata: Csaf20DocumentMetadata
     tool_version: str = field(default_factory=lambda: __version__)
+
+    def _vexcalibur_execution_report_output_format(
+        self,
+    ) -> ExecutionReportOutputFormat | None:
+        """Return the format only for the built-in renderer implementation."""
+        if type(self) is not Csaf20VexJsonRenderer:
+            return None
+        return ExecutionReportOutputFormat.CSAF
 
     def __post_init__(self) -> None:
         normalized_tool_version = self.tool_version.strip()

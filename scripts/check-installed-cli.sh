@@ -17,26 +17,33 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$work_dir/cache}"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 unset VIRTUAL_ENV CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL
 
-wheel="${VEXCALIBUR_WHEEL:-}"
-if [[ -z "$wheel" ]]; then
+distribution="${VEXCALIBUR_DISTRIBUTION:-${VEXCALIBUR_WHEEL:-}}"
+if [[ -n "${VEXCALIBUR_DISTRIBUTION:-}" && -n "${VEXCALIBUR_WHEEL:-}" &&
+  "$VEXCALIBUR_DISTRIBUTION" != "$VEXCALIBUR_WHEEL" ]]; then
+  printf 'VEXCALIBUR_DISTRIBUTION and VEXCALIBUR_WHEEL name different files\n' >&2
+  exit 2
+fi
+if [[ -z "$distribution" ]]; then
   dist_dir="$work_dir/dist"
   "$uv_bin" build --clear --no-create-gitignore --no-sources --out-dir "$dist_dir"
-  mapfile -t wheels < <(find "$dist_dir" -maxdepth 1 -type f -name "*.whl" | sort)
+  shopt -s nullglob
+  wheels=("$dist_dir"/*.whl)
+  shopt -u nullglob
   if [[ ${#wheels[@]} -ne 1 ]]; then
     printf 'expected exactly one wheel in %s, found %s\n' "$dist_dir" "${#wheels[@]}" >&2
     exit 2
   fi
-  wheel="${wheels[0]}"
+  distribution="${wheels[0]}"
 fi
 
-if [[ ! -f "$wheel" ]]; then
-  printf 'Vexcalibur wheel was not found: %s\n' "$wheel" >&2
+if [[ ! -f "$distribution" ]]; then
+  printf 'Vexcalibur distribution was not found: %s\n' "$distribution" >&2
   exit 2
 fi
 
 venv_dir="$work_dir/venv"
-"$repo_root/scripts/install-locked-wheel.sh" \
+"$repo_root/scripts/install-locked-distribution.sh" \
   "$venv_dir" \
-  "$wheel" \
+  "$distribution" \
   "$work_dir/runtime-requirements.txt"
 VEXCALIBUR_BIN_DIR="$venv_dir/bin" "$venv_dir/bin/python" tests/integration/check_installed_cli.py

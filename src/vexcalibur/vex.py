@@ -32,6 +32,7 @@ from vexcalibur.document import (
     vex_document_from_findings,
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.generation_context import ExecutionReportOutputFormat
 
 VexRenderError = _render.VexRenderError
 
@@ -55,6 +56,14 @@ def render_cyclonedx_vex_json(
 
 class CycloneDxJsonRenderer:
     """Render CycloneDX 1.6 VEX JSON."""
+
+    def _vexcalibur_execution_report_output_format(
+        self,
+    ) -> ExecutionReportOutputFormat | None:
+        """Return the format only for the built-in renderer implementation."""
+        if type(self) is not CycloneDxJsonRenderer:
+            return None
+        return ExecutionReportOutputFormat.CYCLONEDX
 
     def render(
         self,

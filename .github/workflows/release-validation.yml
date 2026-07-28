@@ -20,10 +20,11 @@ on:
         required: false
         default: false
         type: boolean
-      synthetic-ci-version:
-        description: Isolate a local v0.0.0 tag for the unprivileged CI contract only.
-        required: false
-        default: false
+      allow-public-evidence-upload:
+        description: >-
+          Explicitly allow release artifacts, dependency inventory, and VEX
+          execution reports to be uploaded to GitHub.
+        required: true
         type: boolean
     outputs:
       sha:
@@ -66,6 +67,21 @@ env:
   XDG_CACHE_HOME: /tmp/vexcalibur-cache
 
 jobs:
+  consent:
+    name: Confirm public evidence upload
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require explicit upload consent
+        env:
+          ALLOW_PUBLIC_EVIDENCE_UPLOAD: ${{ inputs.allow-public-evidence-upload }}
+        run: |
+          set -euo pipefail
+          if [[ "${ALLOW_PUBLIC_EVIDENCE_UPLOAD}" != true ]]; then
+            echo "Release validation requires explicit consent to upload public evidence." >&2
+            exit 2
+          fi
+
   quality:
     name: Quality
     runs-on: ubuntu-latest
@@ -211,6 +227,7 @@ jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
+    needs: consent
     permissions:
       contents: read
     outputs:
@@ -272,11 +289,9 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
           RELEASE_SHA: ${{ inputs.release-sha }}
-          SYNTHETIC_CI_VERSION: ${{ inputs.synthetic-ci-version }}
         run: |
           set -euo pipefail
-          scripts/prepare-local-release-tag.sh \
-            "${RELEASE_TAG}" "${RELEASE_SHA}" "${SYNTHETIC_CI_VERSION}"
+          scripts/prepare-local-release-tag.sh "${RELEASE_TAG}" "${RELEASE_SHA}"
 
       - name: Set up uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -285,8 +300,37 @@ jobs:
           enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
 
-      - name: Build distributions
-        run: uv build --clear --no-create-gitignore --no-sources
+      - name: Install the hash-locked build backend
+        run: |
+          set -euo pipefail
+
+          build_requirements="${RUNNER_TEMP}/release-build-requirements.txt"
+          build_venv="${RUNNER_TEMP}/release-build-venv"
+          uv export \
+            --quiet \
+            --frozen \
+            --only-group sdist-build \
+            --no-emit-project \
+            --no-annotate \
+            --output-file "${build_requirements}"
+          uv venv --python "${MAX_PYTHON}" "${build_venv}"
+          uv pip sync \
+            --require-hashes \
+            --only-binary :all: \
+            --python "${build_venv}/bin/python" \
+            "${build_requirements}"
+          printf 'VEXCALIBUR_BUILD_PYTHON=%s\n' \
+            "${build_venv}/bin/python" >> "${GITHUB_ENV}"
+
+      - name: Build distributions offline
+        run: >-
+          uv build
+          --clear
+          --no-build-isolation
+          --offline
+          --python "${VEXCALIBUR_BUILD_PYTHON}"
+          --no-create-gitignore
+          --no-sources
 
       - name: Normalize source-distribution archive metadata
         run: |
@@ -360,16 +404,17 @@ jobs:
           retention-days: 14
 
   installed-cli:
-    name: Installed CLI (Python ${{ matrix.python-version }})
+    name: Installed CLI (${{ matrix.distribution }}, Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
     needs: build
-    if: ${{ !inputs.publication-only && needs.build.result == 'success' }}
+    if: ${{ needs.build.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.14"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        distribution: ["wheel", "sdist"]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -411,8 +456,9 @@ jobs:
 
       - name: Run installed CLI checks
         env:
+          VEXCALIBUR_EXPECTED_PYTHON: ${{ matrix.python-version }}
           VEXCALIBUR_EXPECTED_VERSION: ${{ inputs.release-version }}
-          VEXCALIBUR_WHEEL: ${{ steps.dist.outputs.wheel }}
+          VEXCALIBUR_DISTRIBUTION: ${{ steps.dist.outputs[matrix.distribution] }}
         run: make installed-cli-check
 
   openvex-interoperability:
@@ -486,12 +532,19 @@ jobs:
           go -C tests/integration/openvex-go run . /tmp/vexcalibur-openvex-interop.json
 
   csaf-conformance:
-    name: CSAF 2.0 conformance
+    name: >-
+      CSAF 2.0 conformance (${{ matrix.distribution }},
+      Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
     needs: build
     if: ${{ !inputs.publication-only && needs.build.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+        distribution: ["wheel", "sdist"]
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -512,7 +565,7 @@ jobs:
         with:
           version-file: .tool-versions
           enable-cache: true
-          python-version: ${{ env.MAX_PYTHON }}
+          python-version: ${{ matrix.python-version }}
 
       - name: Install pinned CSAF validator
         run: make csaf-validator-install
@@ -524,6 +577,7 @@ jobs:
           path: dist
 
       - name: Verify downloaded distribution bytes
+        id: dist
         env:
           EXPECTED_VERSION: ${{ inputs.release-version }}
           EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
@@ -531,6 +585,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          python scripts/verify-dist-metadata.py dist \
+            --expected-name vexcalibur \
+            --expected-version "$EXPECTED_VERSION" \
+            --github-output "$GITHUB_OUTPUT"
           wheel="dist/vexcalibur-${EXPECTED_VERSION}-py3-none-any.whl"
           sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
           printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
@@ -539,19 +597,10 @@ jobs:
       - name: Validate checked-in CSAF golden
         run: make csaf-interop
 
-      - name: Select wheel
-        id: wheel
-        run: |
-          mapfile -t wheels < <(find dist -maxdepth 1 -type f -name "*.whl" | sort)
-          if [ "${#wheels[@]}" -ne 1 ]; then
-            echo "Expected exactly one wheel in dist, found ${#wheels[@]}" >&2
-            exit 2
-          fi
-          printf 'path=%s\n' "${wheels[0]}" >> "$GITHUB_OUTPUT"
-
-      - name: Validate installed-wheel CSAF output
+      - name: Validate installed-distribution CSAF output
         env:
-          VEXCALIBUR_WHEEL: ${{ steps.wheel.outputs.path }}
+          VEXCALIBUR_EXPECTED_PYTHON: ${{ matrix.python-version }}
+          VEXCALIBUR_DISTRIBUTION: ${{ steps.dist.outputs[matrix.distribution] }}
         run: make installed-csaf-check
 
   publication-inventory:
@@ -805,7 +854,8 @@ jobs:
             --findings-file "${RUNNER_TEMP}/direct-inventory/findings.json" \
             --offline \
             --timestamp "${RELEASE_TIMESTAMP}" \
-            --output "${output_dir}/vex.cdx.json"
+            --output "${output_dir}/vex.cdx.json" \
+            --execution-report "${output_dir}/vex.cdx.execution.json"
 
       - name: Generate OpenVEX with only the installed CLI
         if: needs.publication-inventory.outputs.assertion-count != '0'
@@ -827,7 +877,8 @@ jobs:
             --author "Vexcalibur maintainers" \
             --author-role "VEX issuer" \
             --timestamp "${RELEASE_TIMESTAMP}" \
-            --output "${RUNNER_TEMP}/direct-vex/vex.openvex.json"
+            --output "${RUNNER_TEMP}/direct-vex/vex.openvex.json" \
+            --execution-report "${RUNNER_TEMP}/direct-vex/vex.openvex.execution.json"
 
       - name: Generate CSAF with only the installed CLI
         if: needs.publication-inventory.outputs.assertion-count != '0'
@@ -853,7 +904,27 @@ jobs:
             --csaf-publisher-category vendor \
             --csaf-document-status interim \
             --timestamp "${RELEASE_TIMESTAMP}" \
-            --output "${RUNNER_TEMP}/direct-vex/vexcalibur-vex.json"
+            --output "${RUNNER_TEMP}/direct-vex/vexcalibur-vex.json" \
+            --execution-report "${RUNNER_TEMP}/direct-vex/vexcalibur-vex.execution.json"
+
+      - name: Validate direct execution reports
+        env:
+          ASSERTION_COUNT: ${{ needs.publication-inventory.outputs.assertion-count }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          formats=(--format cyclonedx)
+          if (( ASSERTION_COUNT > 0 )); then
+            formats+=(--format openvex --format csaf)
+          fi
+          env -u PYTHONHOME -u PYTHONPATH \
+            "${RUNNER_TEMP}/direct-venv/bin/python" \
+            -m vexcalibur.execution_report_validation \
+            --output-dir "${RUNNER_TEMP}/direct-vex" \
+            --release-version "${RELEASE_VERSION}" \
+            --finding-count "${ASSERTION_COUNT}" \
+            "${formats[@]}"
 
       - name: Record direct VEX artifact name
         id: metadata
@@ -864,14 +935,25 @@ jobs:
           set -euo pipefail
 
           if (( ASSERTION_COUNT > 0 )); then
-            expected="$(printf '%s\n' vex.cdx.json vex.openvex.json vexcalibur-vex.json | sort)"
+            expected="$(printf '%s\n' \
+              vex.cdx.execution.json vex.cdx.json \
+              vex.openvex.execution.json vex.openvex.json \
+              vexcalibur-vex.execution.json vexcalibur-vex.json | sort)"
           else
-            expected=vex.cdx.json
+            expected="$(printf '%s\n' vex.cdx.execution.json vex.cdx.json | sort)"
           fi
           output_dir="${RUNNER_TEMP}/direct-vex"
           actual="$(find "${output_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
           test "${actual}" = "${expected}"
-          test -z "$(find "${output_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          lock_dir="${output_dir}/.vexcalibur-locks"
+          test -d "${lock_dir}"
+          test ! -L "${lock_dir}"
+          test "$(stat --format=%a -- "${lock_dir}")" = 700
+          test "$(find "${lock_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n')" = directory.lock
+          test -z "$(find "${lock_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          test "$(stat --format=%a -- "${lock_dir}/directory.lock")" = 600
+          test -z "$(find "${output_dir}" -mindepth 1 -maxdepth 1 \
+            ! -type f ! -path "${lock_dir}" -print -quit)"
           for output in "${output_dir}"/*; do
             if (( $(stat --format=%s -- "${output}") > 33554432 )); then
               echo "Direct VEX output exceeds the 32 MiB publication bound: ${output}" >&2
@@ -904,6 +986,13 @@ jobs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
     steps:
+      - name: Set up uv without repository checkout
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.17"
+          enable-cache: false
+          python-version: ${{ env.MAX_PYTHON }}
+
       - name: Download exact distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -969,6 +1058,18 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           mkdir -- "${RUNNER_TEMP}/action-vex"
 
+          requirements="${RUNNER_TEMP}/action-validator-requirements.txt"
+          cp -- "${inventory_dir}/runtime-constraints.txt" "${requirements}"
+          {
+            printf '\nvexcalibur @ %s \\\n' "${wheel_uri}"
+            printf '    --hash=sha256:%s\n' "${EXPECTED_WHEEL_SHA256}"
+          } >> "${requirements}"
+          uv venv --python "${MAX_PYTHON}" "${RUNNER_TEMP}/action-validator-venv"
+          uv pip sync \
+            --require-hashes \
+            --python "${RUNNER_TEMP}/action-validator-venv/bin/python" \
+            "${requirements}"
+
       - name: Reject a missing wheel URI hash
         id: missing-hash
         continue-on-error: true
@@ -1014,6 +1115,175 @@ jobs:
           test "${WRONG_HASH_OUTCOME}" = failure
           test "${SDIST_FALLBACK_OUTCOME}" = failure
 
+      - name: Prepare the failed-generation case
+        env:
+          STALE_REPORT: ${{ runner.temp }}/action-vex/failed.execution.json
+        run: |
+          set -euo pipefail
+
+          printf '{"stale":true}\n' > "${STALE_REPORT}"
+          printf '{"bomFormat":' > "${RUNNER_TEMP}/invalid-sbom.cdx.json"
+
+      - name: Run the failed generation through the pinned Action
+        id: failed-generation-action
+        continue-on-error: true
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: |
+            generate
+            ${{ runner.temp }}/invalid-sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-inventory/findings.json
+            --offline
+            --output
+            ${{ runner.temp }}/action-vex/failed.json
+            --execution-report
+            ${{ runner.temp }}/action-vex/failed.execution.json
+
+      - name: Require failed generation to leave no success artifacts
+        env:
+          FAILED_GENERATION_OUTCOME: ${{ steps.failed-generation-action.outcome }}
+        run: |
+          set -euo pipefail
+
+          test "${FAILED_GENERATION_OUTCOME}" = failure
+          test ! -e "${RUNNER_TEMP}/action-vex/failed.json"
+          test ! -e "${RUNNER_TEMP}/action-vex/failed.execution.json"
+
+      - name: Prepare synthetic Action report conformance input
+        env:
+          RELEASE_VERSION: ${{ inputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          output_dir="${RUNNER_TEMP}/action-report-conformance"
+          mkdir -- "${output_dir}"
+          python3 - "${output_dir}/findings.json" "${RELEASE_VERSION}" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          output = pathlib.Path(sys.argv[1])
+          version = sys.argv[2]
+          document = {
+              "findings": [
+                  {
+                      "analysis_detail": "Synthetic report-format contract fixture.",
+                      "analysis_state": "in_triage",
+                      "id": "CVE-2099-0001",
+                      "modified": "2026-01-01T00:00:00Z",
+                      "purl": f"pkg:pypi/vexcalibur@{version}",
+                      "source_name": "Vexcalibur CI",
+                      "source_url": "https://security.example.test/CVE-2099-0001",
+                  }
+              ]
+          }
+          output.write_text(
+              json.dumps(document, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Generate synthetic CycloneDX report through the pinned Action
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: |
+            generate
+            ${{ runner.temp }}/action-inventory/sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-report-conformance/findings.json
+            --offline
+            --timestamp
+            ${{ needs.publication-inventory.outputs.timestamp }}
+            --output
+            ${{ runner.temp }}/action-report-conformance/vex.cdx.json
+            --execution-report
+            ${{ runner.temp }}/action-report-conformance/vex.cdx.execution.json
+
+      - name: Generate synthetic OpenVEX report through the pinned Action
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: |
+            generate
+            ${{ runner.temp }}/action-inventory/sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-report-conformance/findings.json
+            --offline
+            --format
+            openvex
+            --author
+            Vexcalibur synthetic conformance
+            --author-role
+            VEX test issuer
+            --timestamp
+            ${{ needs.publication-inventory.outputs.timestamp }}
+            --output
+            ${{ runner.temp }}/action-report-conformance/vex.openvex.json
+            --execution-report
+            ${{ runner.temp }}/action-report-conformance/vex.openvex.execution.json
+
+      - name: Generate synthetic CSAF report through the pinned Action
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          python-version: ${{ env.MAX_PYTHON }}
+          args: |
+            generate
+            ${{ runner.temp }}/action-inventory/sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-report-conformance/findings.json
+            --offline
+            --format
+            csaf
+            --csaf-document-id
+            vexcalibur-synthetic-conformance
+            --csaf-document-title
+            Vexcalibur synthetic report conformance
+            --csaf-publisher-name
+            Vexcalibur maintainers
+            --csaf-publisher-namespace
+            https://github.com/vexcalibur-dev/vexcalibur
+            --csaf-publisher-category
+            vendor
+            --csaf-document-status
+            interim
+            --timestamp
+            ${{ needs.publication-inventory.outputs.timestamp }}
+            --output
+            ${{ runner.temp }}/action-report-conformance/vexcalibur-vex.json
+            --execution-report
+            ${{ runner.temp }}/action-report-conformance/vexcalibur-vex.execution.json
+
+      - name: Validate synthetic Action report conformance
+        env:
+          RELEASE_VERSION: ${{ inputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          env -u PYTHONHOME -u PYTHONPATH \
+            "${RUNNER_TEMP}/action-validator-venv/bin/python" \
+            -m vexcalibur.execution_report_validation \
+            --output-dir "${RUNNER_TEMP}/action-report-conformance" \
+            --release-version "${RELEASE_VERSION}" \
+            --finding-count 1 \
+            --format cyclonedx \
+            --format openvex \
+            --format csaf
+
       - name: Generate CycloneDX VEX through the pinned Action
         uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
         with:
@@ -1031,6 +1301,8 @@ jobs:
             ${{ needs.publication-inventory.outputs.timestamp }}
             --output
             ${{ runner.temp }}/action-vex/vex.cdx.json
+            --execution-report
+            ${{ runner.temp }}/action-vex/vex.cdx.execution.json
 
       - name: Generate OpenVEX through the pinned Action
         if: needs.publication-inventory.outputs.assertion-count != '0'
@@ -1056,6 +1328,8 @@ jobs:
             ${{ needs.publication-inventory.outputs.timestamp }}
             --output
             ${{ runner.temp }}/action-vex/vex.openvex.json
+            --execution-report
+            ${{ runner.temp }}/action-vex/vex.openvex.execution.json
 
       - name: Generate CSAF through the pinned Action
         if: needs.publication-inventory.outputs.assertion-count != '0'
@@ -1089,6 +1363,27 @@ jobs:
             ${{ needs.publication-inventory.outputs.timestamp }}
             --output
             ${{ runner.temp }}/action-vex/vexcalibur-vex.json
+            --execution-report
+            ${{ runner.temp }}/action-vex/vexcalibur-vex.execution.json
+
+      - name: Validate Action execution reports
+        env:
+          ASSERTION_COUNT: ${{ needs.publication-inventory.outputs.assertion-count }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          formats=(--format cyclonedx)
+          if (( ASSERTION_COUNT > 0 )); then
+            formats+=(--format openvex --format csaf)
+          fi
+          env -u PYTHONHOME -u PYTHONPATH \
+            "${RUNNER_TEMP}/action-validator-venv/bin/python" \
+            -m vexcalibur.execution_report_validation \
+            --output-dir "${RUNNER_TEMP}/action-vex" \
+            --release-version "${RELEASE_VERSION}" \
+            --finding-count "${ASSERTION_COUNT}" \
+            "${formats[@]}"
 
       - name: Record Action VEX artifact name
         id: metadata
@@ -1099,14 +1394,25 @@ jobs:
           set -euo pipefail
 
           if (( ASSERTION_COUNT > 0 )); then
-            expected="$(printf '%s\n' vex.cdx.json vex.openvex.json vexcalibur-vex.json | sort)"
+            expected="$(printf '%s\n' \
+              vex.cdx.execution.json vex.cdx.json \
+              vex.openvex.execution.json vex.openvex.json \
+              vexcalibur-vex.execution.json vexcalibur-vex.json | sort)"
           else
-            expected=vex.cdx.json
+            expected="$(printf '%s\n' vex.cdx.execution.json vex.cdx.json | sort)"
           fi
           output_dir="${RUNNER_TEMP}/action-vex"
           actual="$(find "${output_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"
           test "${actual}" = "${expected}"
-          test -z "$(find "${output_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          lock_dir="${output_dir}/.vexcalibur-locks"
+          test -d "${lock_dir}"
+          test ! -L "${lock_dir}"
+          test "$(stat --format=%a -- "${lock_dir}")" = 700
+          test "$(find "${lock_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n')" = directory.lock
+          test -z "$(find "${lock_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          test "$(stat --format=%a -- "${lock_dir}/directory.lock")" = 600
+          test -z "$(find "${output_dir}" -mindepth 1 -maxdepth 1 \
+            ! -type f ! -path "${lock_dir}" -print -quit)"
           for output in "${output_dir}"/*; do
             if (( $(stat --format=%s -- "${output}") > 33554432 )); then
               echo "Action VEX output exceeds the 32 MiB publication bound: ${output}" >&2
@@ -1183,8 +1489,8 @@ jobs:
           enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
 
-      - name: Install locked evidence-helper dependencies
-        run: uv sync --frozen --no-install-project --group dev
+      - name: Install locked finalizer and project dependencies
+        run: uv sync --frozen --group dev
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -1331,9 +1637,21 @@ jobs:
           (cd "${inventory_dir}" && sha256sum --check --strict SHA256SUMS)
 
           if (( ASSERTION_COUNT > 0 )); then
-            expected_vex_files="$(printf '%s\n' vex.cdx.json vex.openvex.json vexcalibur-vex.json | sort)"
+            expected_vex_files="$(
+              printf '%s\n' \
+                vex.cdx.execution.json \
+                vex.cdx.json \
+                vex.openvex.execution.json \
+                vex.openvex.json \
+                vexcalibur-vex.execution.json \
+                vexcalibur-vex.json |
+                sort
+            )"
           else
-            expected_vex_files=vex.cdx.json
+            expected_vex_files="$(
+              printf '%s\n' vex.cdx.execution.json vex.cdx.json |
+                sort
+            )"
           fi
           for vex_dir in "${RUNNER_TEMP}/final-direct-vex" "${RUNNER_TEMP}/final-action-vex"; do
             actual_vex_files="$(find "${vex_dir}" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)"

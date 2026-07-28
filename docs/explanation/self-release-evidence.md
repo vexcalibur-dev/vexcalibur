@@ -6,8 +6,9 @@ if the evidence is tied to the release bytes. A VEX file generated from a
 checkout while different bytes reach PyPI would be reassuring but meaningless.
 
 The release design therefore treats the wheel, source distribution, locked
-inventory, reviewed findings, direct CLI output, and Action output as one
-immutable publication unit.
+inventory, reviewed findings, VEX documents, and their execution reports as
+one immutable publication unit. The direct CLI and Action must produce the
+same bytes.
 
 ## Two bundles serve different purposes
 
@@ -65,13 +66,15 @@ The direct-generation job receives that oracle plus the exact wheel. It
 installs the wheel with a SHA-256-bound local URI and runs the installed
 `vexcalibur` entry point outside the checkout. The Action-generation job runs
 the full-commit-pinned companion Action in a separate environment. Each job
-emits only the files its consumer needs.
+emits a VEX document and execution report for every applicable format.
 
 A fresh finalizer downloads all producer artifacts, verifies their GitHub
 artifact identity and transport digests, revalidates every input, and requires
-the direct and Action VEX files to be byte-for-byte equal. It writes into a
-fresh directory and removes the incomplete directory after any late failure.
-It never merges into or overwrites an existing output.
+the direct and Action documents and reports to be byte-for-byte equal. It also
+checks each report's provenance categories, counts, size, and document digest.
+The finalizer writes into a fresh directory and removes the incomplete
+directory after any late failure. It never merges into or overwrites an
+existing output.
 
 GitHub artifact archive digests protect transport within one workflow run, but
 they are not stable publication data. The schema-2 manifest instead records
@@ -93,6 +96,13 @@ The bundled runtime constraints start with `--require-hashes` and
 SHA-256 hash. This prevents dependency substitution; it does not mean package
 installation is network-free. A runner may still download those exact bytes
 from its configured index.
+
+Source-distribution validation keeps build and runtime dependencies separate.
+The build environment hash-syncs the exact PEP 517 tools recorded in
+`uv.lock`, then `uv` builds the candidate sdist offline without build
+isolation. A clean runtime environment installs only the derived, hash-bound
+wheel and locked runtime dependencies. This prevents the build frontend from
+resolving a newer backend or backend dependency during the release check.
 
 VEX generation itself selects only the reviewed local-findings provider. Proxy
 settings provide an additional failure boundary, but the precise claim is
