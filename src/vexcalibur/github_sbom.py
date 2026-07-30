@@ -362,7 +362,7 @@ def resolve_github_token(
     if not allow_gh_cli:
         return None
 
-    return _gh_auth_token(api_url)
+    return _gh_auth_token(api_url, environ=environment)
 
 
 def _default_token_env_names(api_url: str) -> tuple[str, ...]:
@@ -655,14 +655,27 @@ def _github_cli_hostname(api_url: str) -> str:
     return normalized_hostname
 
 
-def _gh_auth_token(api_url: str) -> str | None:
+def _gh_auth_token(
+    api_url: str,
+    *,
+    environ: Mapping[str, str],
+) -> str | None:
     hostname = _github_cli_hostname(api_url)
+    gh_environment = dict(environ)
+    for variable_name in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+    ):
+        gh_environment.pop(variable_name, None)
     try:
         completed = subprocess.run(  # noqa: S603
             # `gh` is intentionally resolved from PATH to match the user's CLI setup.
             ["gh", "auth", "token", "--hostname", hostname],  # noqa: S607
             check=False,
             capture_output=True,
+            env=gh_environment,
             text=True,
             timeout=5,
         )

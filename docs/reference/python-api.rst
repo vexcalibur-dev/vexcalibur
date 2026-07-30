@@ -321,6 +321,14 @@ The report classes validate their complete constructor state:
        ``ValueError`` for every invalid value or invariant. ``to_json`` also
        raises ``ValueError`` above 16 KiB.
 
+``parse_generation_execution_report`` accepts exact ``bytes`` or ``str`` and
+returns a validated ``GenerationExecutionReport``. It applies the 16 KiB
+limit, rejects malformed UTF-8, duplicate keys, unknown or missing fields,
+mistyped values, invalid cross-field totals, and JSON that is not the canonical
+form produced by ``to_json``. It raises ``TypeError`` for another Python input
+type and ``GenerationExecutionReportParseError`` for invalid serialized
+content.
+
 A custom source can implement ``execution_report_finding_source`` and return
 ``FindingSourceCategory.CUSTOM``. A custom renderer can implement
 ``execution_report_output_format`` and return
@@ -357,7 +365,7 @@ that does not request a report never reads that metadata.
 JSON would exceed 16 KiB. The report JSON includes one trailing newline.
 
 .. automodule:: vexcalibur.generation_result
-   :members: GenerationReportMetadataError, GeneratedDocumentMetadataDict, GenerationExecutionReportDict, InventorySourceCategory, FindingSourceCategory, ExecutionReportOutputFormat, ExecutionReportFindingSourceDeclaration, ExecutionReportOutputFormatDeclaration, GenerationExecutionContext, GenerationResult, GeneratedDocumentMetadata, GenerationExecutionReport
+   :members: GenerationReportMetadataError, GenerationExecutionReportParseError, GeneratedDocumentMetadataDict, GenerationExecutionReportDict, InventorySourceCategory, FindingSourceCategory, ExecutionReportOutputFormat, ExecutionReportFindingSourceDeclaration, ExecutionReportOutputFormatDeclaration, GenerationExecutionContext, GenerationResult, GeneratedDocumentMetadata, GenerationExecutionReport, parse_generation_execution_report
    :show-inheritance:
 
 VEX rendering

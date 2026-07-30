@@ -15,6 +15,7 @@ from vexcalibur.execution_report_destination import (
     StagedFileWrite,
     acquire_destination_locks,
 )
+from vexcalibur.execution_report_staging import PublishedFileRollback
 from vexcalibur.generation_result import GenerationResult
 
 
@@ -84,6 +85,7 @@ class GenerationOutputTransaction:
     __slots__ = (
         "_closed",
         "_consumed",
+        "_report_rollback",
         "output_destination",
         "output_path",
         "protected_descriptors",
@@ -107,6 +109,7 @@ class GenerationOutputTransaction:
         self.protected_descriptors = protected_descriptors
         self._consumed = False
         self._closed = False
+        self._report_rollback: PublishedFileRollback | None = None
 
     @classmethod
     def _create(
@@ -219,6 +222,7 @@ class GenerationOutputTransaction:
             raise GenerationReportConstructionError(str(exc)) from exc
 
         staged_report: StagedFileWrite | None = None
+        report_rollback: PublishedFileRollback | None = None
         try:
             with ExitStack() as stack:
                 try:
@@ -287,6 +291,7 @@ class GenerationOutputTransaction:
 
                         try:
                             staged_report.commit(destination_lock_held=True)
+                            report_rollback = staged_report.retain_rollback()
                         except BoundFileDestinationError as exc:
                             raise GenerationReportWriteError(
                                 self.report_destination.requested_path,
@@ -305,7 +310,12 @@ class GenerationOutputTransaction:
                     with suppress(BaseException):
                         if staged_report.discard_committed():
                             break
+            if report_rollback is not None:
+                report_rollback.close()
             raise
+        if report_rollback is None:
+            raise AssertionError("published report rollback handle is unavailable")
+        self._report_rollback = report_rollback
 
     def close(self) -> None:
         """Close every retained destination descriptor."""
@@ -320,6 +330,11 @@ class GenerationOutputTransaction:
             except BaseException as exc:
                 if failure is None:
                     failure = exc
+                self._discard_published_report()
+        if failure is None:
+            self._release_report_rollback()
+        else:
+            self._discard_published_report()
         if failure is not None:
             raise failure
         self._closed = True
@@ -365,6 +380,24 @@ class GenerationOutputTransaction:
                 raise BoundFileDestinationError(
                     f"--execution-report became an alias of redirected {description}"
                 )
+
+    def _discard_published_report(self) -> None:
+        rollback = self._report_rollback
+        if rollback is None:
+            return
+        for _ in range(2):
+            with suppress(BaseException):
+                if rollback.discard():
+                    break
+        rollback.close()
+        self._report_rollback = None
+
+    def _release_report_rollback(self) -> None:
+        rollback = self._report_rollback
+        if rollback is None:
+            return
+        rollback.close()
+        self._report_rollback = None
 
 
 def _label_destination_error(

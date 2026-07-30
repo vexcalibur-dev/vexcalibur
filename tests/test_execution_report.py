@@ -22,10 +22,14 @@ from vexcalibur.generation_result import (
     ExecutionReportOutputFormat,
     FindingSourceCategory,
     GeneratedDocumentMetadata,
+    GeneratedDocumentMetadataDict,
     GenerationExecutionContext,
     GenerationExecutionReport,
+    GenerationExecutionReportDict,
+    GenerationExecutionReportParseError,
     GenerationResult,
     InventorySourceCategory,
+    parse_generation_execution_report,
 )
 
 EXECUTION_REPORT_SCHEMA_PATH = (
@@ -112,6 +116,121 @@ def test_execution_report_records_exact_document_and_zero_findings(
         '"inventory_source":"sbom_file","output_format":"cyclonedx",'
         '"schema_version":1,"vexcalibur_version":"0.4.2.dev1+g1234567"}\n'
     )
+
+
+def test_canonical_execution_report_parser_round_trips_typed_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = _report(
+        monkeypatch,
+        findings=tuple(_finding(state) for state in VexAnalysisState),
+        output_format=ExecutionReportOutputFormat.OPENVEX,
+    )
+
+    parsed = parse_generation_execution_report(report.to_json().encode("utf-8"))
+
+    assert parsed == report
+    assert parsed.to_json() == report.to_json()
+
+
+def test_execution_report_schema_and_parser_contracts_are_exhaustively_aligned() -> None:
+    schema = json.loads(EXECUTION_REPORT_SCHEMA_PATH.read_text(encoding="utf-8"))
+    properties = schema["properties"]
+
+    assert set(schema["required"]) == set(GenerationExecutionReportDict.__required_keys__)
+    assert properties["schema_version"]["const"] == 1
+    assert properties["command"]["const"] == "generate"
+    assert properties["vexcalibur_version"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[0-9A-Za-z][0-9A-Za-z.!+_-]*$",
+        "not": {"pattern": "[^0-9A-Za-z.!+_-]"},
+    }
+    assert set(properties["inventory_source"]["enum"]) == {
+        value.value for value in InventorySourceCategory
+    }
+    assert set(properties["finding_source"]["enum"]) == {
+        value.value for value in FindingSourceCategory
+    }
+    assert set(properties["output_format"]["enum"]) == {
+        value.value for value in ExecutionReportOutputFormat
+    }
+    assert set(properties["analysis_state_counts"]["properties"]) == {
+        state.value for state in VexAnalysisState
+    }
+    assert set(properties["document"]["required"]) == set(
+        GeneratedDocumentMetadataDict.__required_keys__
+    )
+    assert properties["document"]["properties"]["bytes"]["maximum"] == MAX_VEX_OUTPUT_BYTES
+
+
+@pytest.mark.parametrize(
+    ("field_path", "invalid_value"),
+    (
+        (("schema_version",), 2),
+        (("command",), "scan"),
+        (("vexcalibur_version",), ""),
+        (("inventory_source",), "private_repository"),
+        (("finding_source",), "unknown"),
+        (("output_format",), "json"),
+        (("component_count",), -1),
+        (("finding_count",), -1),
+        (("analysis_state_counts", "in_triage"), 0),
+        (("analysis_state_counts", "unknown"), 1),
+        (("document", "sha256"), "A" * 64),
+        (("document", "bytes"), MAX_VEX_OUTPUT_BYTES + 1),
+    ),
+)
+def test_canonical_execution_report_parser_rejects_every_invalid_contract_field(
+    monkeypatch: pytest.MonkeyPatch,
+    field_path: tuple[str, ...],
+    invalid_value: object,
+) -> None:
+    document = _report(
+        monkeypatch,
+        findings=(_finding(),),
+    ).to_dict()
+    target = document
+    for field in field_path[:-1]:
+        target = target[field]
+    target[field_path[-1]] = invalid_value
+    serialized = (
+        json.dumps(document, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n"
+    )
+
+    with pytest.raises(GenerationExecutionReportParseError):
+        parse_generation_execution_report(serialized)
+
+
+@pytest.mark.parametrize("removed_field", tuple(GenerationExecutionReportDict.__required_keys__))
+def test_canonical_execution_report_parser_rejects_missing_root_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    removed_field: str,
+) -> None:
+    document = _report(monkeypatch).to_dict()
+    del document[removed_field]
+    serialized = (
+        json.dumps(document, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n"
+    )
+
+    with pytest.raises(GenerationExecutionReportParseError, match="unexpected fields"):
+        parse_generation_execution_report(serialized)
+
+
+def test_canonical_execution_report_parser_rejects_duplicate_and_noncanonical_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    serialized = _report(monkeypatch).to_json()
+    duplicate = serialized.replace(
+        '"command":"generate",',
+        '"command":"generate","command":"generate",',
+    )
+
+    with pytest.raises(GenerationExecutionReportParseError, match="duplicate"):
+        parse_generation_execution_report(duplicate)
+    with pytest.raises(GenerationExecutionReportParseError, match="canonical"):
+        parse_generation_execution_report(json.dumps(json.loads(serialized), indent=2))
 
 
 def test_execution_report_matches_the_published_json_schema(

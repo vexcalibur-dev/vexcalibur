@@ -196,10 +196,10 @@ jobs:
           tests/test_execution_report_destination.py::test_native_windows_report_request_fails_closed
           tests/test_cli_execution_report.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output
 
-      - name: Build wheel
+      - name: Build distributions
         run: uv build --clear --no-create-gitignore --no-sources
 
-      - name: Verify installed-wheel Windows behavior
+      - name: Verify installed-distribution Windows behavior
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -208,25 +208,84 @@ jobs:
           }
           $PSNativeCommandUseErrorActionPreference = $true
           $wheels = @(Get-ChildItem -Path dist -Filter *.whl)
+          $sdists = @(Get-ChildItem -Path dist -Filter *.tar.gz)
           if ($wheels.Count -ne 1) {
             throw "Expected exactly one wheel in dist, found $($wheels.Count)"
           }
-          $venv = Join-Path $env:RUNNER_TEMP "vexcalibur-installed"
-          $requirements = Join-Path $env:RUNNER_TEMP "runtime-requirements.txt"
+          if ($sdists.Count -ne 1) {
+            throw "Expected exactly one sdist in dist, found $($sdists.Count)"
+          }
+          $expectedVersion = (
+            uv run --frozen python -c `
+              "import importlib.metadata; print(importlib.metadata.version('vexcalibur'))"
+          )
+          $buildRequirements = Join-Path $env:RUNNER_TEMP "sdist-build-requirements.txt"
+          $buildVenv = Join-Path $env:RUNNER_TEMP "vexcalibur-sdist-build"
           uv export `
             --quiet `
             --frozen `
-            --no-dev `
+            --only-group sdist-build `
             --no-emit-project `
             --no-annotate `
-            --output-file $requirements
-          python scripts/append_locked_wheel_requirement.py `
-            $wheels[0].FullName `
-            $requirements
-          uv venv $venv
-          $python = Join-Path $venv "Scripts/python.exe"
-          uv pip sync --require-hashes --python $python $requirements
-          & $python tests/integration/check_installed_windows.py
+            --output-file $buildRequirements
+          uv venv $buildVenv
+          $buildPython = Join-Path $buildVenv "Scripts/python.exe"
+          uv pip sync `
+            --require-hashes `
+            --only-binary :all: `
+            --python $buildPython `
+            $buildRequirements
+
+          $distributions = @(
+            @{ Name = "wheel"; Path = $wheels[0].FullName },
+            @{ Name = "sdist"; Path = $sdists[0].FullName }
+          )
+          foreach ($distribution in $distributions) {
+            $installDistribution = $distribution.Path
+            if ($distribution.Name -eq "sdist") {
+              $wheelDir = Join-Path $env:RUNNER_TEMP "vexcalibur-sdist-wheel"
+              New-Item -ItemType Directory -Path $wheelDir | Out-Null
+              $env:VIRTUAL_ENV = $buildVenv
+              uv build `
+                --wheel `
+                --no-build-isolation `
+                --offline `
+                --python $buildPython `
+                --out-dir $wheelDir `
+                $distribution.Path
+              Remove-Item Env:VIRTUAL_ENV
+              $builtWheels = @(Get-ChildItem -Path $wheelDir -Filter *.whl)
+              if ($builtWheels.Count -ne 1) {
+                throw "Expected one wheel built from the sdist, found $($builtWheels.Count)"
+              }
+              $installDistribution = $builtWheels[0].FullName
+            }
+
+            $venv = Join-Path $env:RUNNER_TEMP "vexcalibur-installed-$($distribution.Name)"
+            $requirements = Join-Path `
+              $env:RUNNER_TEMP `
+              "runtime-requirements-$($distribution.Name).txt"
+            uv export `
+              --quiet `
+              --frozen `
+              --no-dev `
+              --no-emit-project `
+              --no-annotate `
+              --output-file $requirements
+            python scripts/append_locked_distribution_requirement.py `
+              $installDistribution `
+              $requirements
+            uv venv $venv
+            $python = Join-Path $venv "Scripts/python.exe"
+            uv pip sync `
+              --require-hashes `
+              --only-binary :all: `
+              --python $python `
+              $requirements
+            $env:VEXCALIBUR_EXPECTED_PYTHON = "${{ matrix.python-version }}"
+            $env:VEXCALIBUR_EXPECTED_VERSION = $expectedVersion
+            & $python tests/integration/check_installed_windows.py
+          }
 
   execution-report-macos:
     name: Execution report macOS contract (Python ${{ matrix.python-version }})
@@ -586,6 +645,21 @@ jobs:
       - name: Build documentation
         run: make docs
 
+  publication-contract:
+    name: Unprivileged publication contract
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/release-validation.yml
+    with:
+      release-sha: ${{ github.sha }}
+      release-tag: v0.0.0
+      release-version: 0.0.0
+      publication-only: true
+      unprivileged-ci-contract: true
+      allow-public-evidence-upload: true
+
   live-services:
     name: Live external-service compatibility
     runs-on: ubuntu-latest
@@ -627,6 +701,7 @@ jobs:
       - csaf-conformance
       - release-evidence
       - docs
+      - publication-contract
     if: always() && github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     steps:
       - name: Check required jobs
@@ -644,7 +719,8 @@ jobs:
             "${{ needs.openvex-interoperability.result }}" \
             "${{ needs.csaf-conformance.result }}" \
             "${{ needs.release-evidence.result }}" \
-            "${{ needs.docs.result }}"; do
+            "${{ needs.docs.result }}" \
+            "${{ needs.publication-contract.result }}"; do
             if [ "$result" != "success" ]; then
               echo "Required job failed or was skipped: $result"
               exit 1

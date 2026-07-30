@@ -4,46 +4,21 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import re
 import stat
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from vexcalibur.generation_context import ExecutionReportOutputFormat
 from vexcalibur.generation_result import (
     MAX_EXECUTION_REPORT_BYTES,
     MAX_GENERATED_DOCUMENT_BYTES,
+    GenerationExecutionReportParseError,
+    parse_generation_execution_report,
 )
-from vexcalibur.json_boundary import StrictJsonError, strict_json_loads
 
 _VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z.!+_-]{0,127}", re.ASCII)
-_ANALYSIS_STATES = frozenset(
-    {
-        "resolved",
-        "exploitable",
-        "in_triage",
-        "false_positive",
-        "not_affected",
-    }
-)
-_REPORT_KEYS = frozenset(
-    {
-        "analysis_state_counts",
-        "command",
-        "component_count",
-        "document",
-        "finding_count",
-        "finding_source",
-        "inventory_source",
-        "output_format",
-        "schema_version",
-        "vexcalibur_version",
-    }
-)
-_DOCUMENT_KEYS = frozenset({"bytes", "sha256"})
 _DOCUMENT_NAMES = {
     ExecutionReportOutputFormat.CYCLONEDX: (
         "vex.cdx.json",
@@ -64,20 +39,6 @@ class ExecutionReportValidationError(ValueError):
     """Raised when a generated document and report violate their contract."""
 
 
-def _require_exact_dict(
-    value: object,
-    *,
-    expected_keys: frozenset[str],
-    field: str,
-) -> dict[str, Any]:
-    if type(value) is not dict:
-        raise ExecutionReportValidationError(f"{field} must be a JSON object")
-    result = value
-    if set(result) != expected_keys:
-        raise ExecutionReportValidationError(f"{field} contains unexpected fields")
-    return result
-
-
 def _require_nonnegative_integer(value: object, *, field: str) -> int:
     if type(value) is not int or value < 0:
         raise ExecutionReportValidationError(f"{field} must be a nonnegative integer")
@@ -88,6 +49,7 @@ def _read_regular_file(path: Path, *, maximum_bytes: int, field: str) -> bytes:
     flags = os.O_RDONLY
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
@@ -180,58 +142,29 @@ def validate_execution_reports(
             field=f"{output_format.value} execution report",
         )
         try:
-            decoded = strict_json_loads(report_bytes)
-        except StrictJsonError as exc:
+            report = parse_generation_execution_report(report_bytes)
+        except GenerationExecutionReportParseError as exc:
             raise ExecutionReportValidationError(
-                f"{output_format.value} execution report is invalid JSON: {exc}"
+                f"{output_format.value} execution report is invalid: {exc}"
             ) from exc
-        report = _require_exact_dict(
-            decoded,
-            expected_keys=_REPORT_KEYS,
-            field=f"{output_format.value} execution report",
-        )
-        canonical = (
-            json.dumps(
-                report,
-                ensure_ascii=True,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-            + b"\n"
-        )
-        if report_bytes != canonical:
-            raise ExecutionReportValidationError(
-                f"{output_format.value} execution report is not canonical JSON"
-            )
-        if type(report["schema_version"]) is not int or report["schema_version"] != 1:
-            raise ExecutionReportValidationError(
-                f"{output_format.value} execution report schema version is invalid"
-            )
-        if report["command"] != "generate":
-            raise ExecutionReportValidationError(
-                f"{output_format.value} execution report command is invalid"
-            )
-        if report["vexcalibur_version"] != expected_version:
+        if report.vexcalibur_version != expected_version:
             raise ExecutionReportValidationError(
                 f"{output_format.value} execution report version is invalid"
             )
-        if report["inventory_source"] != "sbom_file":
+        if report.inventory_source.value != "sbom_file":
             raise ExecutionReportValidationError(
                 f"{output_format.value} execution report inventory source is invalid"
             )
-        if report["finding_source"] != "local_file":
+        if report.finding_source.value != "local_file":
             raise ExecutionReportValidationError(
                 f"{output_format.value} execution report finding source is invalid"
             )
-        if report["output_format"] != output_format.value:
+        if report.output_format is not output_format:
             raise ExecutionReportValidationError(
                 f"{output_format.value} execution report output format is invalid"
             )
 
-        component_count = _require_nonnegative_integer(
-            report["component_count"],
-            field=f"{output_format.value} execution report component count",
-        )
+        component_count = report.component_count
         if expected_component_count is None:
             if component_count == 0:
                 raise ExecutionReportValidationError(
@@ -242,41 +175,15 @@ def validate_execution_reports(
                 f"{output_format.value} execution report component count is invalid"
             )
 
-        finding_count = _require_nonnegative_integer(
-            report["finding_count"],
-            field=f"{output_format.value} execution report finding count",
-        )
+        finding_count = report.finding_count
         if finding_count != expected_finding_count:
             raise ExecutionReportValidationError(
                 f"{output_format.value} execution report finding count is invalid"
             )
-        state_counts = report["analysis_state_counts"]
-        if type(state_counts) is not dict:
-            raise ExecutionReportValidationError(
-                f"{output_format.value} execution report analysis-state counts "
-                "must be a JSON object"
-            )
-        if any(
-            state not in _ANALYSIS_STATES or type(count) is not int or count <= 0
-            for state, count in state_counts.items()
+        if (
+            report.document.bytes != len(document)
+            or report.document.sha256 != hashlib.sha256(document).hexdigest()
         ):
-            raise ExecutionReportValidationError(
-                f"{output_format.value} execution report analysis-state count is invalid"
-            )
-        if sum(state_counts.values()) != expected_finding_count:
-            raise ExecutionReportValidationError(
-                f"{output_format.value} execution report analysis-state sum is invalid"
-            )
-
-        document_metadata = _require_exact_dict(
-            report["document"],
-            expected_keys=_DOCUMENT_KEYS,
-            field=f"{output_format.value} execution report document",
-        )
-        if document_metadata != {
-            "bytes": len(document),
-            "sha256": hashlib.sha256(document).hexdigest(),
-        }:
             raise ExecutionReportValidationError(
                 f"{output_format.value} execution report document binding is invalid"
             )

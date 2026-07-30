@@ -988,3 +988,52 @@ def test_transaction_close_attempts_every_destination_and_can_retry(
 
     assert output_destination.closed
     assert transaction.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+@pytest.mark.parametrize("failed_role", ("output", "report"))
+def test_destination_close_cancellation_removes_published_success_report(
+    failed_role: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(
+        _generation_result(monkeypatch),
+        binary_stdout=None,
+    )
+    output_destination = transaction.output_destination
+    report_destination = transaction.report_destination
+    failed_destination = output_destination if failed_role == "output" else report_destination
+    assert failed_destination is not None
+    real_close = BoundFileDestination.close
+    interrupted = False
+
+    def interrupt_selected_close(destination: BoundFileDestination) -> None:
+        nonlocal interrupted
+        if destination is failed_destination and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("synthetic destination close cancellation")
+        real_close(destination)
+
+    monkeypatch.setattr(
+        BoundFileDestination,
+        "close",
+        interrupt_selected_close,
+    )
+
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="synthetic destination close cancellation",
+    ):
+        transaction.close()
+
+    assert output_path.exists()
+    assert not report_path.exists()
+    transaction.close()

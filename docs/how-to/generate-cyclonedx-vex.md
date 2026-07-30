@@ -133,16 +133,17 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-The companion action accepts the same command arguments:
+The companion Action accepts the same command arguments. This example writes
+the document and execution report to absolute runner-temporary paths:
 
 ```yaml
 permissions:
   contents: read
 
 steps:
-  - uses: vexcalibur-dev/vexcalibur-action@6a028a18b4b7fc15cd5e83056e0013ed0928a483 # v0.2.0
+  - uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
     with:
-      package-spec: vexcalibur==0.2.0
+      package-spec: vexcalibur==0.5.0
       args: |
         generate
         --github-repo
@@ -153,9 +154,16 @@ steps:
         https://osv.internal.example
         --output
         ${{ runner.temp }}/vex.json
+        --execution-report
+        ${{ runner.temp }}/execution-report.json
     env:
       GITHUB_TOKEN: ${{ github.token }}
 ```
+
+Package releases before `0.5.0` reject `--execution-report`. Follow
+[Consume a generation execution report](consume-execution-report.md)
+to validate the pair, apply a count policy, and upload it only after validation
+succeeds.
 
 ## Read XML input
 

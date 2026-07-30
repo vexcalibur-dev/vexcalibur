@@ -9,7 +9,9 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
+
+from packageurl import PackageURL
 
 from vexcalibur.domain import (
     ComponentIdentity,
@@ -23,6 +25,7 @@ from vexcalibur.generation_context import (
     GenerationExecutionContext,
     InventorySourceCategory,
 )
+from vexcalibur.json_boundary import StrictJsonError, strict_json_loads
 from vexcalibur.render import (
     ExecutionReportOutputFormatDeclaration,
     VexRenderError,
@@ -41,9 +44,11 @@ __all__ = [
     "GenerationExecutionContext",
     "GenerationExecutionReport",
     "GenerationExecutionReportDict",
+    "GenerationExecutionReportParseError",
     "GenerationReportMetadataError",
     "GenerationResult",
     "InventorySourceCategory",
+    "parse_generation_execution_report",
 ]
 
 EXECUTION_REPORT_SCHEMA_VERSION = 1
@@ -55,6 +60,10 @@ _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}", re.ASCII)
 
 class GenerationReportMetadataError(ValueError):
     """Raised when installed package metadata cannot identify a report."""
+
+
+class GenerationExecutionReportParseError(ValueError):
+    """Raised when serialized execution-report bytes violate the public contract."""
 
 
 class GeneratedDocumentMetadataDict(TypedDict):
@@ -79,38 +88,108 @@ class GenerationExecutionReportDict(TypedDict):
     document: GeneratedDocumentMetadataDict
 
 
+_EXECUTION_REPORT_KEYS = frozenset(GenerationExecutionReportDict.__required_keys__)
+_DOCUMENT_METADATA_KEYS = frozenset(GeneratedDocumentMetadataDict.__required_keys__)
+
+
 @dataclass(frozen=True)
+class _ComponentSnapshot:
+    """Primitive retained representation of one normalized component."""
+
+    ref: str
+    name: str
+    version: str | None
+    purl_type: str
+    purl_namespace: str | None
+    purl_name: str
+    purl_version: str | None
+    purl_qualifiers: tuple[tuple[str, str], ...]
+    purl_subpath: str | None
+    component_type: str
+
+    @classmethod
+    def from_component(cls, component: ComponentIdentity) -> _ComponentSnapshot:
+        return cls(
+            ref=component.ref,
+            name=component.name,
+            version=component.version,
+            purl_type=component.purl.type,
+            purl_namespace=component.purl.namespace,
+            purl_name=component.purl.name,
+            purl_version=component.purl.version,
+            purl_qualifiers=tuple(sorted(dict(component.purl.qualifiers).items())),
+            purl_subpath=component.purl.subpath,
+            component_type=component.type,
+        )
+
+    def materialize(self) -> ComponentIdentity:
+        return ComponentIdentity(
+            ref=self.ref,
+            name=self.name,
+            version=self.version,
+            purl=PackageURL(
+                type=self.purl_type,
+                namespace=self.purl_namespace,
+                name=self.purl_name,
+                version=self.purl_version,
+                qualifiers=dict(self.purl_qualifiers),
+                subpath=self.purl_subpath,
+            ),
+            type=self.component_type,
+        )
+
+
+@dataclass(frozen=True, init=False)
 class GenerationResult:
-    """Rendered VEX and the normalized inputs used to render it."""
+    """Rendered VEX and an immutable snapshot of the normalized render inputs."""
 
     rendered_document: str
-    components: tuple[ComponentIdentity, ...]
     findings: tuple[VulnerabilityFinding, ...]
-    execution_context: GenerationExecutionContext | None = None
+    execution_context: GenerationExecutionContext | None
+    _component_snapshots: tuple[_ComponentSnapshot, ...] = field(repr=False)
     _vexcalibur_version: str | None = field(
         default=None,
-        init=False,
         repr=False,
         compare=False,
         hash=False,
     )
 
-    def __post_init__(self) -> None:
-        if type(self.rendered_document) is not str:
+    def __init__(
+        self,
+        rendered_document: str,
+        components: tuple[ComponentIdentity, ...],
+        findings: tuple[VulnerabilityFinding, ...],
+        execution_context: GenerationExecutionContext | None = None,
+    ) -> None:
+        if type(rendered_document) is not str:
             raise TypeError("rendered_document must be exact built-in text")
-        if type(self.components) is not tuple or not all(
-            type(component) is ComponentIdentity for component in self.components
+        if type(components) is not tuple or not all(
+            type(component) is ComponentIdentity for component in components
         ):
             raise TypeError("components must be an exact tuple of ComponentIdentity values")
-        if type(self.findings) is not tuple or not all(
-            type(finding) is VulnerabilityFinding for finding in self.findings
+        if type(findings) is not tuple or not all(
+            type(finding) is VulnerabilityFinding for finding in findings
         ):
             raise TypeError("findings must be an exact tuple of VulnerabilityFinding values")
         if (
-            self.execution_context is not None
-            and type(self.execution_context) is not GenerationExecutionContext
+            execution_context is not None
+            and type(execution_context) is not GenerationExecutionContext
         ):
             raise TypeError("execution_context must be a GenerationExecutionContext")
+        object.__setattr__(self, "rendered_document", rendered_document)
+        object.__setattr__(self, "findings", findings)
+        object.__setattr__(self, "execution_context", execution_context)
+        object.__setattr__(
+            self,
+            "_component_snapshots",
+            tuple(_ComponentSnapshot.from_component(component) for component in components),
+        )
+        object.__setattr__(self, "_vexcalibur_version", None)
+
+    @property
+    def components(self) -> tuple[ComponentIdentity, ...]:
+        """Return independent ordinary package objects from the retained snapshot."""
+        return tuple(snapshot.materialize() for snapshot in self._component_snapshots)
 
     @cached_property
     def rendered_bytes(self) -> bytes:
@@ -299,6 +378,162 @@ class GenerationExecutionReport:
             msg = f"execution report exceeds the {MAX_EXECUTION_REPORT_BYTES} byte limit"
             raise ValueError(msg)
         return serialized
+
+
+def parse_generation_execution_report(
+    serialized: bytes | str,
+) -> GenerationExecutionReport:
+    """Parse one bounded, canonical execution report into its typed value."""
+    if type(serialized) is str:
+        try:
+            report_bytes = serialized.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise GenerationExecutionReportParseError(
+                "execution report is not valid UTF-8"
+            ) from exc
+    elif type(serialized) is bytes:
+        report_bytes = serialized
+    else:
+        raise TypeError("serialized execution report must be exact bytes or text")
+    if len(report_bytes) > MAX_EXECUTION_REPORT_BYTES:
+        raise GenerationExecutionReportParseError(
+            f"execution report exceeds the {MAX_EXECUTION_REPORT_BYTES} byte limit"
+        )
+
+    try:
+        decoded = strict_json_loads(report_bytes)
+    except StrictJsonError as exc:
+        raise GenerationExecutionReportParseError(
+            f"execution report is invalid JSON: {exc}"
+        ) from exc
+    report = _require_exact_report_object(
+        decoded,
+        expected_keys=_EXECUTION_REPORT_KEYS,
+        field="execution report",
+    )
+    state_counts = _require_exact_report_object(
+        report["analysis_state_counts"],
+        expected_keys=None,
+        field="analysis_state_counts",
+    )
+    document = _require_exact_report_object(
+        report["document"],
+        expected_keys=_DOCUMENT_METADATA_KEYS,
+        field="document",
+    )
+
+    try:
+        command = _require_report_string(report["command"], field="command")
+        if command != "generate":
+            raise GenerationExecutionReportParseError("execution report command must be generate")
+        inventory_source = InventorySourceCategory(
+            _require_report_string(
+                report["inventory_source"],
+                field="inventory_source",
+            )
+        )
+        finding_source = FindingSourceCategory(
+            _require_report_string(
+                report["finding_source"],
+                field="finding_source",
+            )
+        )
+        output_format = ExecutionReportOutputFormat(
+            _require_report_string(
+                report["output_format"],
+                field="output_format",
+            )
+        )
+        invalid_states = set(state_counts).difference(state.value for state in VexAnalysisState)
+        if invalid_states:
+            raise GenerationExecutionReportParseError(
+                "analysis_state_counts contains an unsupported analysis state"
+            )
+        parsed = GenerationExecutionReport(
+            schema_version=_require_report_integer(
+                report["schema_version"],
+                field="schema_version",
+            ),
+            command=cast(Literal["generate"], command),
+            vexcalibur_version=_require_report_string(
+                report["vexcalibur_version"],
+                field="vexcalibur_version",
+            ),
+            inventory_source=inventory_source,
+            finding_source=finding_source,
+            output_format=output_format,
+            component_count=_require_report_integer(
+                report["component_count"],
+                field="component_count",
+            ),
+            finding_count=_require_report_integer(
+                report["finding_count"],
+                field="finding_count",
+            ),
+            analysis_state_counts=tuple(
+                (
+                    state,
+                    _require_report_integer(
+                        state_counts[state.value],
+                        field=f"analysis_state_counts.{state.value}",
+                    ),
+                )
+                for state in VexAnalysisState
+                if state.value in state_counts
+            ),
+            document=GeneratedDocumentMetadata(
+                sha256=_require_report_string(
+                    document["sha256"],
+                    field="document.sha256",
+                ),
+                bytes=_require_report_integer(
+                    document["bytes"],
+                    field="document.bytes",
+                ),
+            ),
+        )
+    except GenerationExecutionReportParseError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GenerationExecutionReportParseError(str(exc)) from exc
+
+    if report_bytes != parsed.to_json().encode("utf-8"):
+        raise GenerationExecutionReportParseError("execution report is not canonical JSON")
+    return parsed
+
+
+def _require_exact_report_object(
+    value: object,
+    *,
+    expected_keys: frozenset[str] | None,
+    field: str,
+) -> dict[str, object]:
+    if type(value) is not dict:
+        raise GenerationExecutionReportParseError(f"{field} must be a JSON object")
+    result = value
+    if expected_keys is not None and set(result) != expected_keys:
+        raise GenerationExecutionReportParseError(f"{field} contains unexpected fields")
+    return result
+
+
+def _require_report_string(
+    value: object,
+    *,
+    field: str,
+) -> str:
+    if type(value) is not str:
+        raise GenerationExecutionReportParseError(f"{field} must be a string")
+    return value
+
+
+def _require_report_integer(
+    value: object,
+    *,
+    field: str,
+) -> int:
+    if type(value) is not int:
+        raise GenerationExecutionReportParseError(f"{field} must be an integer")
+    return value
 
 
 def _installed_vexcalibur_version() -> str:

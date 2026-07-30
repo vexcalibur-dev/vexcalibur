@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any
+from typing import cast
 
 from packageurl import PackageURL
 
@@ -63,57 +65,20 @@ _PREFLIGHT_BUDGET_RENDERER_TYPES = frozenset(
 )
 
 
-class _FrozenPackageURL(PackageURL):
-    """A PackageURL snapshot whose qualifier mapping has no mutation surface."""
-
-    __slots__ = ()
-
-    @classmethod
-    def from_package_url(cls, purl: PackageURL) -> _FrozenPackageURL:
-        """Normalize and retain one package URL with immutable qualifiers."""
-        normalized = PackageURL(
-            type=purl.type,
-            namespace=purl.namespace,
-            name=purl.name,
-            version=purl.version,
-            qualifiers=dict(purl.qualifiers),
-            subpath=purl.subpath,
-        )
-        return cls._make(
-            (
-                normalized.type,
-                normalized.namespace,
-                normalized.name,
-                normalized.version,
-                MappingProxyType(dict(normalized.qualifiers)),
-                normalized.subpath,
-            )
-        )
-
-    def _mutable_package_url(self) -> PackageURL:
-        return PackageURL(
-            type=self.type,
-            namespace=self.namespace,
-            name=self.name,
-            version=self.version,
-            qualifiers=dict(self.qualifiers),
-            subpath=self.subpath,
-            normalize_purl=False,
-        )
-
-    def to_string(self, encode: bool | None = True) -> str:
-        return self._mutable_package_url().to_string(encode=encode)
-
-    def to_dict(self, encode: bool | None = False, empty: Any = None) -> dict[str, Any]:
-        return self._mutable_package_url().to_dict(encode=encode, empty=empty)
-
-    def validate(self, strict: bool = False) -> list[Any]:
-        return self._mutable_package_url().validate(strict=strict)
-
-
 _PURL_UNRESERVED_CHARACTERS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 )
+
+
+class _ExtensionBoundaryPolicy(Enum):
+    PRESERVE_IDENTITY = "preserve_identity"
+    ISOLATED_COPIES = "isolated_copies"
+
+
+@dataclass(frozen=True)
+class _GenerationRun:
+    result: GenerationResult
+    legacy_document: str
 
 
 def generate_vex_from_source(
@@ -124,13 +89,14 @@ def generate_vex_from_source(
     renderer: VexRenderer | None = None,
 ) -> str:
     """Generate VEX JSON from a CycloneDX SBOM and source provider."""
-    components = load_cyclonedx_sbom(input_file)
-    return generate_vex_from_components(
-        components=components,
+    return _run_cyclonedx_generation(
+        input_file=input_file,
         source=source,
         timestamp=timestamp,
         renderer=renderer,
-    )
+        boundary_policy=_ExtensionBoundaryPolicy.PRESERVE_IDENTITY,
+        execution_context=None,
+    ).legacy_document
 
 
 def generate_vex_from_source_result(
@@ -142,15 +108,14 @@ def generate_vex_from_source_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from a CycloneDX SBOM and provider."""
-    components = load_cyclonedx_sbom(input_file)
-    return _generate_vex_from_components_result(
-        components=components,
+    return _run_cyclonedx_generation(
+        input_file=input_file,
         source=source,
         timestamp=timestamp,
         renderer=renderer,
-        inventory_source=InventorySourceCategory.SBOM_FILE,
+        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
         execution_context=execution_context,
-    )
+    ).result
 
 
 def generate_vex_from_components(
@@ -161,13 +126,14 @@ def generate_vex_from_components(
     renderer: VexRenderer | None = None,
 ) -> str:
     """Generate VEX JSON from component identities and a source provider."""
-    _require_components(components)
-    return _render_vex_from_components_document(
+    return _run_generation(
         components=components,
         source=source,
         timestamp=timestamp,
         renderer=renderer,
-    )
+        execution_context=None,
+        boundary_policy=_ExtensionBoundaryPolicy.PRESERVE_IDENTITY,
+    ).legacy_document
 
 
 def generate_vex_from_components_result(
@@ -204,19 +170,49 @@ def _generate_vex_from_components_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a result with inventory provenance established by a trusted loader."""
-    _require_components(components)
     retained_context = _execution_context_for_generation(
         inventory_source=inventory_source,
         source=source,
         renderer=renderer,
         execution_context=execution_context,
     )
-    return _render_vex_from_components_result(
+    return _run_generation(
         components=components,
         source=source,
         timestamp=timestamp,
         renderer=renderer,
         execution_context=retained_context,
+        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
+    ).result
+
+
+def _run_cyclonedx_generation(
+    *,
+    input_file: Path,
+    source: VulnerabilitySource,
+    timestamp: datetime | None,
+    renderer: VexRenderer | None,
+    boundary_policy: _ExtensionBoundaryPolicy,
+    execution_context: GenerationExecutionContext | None,
+) -> _GenerationRun:
+    components = load_cyclonedx_sbom(input_file)
+    retained_context = (
+        _execution_context_for_generation(
+            inventory_source=InventorySourceCategory.SBOM_FILE,
+            source=source,
+            renderer=renderer,
+            execution_context=execution_context,
+        )
+        if boundary_policy is _ExtensionBoundaryPolicy.ISOLATED_COPIES
+        else None
+    )
+    return _run_generation(
+        components=components,
+        source=source,
+        timestamp=timestamp,
+        renderer=renderer,
+        execution_context=retained_context,
+        boundary_policy=boundary_policy,
     )
 
 
@@ -227,80 +223,83 @@ def _require_components(components: tuple[ComponentIdentity, ...]) -> None:
         raise SbomError(msg)
 
 
-def _render_vex_from_components_document(
-    *,
-    components: tuple[ComponentIdentity, ...],
-    source: VulnerabilitySource,
-    timestamp: datetime | None,
-    renderer: VexRenderer | None,
-) -> str:
-    """Render through the object-preserving legacy extension path."""
-    try:
-        findings = source.findings_for_components(components)
-    except VulnerabilitySourceInputError as exc:
-        raise SbomError(str(exc)) from exc
-
-    selected_renderer = CycloneDxJsonRenderer() if renderer is None else renderer
-    _validate_builtin_render_input(
-        components=components,
-        findings=findings,
-        renderer=selected_renderer,
-    )
-    rendered = selected_renderer.render(
-        components=components,
-        findings=findings,
-        timestamp=timestamp,
-    )
-    _validate_rendered_output(rendered)
-    return rendered
-
-
-def _render_vex_from_components_result(
+def _run_generation(
     *,
     components: tuple[ComponentIdentity, ...],
     source: VulnerabilitySource,
     timestamp: datetime | None,
     renderer: VexRenderer | None,
     execution_context: GenerationExecutionContext | None,
-) -> GenerationResult:
-    components = tuple(_snapshot_component(component) for component in components)
+    boundary_policy: _ExtensionBoundaryPolicy,
+) -> _GenerationRun:
+    """Run the single component-to-result pipeline under one extension policy."""
+    _require_components(components)
+    isolated = boundary_policy is _ExtensionBoundaryPolicy.ISOLATED_COPIES
+    retained_components = _copy_components(components) if isolated else None
+    source_components = (
+        _copy_components(retained_components) if retained_components is not None else components
+    )
     try:
-        findings = tuple(
-            _snapshot_finding(finding) for finding in source.findings_for_components(components)
-        )
+        source_findings = source.findings_for_components(source_components)
     except VulnerabilitySourceInputError as exc:
         raise SbomError(str(exc)) from exc
 
+    retained_findings = (
+        tuple(_snapshot_finding(finding) for finding in source_findings) if isolated else None
+    )
     selected_renderer = CycloneDxJsonRenderer() if renderer is None else renderer
+    renderer_components = (
+        _copy_components(retained_components) if retained_components is not None else components
+    )
+    renderer_findings = retained_findings if retained_findings is not None else source_findings
     _validate_builtin_render_input(
-        components=components,
-        findings=findings,
+        components=renderer_components,
+        findings=renderer_findings,
         renderer=selected_renderer,
     )
-    rendered = _canonical_rendered_text(
-        selected_renderer.render(
-            components=components,
-            findings=findings,
-            timestamp=timestamp,
-        )
+    rendered = selected_renderer.render(
+        components=renderer_components,
+        findings=renderer_findings,
+        timestamp=timestamp,
     )
-    return GenerationResult(
-        rendered_document=rendered,
-        components=components,
-        findings=findings,
-        execution_context=execution_context,
+    canonical_document = _canonical_rendered_text(rendered)
+    if retained_components is None:
+        retained_components = _copy_components(components)
+    if retained_findings is None:
+        retained_findings = tuple(_snapshot_finding(finding) for finding in source_findings)
+    return _GenerationRun(
+        result=GenerationResult(
+            rendered_document=canonical_document,
+            components=retained_components,
+            findings=retained_findings,
+            execution_context=execution_context,
+        ),
+        legacy_document=rendered,
     )
 
 
-def _snapshot_component(component: ComponentIdentity) -> ComponentIdentity:
-    """Copy one extension-supplied component into the exact domain type."""
+def _copy_components(
+    components: tuple[ComponentIdentity, ...],
+) -> tuple[ComponentIdentity, ...]:
+    return tuple(_copy_component(component) for component in components)
+
+
+def _copy_component(component: ComponentIdentity) -> ComponentIdentity:
+    """Copy one component with an ordinary, independently owned package URL."""
     if not isinstance(component, ComponentIdentity):
         raise TypeError("components must contain ComponentIdentity values")
     return ComponentIdentity(
         ref=component.ref,
         name=component.name,
         version=component.version,
-        purl=_FrozenPackageURL.from_package_url(component.purl),
+        purl=PackageURL(
+            type=component.purl.type,
+            namespace=component.purl.namespace,
+            name=component.purl.name,
+            version=component.purl.version,
+            qualifiers=dict(component.purl.qualifiers),
+            subpath=component.purl.subpath,
+        ),
         type=component.type,
     )
 
@@ -516,20 +515,21 @@ def generate_vex_from_sbom(
     renderer: VexRenderer | None = None,
 ) -> str:
     """Generate VEX JSON from a CycloneDX SBOM."""
-    components = load_cyclonedx_sbom(input_file)
-    source = OsvSource(
+    source = _osv_source(
         client=osv_client,
         osv_base_url=osv_base_url,
         allow_public_osv=allow_public_osv,
         source_name=osv_source_name,
         source_url=osv_source_url,
     )
-    return generate_vex_from_components(
-        components=components,
+    return _run_cyclonedx_generation(
+        input_file=input_file,
         source=source,
         timestamp=timestamp,
         renderer=renderer,
-    )
+        boundary_policy=_ExtensionBoundaryPolicy.PRESERVE_IDENTITY,
+        execution_context=None,
+    ).legacy_document
 
 
 def generate_vex_from_sbom_result(
@@ -545,23 +545,21 @@ def generate_vex_from_sbom_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from a local CycloneDX SBOM."""
-    components = load_cyclonedx_sbom(input_file)
-    source = OsvSource(
+    source = _osv_source(
         client=osv_client,
         osv_base_url=osv_base_url,
         allow_public_osv=allow_public_osv,
         source_name=osv_source_name,
         source_url=osv_source_url,
     )
-
-    return _generate_vex_from_components_result(
-        components=components,
+    return _run_cyclonedx_generation(
+        input_file=input_file,
         source=source,
         timestamp=timestamp,
         renderer=renderer,
-        inventory_source=InventorySourceCategory.SBOM_FILE,
+        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
         execution_context=execution_context,
-    )
+    ).result
 
 
 def generate_vex_from_github_sbom(
@@ -577,22 +575,22 @@ def generate_vex_from_github_sbom(
     renderer: VexRenderer | None = None,
 ) -> str:
     """Generate VEX JSON from a GitHub Dependency Graph SBOM."""
-    source = OsvSource(
+    source = _osv_source(
         client=osv_client,
         osv_base_url=osv_base_url,
         allow_public_osv=allow_public_osv,
         source_name=osv_source_name,
         source_url=osv_source_url,
     )
-    validate_source_before_inventory_load(source)
-    client = GithubSbomClient() if github_client is None else github_client
-    components = client.component_identities(repository)
-    return generate_vex_from_components(
-        components=components,
+    return _run_github_generation(
+        repository=repository,
         source=source,
         timestamp=timestamp,
+        github_client=github_client,
         renderer=renderer,
-    )
+        boundary_policy=_ExtensionBoundaryPolicy.PRESERVE_IDENTITY,
+        execution_context=None,
+    ).legacy_document
 
 
 def generate_vex_from_github_source_result(
@@ -605,23 +603,15 @@ def generate_vex_from_github_source_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from GitHub inventory and one source."""
-    validate_source_before_inventory_load(source)
-    retained_context = _execution_context_for_generation(
-        inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
-        source=source,
-        renderer=renderer,
-        execution_context=execution_context,
-    )
-    client = GithubSbomClient() if github_client is None else github_client
-    components = client.component_identities(repository)
-    _require_components(components)
-    return _render_vex_from_components_result(
-        components=components,
+    return _run_github_generation(
+        repository=repository,
         source=source,
         timestamp=timestamp,
+        github_client=github_client,
         renderer=renderer,
-        execution_context=retained_context,
-    )
+        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
+        execution_context=execution_context,
+    ).result
 
 
 def generate_vex_from_github_sbom_result(
@@ -638,7 +628,7 @@ def generate_vex_from_github_sbom_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from a GitHub Dependency Graph SBOM."""
-    source = OsvSource(
+    source = _osv_source(
         client=osv_client,
         osv_base_url=osv_base_url,
         allow_public_osv=allow_public_osv,
@@ -652,6 +642,56 @@ def generate_vex_from_github_sbom_result(
         github_client=github_client,
         renderer=renderer,
         execution_context=execution_context,
+    )
+
+
+def _run_github_generation(
+    *,
+    repository: str,
+    source: VulnerabilitySource,
+    timestamp: datetime | None,
+    github_client: GithubSbomComponentLoader | None,
+    renderer: VexRenderer | None,
+    boundary_policy: _ExtensionBoundaryPolicy,
+    execution_context: GenerationExecutionContext | None,
+) -> _GenerationRun:
+    validate_source_before_inventory_load(source)
+    retained_context = (
+        _execution_context_for_generation(
+            inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+            source=source,
+            renderer=renderer,
+            execution_context=execution_context,
+        )
+        if boundary_policy is _ExtensionBoundaryPolicy.ISOLATED_COPIES
+        else None
+    )
+    client = GithubSbomClient() if github_client is None else github_client
+    components = client.component_identities(repository)
+    return _run_generation(
+        components=components,
+        source=source,
+        timestamp=timestamp,
+        renderer=renderer,
+        execution_context=retained_context,
+        boundary_policy=boundary_policy,
+    )
+
+
+def _osv_source(
+    *,
+    client: OsvClient | None,
+    osv_base_url: str,
+    allow_public_osv: bool,
+    source_name: str | None,
+    source_url: str | None,
+) -> OsvSource:
+    return OsvSource(
+        client=client,
+        osv_base_url=osv_base_url,
+        allow_public_osv=allow_public_osv,
+        source_name=source_name,
+        source_url=source_url,
     )
 
 
@@ -732,10 +772,12 @@ def _execution_report_finding_source(
     source: VulnerabilitySource,
 ) -> FindingSourceCategory | None:
     """Reserve built-in provenance for Vexcalibur's exact source types."""
-    if isinstance(source, LocalFindingsSource) and type(source) is LocalFindingsSource:
-        return source._vexcalibur_execution_report_finding_source()
-    if isinstance(source, OsvSource) and type(source) is OsvSource:
-        return source._vexcalibur_execution_report_finding_source()
+    declaration = _BUILTIN_EXECUTION_DECLARATIONS.get(type(source))
+    if declaration is not None:
+        category = declaration(source)
+        if not isinstance(category, FindingSourceCategory):
+            raise AssertionError("built-in source declaration returned the wrong category type")
+        return category
     return declared_execution_report_finding_source(source)
 
 
@@ -743,10 +785,64 @@ def _execution_report_output_format(
     renderer: VexRenderer,
 ) -> ExecutionReportOutputFormat | None:
     """Reserve built-in formats for Vexcalibur's exact renderer types."""
-    if isinstance(renderer, CycloneDxJsonRenderer) and type(renderer) is CycloneDxJsonRenderer:
-        return renderer._vexcalibur_execution_report_output_format()
-    if isinstance(renderer, OpenVexJsonRenderer) and type(renderer) is OpenVexJsonRenderer:
-        return renderer._vexcalibur_execution_report_output_format()
-    if isinstance(renderer, Csaf20VexJsonRenderer) and type(renderer) is Csaf20VexJsonRenderer:
-        return renderer._vexcalibur_execution_report_output_format()
+    declaration = _BUILTIN_EXECUTION_DECLARATIONS.get(type(renderer))
+    if declaration is not None:
+        category = declaration(renderer)
+        if not isinstance(category, ExecutionReportOutputFormat):
+            raise AssertionError("built-in renderer declaration returned the wrong category type")
+        return category
     return declared_execution_report_output_format(renderer)
+
+
+_ExecutionCategory = FindingSourceCategory | ExecutionReportOutputFormat
+_ExecutionDeclaration = Callable[[object], _ExecutionCategory]
+
+
+def _local_finding_source_declaration(value: object) -> FindingSourceCategory:
+    return cast(
+        FindingSourceCategory,
+        cast(
+            LocalFindingsSource,
+            value,
+        )._vexcalibur_execution_report_finding_source(),
+    )
+
+
+def _osv_finding_source_declaration(value: object) -> FindingSourceCategory:
+    return cast(
+        FindingSourceCategory,
+        cast(OsvSource, value)._vexcalibur_execution_report_finding_source(),
+    )
+
+
+def _cyclonedx_output_declaration(value: object) -> ExecutionReportOutputFormat:
+    return cast(
+        ExecutionReportOutputFormat,
+        cast(
+            CycloneDxJsonRenderer,
+            value,
+        )._vexcalibur_execution_report_output_format(),
+    )
+
+
+def _openvex_output_declaration(value: object) -> ExecutionReportOutputFormat:
+    return cast(
+        ExecutionReportOutputFormat,
+        cast(OpenVexJsonRenderer, value)._vexcalibur_execution_report_output_format(),
+    )
+
+
+def _csaf_output_declaration(value: object) -> ExecutionReportOutputFormat:
+    return cast(
+        ExecutionReportOutputFormat,
+        cast(Csaf20VexJsonRenderer, value)._vexcalibur_execution_report_output_format(),
+    )
+
+
+_BUILTIN_EXECUTION_DECLARATIONS: dict[type[object], _ExecutionDeclaration] = {
+    LocalFindingsSource: _local_finding_source_declaration,
+    OsvSource: _osv_finding_source_declaration,
+    CycloneDxJsonRenderer: _cyclonedx_output_declaration,
+    OpenVexJsonRenderer: _openvex_output_declaration,
+    Csaf20VexJsonRenderer: _csaf_output_declaration,
+}

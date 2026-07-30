@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, get_args, get_origin, get_type_hints
@@ -663,34 +664,134 @@ def test_generation_snapshots_package_url_qualifiers() -> None:
     )
     component.purl.qualifiers["repository_url"] = "https://changed.example.test"
 
+    first_purl = result.components[0].purl
+    assert type(first_purl) is PackageURL
+    assert type(first_purl.qualifiers) is dict
+    assert first_purl is not component.purl
+    assert first_purl.qualifiers is not component.purl.qualifiers
+    assert first_purl.qualifiers == {"repository_url": "https://packages.example.test/simple"}
+    first_purl.qualifiers["repository_url"] = "https://changed-again.example.test"
+
     retained_purl = result.components[0].purl
-    assert retained_purl is not component.purl
-    assert retained_purl.qualifiers is not component.purl.qualifiers
-    assert retained_purl.qualifiers == {"repository_url": "https://packages.example.test/simple"}
-    with pytest.raises(TypeError):
-        retained_purl.qualifiers["repository_url"] = "https://changed-again.example.test"
-    for method, arguments in (
-        ("__delitem__", ("repository_url",)),
-        ("clear", ()),
-        ("pop", ("repository_url",)),
-        ("popitem", ()),
-        ("setdefault", ("arch", "x86_64")),
-        ("update", ({"arch": "x86_64"},)),
-        ("__ior__", ({"arch": "x86_64"},)),
-    ):
-        with pytest.raises((AttributeError, TypeError)):
-            getattr(retained_purl.qualifiers, method)(*arguments)
-    with pytest.raises(TypeError):
-        dict.__setitem__(
-            retained_purl.qualifiers,
-            "repository_url",
-            "https://changed-through-descriptor.example.test",
-        )
+    assert retained_purl is not first_purl
     assert retained_purl.qualifiers == {"repository_url": "https://packages.example.test/simple"}
     assert retained_purl.to_string() == (
         "pkg:pypi/demo@1.0.0?repository_url=https://packages.example.test/simple"
     )
     assert retained_purl.to_dict()["qualifiers"] == {
+        "repository_url": "https://packages.example.test/simple"
+    }
+
+
+def test_direct_generation_result_snapshots_package_url_qualifiers() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL(
+            type="pypi",
+            namespace=None,
+            name="demo",
+            version="1.0.0",
+            qualifiers={"repository_url": "https://packages.example.test/simple"},
+            subpath=None,
+        ),
+    )
+    result = GenerationResult("{}\n", (component,), ())
+    original_hash = hash(result)
+
+    component.purl.qualifiers["repository_url"] = "https://changed.example.test"
+    returned = result.components[0]
+    returned.purl.qualifiers["repository_url"] = "https://changed-again.example.test"
+
+    expected_component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL(
+            type="pypi",
+            namespace=None,
+            name="demo",
+            version="1.0.0",
+            qualifiers={"repository_url": "https://packages.example.test/simple"},
+            subpath=None,
+        ),
+    )
+    assert result.components == (expected_component,)
+    assert hash(result) == original_hash
+    assert result == GenerationResult("{}\n", (expected_component,), ())
+
+
+def test_result_extensions_receive_independent_ordinary_package_urls() -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL(
+            type="pypi",
+            namespace=None,
+            name="demo",
+            version="1.0.0",
+            qualifiers={"repository_url": "https://packages.example.test/simple"},
+            subpath=None,
+        ),
+    )
+    source_component: ComponentIdentity | None = None
+    renderer_component: ComponentIdentity | None = None
+
+    class MutatingSource:
+        def execution_report_finding_source(
+            self,
+        ) -> Literal[FindingSourceCategory.CUSTOM]:
+            return FindingSourceCategory.CUSTOM
+
+        def findings_for_components(
+            self,
+            components: tuple[ComponentIdentity, ...],
+        ) -> tuple[VulnerabilityFinding, ...]:
+            nonlocal source_component
+            source_component = components[0]
+            assert type(source_component.purl) is PackageURL
+            assert type(source_component.purl.qualifiers) is dict
+            json.dumps(source_component.purl.qualifiers)
+            source_component.purl.qualifiers["source_mutation"] = "discarded"
+            return ()
+
+    class MutatingRenderer:
+        def execution_report_output_format(
+            self,
+        ) -> Literal[ExecutionReportOutputFormat.CUSTOM]:
+            return ExecutionReportOutputFormat.CUSTOM
+
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            del findings, timestamp
+            nonlocal renderer_component
+            renderer_component = components[0]
+            assert type(renderer_component.purl) is PackageURL
+            assert type(renderer_component.purl.qualifiers) is dict
+            assert "source_mutation" not in renderer_component.purl.qualifiers
+            json.dumps(renderer_component.purl.qualifiers)
+            renderer_component.purl.qualifiers["renderer_mutation"] = "discarded"
+            return "{}\n"
+
+    result = generate_vex_from_components_result(
+        components=(component,),
+        source=MutatingSource(),
+        timestamp=None,
+        renderer=MutatingRenderer(),
+    )
+
+    assert source_component is not None
+    assert renderer_component is not None
+    assert source_component is not renderer_component
+    assert component.purl.qualifiers == {"repository_url": "https://packages.example.test/simple"}
+    assert result.components[0].purl.qualifiers == {
         "repository_url": "https://packages.example.test/simple"
     }
 

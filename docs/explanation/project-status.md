@@ -44,11 +44,16 @@ checked distribution bytes to a flat immutable GitHub Release and then to PyPI
 through Trusted Publishing.
 
 Pull requests exercise the full schema-2 asset-generation and validation graph
-without publication credentials or external publication. They do not perform a
-real GitHub publication or PyPI OIDC exchange; those publisher paths are tested
-statically until a real release. The initial production review makes zero
-assertions; a separate synthetic `in_triage` fixture exercises CycloneDX,
-OpenVEX, and CSAF equivalence.
+without publication credentials. That graph creates an ephemeral local
+`v0.0.0` tag in its credentialless checkout so the normal package metadata
+path remains under test. It never pushes the tag or changes an existing tag.
+The graph uploads only artifacts derived from this public repository, and the
+caller must set `allow-public-evidence-upload: true`.
+
+Pull requests do not create a GitHub Release or perform a PyPI OIDC exchange.
+Those publisher paths are tested statically until a real release. The initial
+production review makes zero assertions; a separate synthetic `in_triage`
+fixture exercises CycloneDX, OpenVEX, and CSAF equivalence.
 
 This is maintainer and release tooling, not part of the public package API.
 Read [Why Vexcalibur publishes evidence about itself](self-release-evidence.md)

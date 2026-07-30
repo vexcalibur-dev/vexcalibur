@@ -62,8 +62,9 @@ def test_bound_resources_cannot_be_duplicated(tmp_path: Path) -> None:
                         copy.copy(resource)
                     with pytest.raises(TypeError, match="cannot be copied"):
                         copy.deepcopy(resource)
-                    with pytest.raises(TypeError):
-                        copy.replace(resource)
+                    if hasattr(copy, "replace"):
+                        with pytest.raises(TypeError):
+                            copy.replace(resource)
                     with pytest.raises(TypeError):
                         dataclasses.replace(resource)
                     with pytest.raises(TypeError, match="cannot be serialized"):

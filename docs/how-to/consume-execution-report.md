@@ -70,12 +70,32 @@ cross-field state total and bind the report to the exact VEX bytes:
 uv run --frozen python docs/examples/validate_execution_report.py \
   "${work_dir}/execution-report.json" \
   "${work_dir}/vex.json" \
-  docs/execution-report-v1.schema.json
+  docs/execution-report-v1.schema.json \
+  --max-exploitable 1
 ```
 
-The final line is the success signal. Apply policy only after it appears. For
-example, a workflow can reject any nonzero `exploitable` count, but that is the
-workflow's policy rather than a conclusion made by Vexcalibur.
+The command prints `execution report verified` and exits with status `0`. The
+`--max-exploitable 1` policy accepts the one exploitable finding in the example
+fixture.
+
+Set the limit to zero when your workflow must reject every exploitable finding:
+
+```bash
+uv run --frozen python docs/examples/validate_execution_report.py \
+  "${work_dir}/execution-report.json" \
+  "${work_dir}/vex.json" \
+  docs/execution-report-v1.schema.json \
+  --max-exploitable 0
+```
+
+The example report fails that policy with status `1` and this stable error:
+
+```text
+execution report rejected: exploitable count 1 exceeds maximum 0
+```
+
+The validator applies policy to the object it already validated. It does not
+open or parse the report a second time.
 
 The validator is the tested example from this checkout. It opens the report,
 schema, and document in nonblocking mode, checks each opened descriptor, and
@@ -84,6 +104,73 @@ than 25 MiB before reading and hashing it, even though the schema carries the
 same maximum. It accepts only the reviewed schema bytes from the same checkout;
 a changed or substituted schema is rejected before JSON Schema evaluation.
 Schema references cannot trigger network requests.
+
+## Consume reports in GitHub Actions
+
+The companion Action passes ordinary Vexcalibur arguments through to the
+installed package. This workflow keeps the VEX document and report in
+`${{ runner.temp }}`, validates both against the schema from the matching
+Vexcalibur release, and uploads them only after validation succeeds:
+
+```yaml
+permissions:
+  contents: read
+
+steps:
+  - name: Check out the matching Vexcalibur schema and validator
+    uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+    with:
+      repository: vexcalibur-dev/vexcalibur
+      ref: v0.5.0
+      path: .vexcalibur-source
+      persist-credentials: false
+
+  - name: Generate VEX and its execution report
+    uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+    with:
+      package-spec: vexcalibur==0.5.0
+      args: |
+        generate
+        ${{ github.workspace }}/.vexcalibur-source/tests/fixtures/sbom/cyclonedx-json-simple.json
+        --offline
+        --findings-file
+        ${{ github.workspace }}/.vexcalibur-source/tests/fixtures/findings/all-analysis-states.json
+        --output
+        ${{ runner.temp }}/vex.json
+        --execution-report
+        ${{ runner.temp }}/execution-report.json
+
+  - name: Set up uv
+    uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+    with:
+      version-file: .vexcalibur-source/.tool-versions
+      enable-cache: true
+
+  - name: Validate the report and apply policy
+    run: |
+      set -euo pipefail
+      cd "${GITHUB_WORKSPACE}/.vexcalibur-source"
+      uv sync --frozen --extra docs
+      uv run --frozen python docs/examples/validate_execution_report.py \
+        "${RUNNER_TEMP}/execution-report.json" \
+        "${RUNNER_TEMP}/vex.json" \
+        docs/execution-report-v1.schema.json \
+        --max-exploitable 1
+
+  - name: Upload validated VEX artifacts
+    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+    with:
+      name: vexcalibur-vex
+      path: |
+        ${{ runner.temp }}/vex.json
+        ${{ runner.temp }}/execution-report.json
+      if-no-files-found: error
+```
+
+Replace the fixture paths and policy limit for your repository. The `v0.5.0`
+tag is immutable and matches `vexcalibur==0.5.0`; the Action itself is pinned
+to the reviewed full commit. Package releases before `0.5.0` reject
+`--execution-report`.
 
 ## Keep the trust boundary explicit
 

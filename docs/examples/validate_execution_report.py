@@ -8,7 +8,7 @@ import hashlib
 import json
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, NoReturn
@@ -134,7 +134,7 @@ def validate_execution_report(
     report_path: Path,
     document_path: Path,
     schema_path: Path,
-) -> None:
+) -> dict[str, Any]:
     """Validate the closed report schema, cross-fields, and document binding."""
     report = _read_report(report_path)
     document_metadata = report.get("document")
@@ -168,19 +168,41 @@ def validate_execution_report(
         raise ValueError("document byte count does not match")
     if report["document"]["sha256"] != document_digest.hexdigest():
         raise ValueError("document digest does not match")
+    return report
 
 
-def _parse_args() -> argparse.Namespace:
+def _nonnegative_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    return parsed
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("report", type=Path)
     parser.add_argument("document", type=Path)
     parser.add_argument("schema", type=Path)
-    return parser.parse_args()
+    parser.add_argument(
+        "--max-exploitable",
+        type=_nonnegative_integer,
+        help="Reject reports whose exploitable count exceeds this value.",
+    )
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
-    validate_execution_report(args.report, args.document, args.schema)
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
+    report = validate_execution_report(args.report, args.document, args.schema)
+    exploitable = report["analysis_state_counts"].get("exploitable", 0)
+    if args.max_exploitable is not None and exploitable > args.max_exploitable:
+        raise SystemExit(
+            f"execution report rejected: exploitable count {exploitable} "
+            f"exceeds maximum {args.max_exploitable}"
+        )
     print("execution report verified")
     return 0
 

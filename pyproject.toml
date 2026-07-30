@@ -52,6 +52,7 @@ dev = [
   "pytest>=9.0.3,<10",
   "pytest-cov>=7.0.0,<8",
   "ruff>=0.15.20,<1",
+  "setuptools-scm==10.2.0",
   "tomli>=2.4.0,<3; python_version < '3.11'",
   "twine>=6,<7",
 ]

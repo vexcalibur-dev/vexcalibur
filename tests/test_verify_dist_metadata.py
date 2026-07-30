@@ -29,12 +29,26 @@ def write_sdist(dist_dir: Path, name: str = "vexcalibur", version: str = "0.1.0"
     return path
 
 
+def add_sdist_file(path: Path, member_name: str, contents: bytes) -> None:
+    replacement = path.with_name(f"{path.name}.replacement")
+    with tarfile.open(path, "r:gz") as source, tarfile.open(replacement, "w:gz") as target:
+        for member in source.getmembers():
+            stream = source.extractfile(member) if member.isfile() else None
+            target.addfile(member, stream)
+        info = tarfile.TarInfo(member_name)
+        info.size = len(contents)
+        target.addfile(info, BytesIO(contents))
+    replacement.replace(path)
+
+
 def run_verifier(
     dist_dir: Path,
     *,
     expected_name: str = "vexcalibur",
     expected_version: str = "0.1.0",
     github_output: Path | None = None,
+    source_root: Path | None = None,
+    required_sdist_files: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
@@ -47,6 +61,10 @@ def run_verifier(
     ]
     if github_output is not None:
         command.extend(["--github-output", str(github_output)])
+    if source_root is not None:
+        command.extend(["--source-root", str(source_root)])
+    for required_file in required_sdist_files:
+        command.extend(["--required-sdist-file", required_file])
     return subprocess.run(  # noqa: S603
         command,
         check=False,
@@ -120,3 +138,66 @@ def test_verifier_rejects_sdist_name_mismatch(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "Built sdist name 'other' does not match expected name 'vexcalibur'." in result.stderr
+
+
+def test_verifier_requires_exact_reviewed_files_in_sdist(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_path = source_root / "docs" / "example.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"print('reviewed')\n")
+    write_wheel(tmp_path)
+    sdist = write_sdist(tmp_path)
+    add_sdist_file(
+        sdist,
+        "vexcalibur-0.1.0/docs/example.py",
+        source_path.read_bytes(),
+    )
+
+    result = run_verifier(
+        tmp_path,
+        source_root=source_root,
+        required_sdist_files=("docs/example.py",),
+    )
+
+    assert result.returncode == 0
+
+
+def test_verifier_rejects_changed_required_sdist_file(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_path = source_root / "docs" / "example.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"print('reviewed')\n")
+    write_wheel(tmp_path)
+    sdist = write_sdist(tmp_path)
+    add_sdist_file(
+        sdist,
+        "vexcalibur-0.1.0/docs/example.py",
+        b"print('different')\n",
+    )
+
+    result = run_verifier(
+        tmp_path,
+        source_root=source_root,
+        required_sdist_files=("docs/example.py",),
+    )
+
+    assert result.returncode == 1
+    assert "Required sdist file differs from source" in result.stderr
+
+
+def test_verifier_rejects_required_file_missing_from_sdist(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_path = source_root / "docs" / "example.py"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"print('reviewed')\n")
+    write_wheel(tmp_path)
+    write_sdist(tmp_path)
+
+    result = run_verifier(
+        tmp_path,
+        source_root=source_root,
+        required_sdist_files=("docs/example.py",),
+    )
+
+    assert result.returncode == 1
+    assert "Required file is missing or invalid in the sdist" in result.stderr

@@ -249,4 +249,6 @@ schema from `vexcalibur_version`.
 Validate the closed-world JSON Schema, check that state counts sum to
 `finding_count`, and verify the digest and byte count before trusting a report.
 The [consumption guide](../how-to/consume-execution-report.md) shows the complete
-sequence.
+sequence. Python embeddings can use `parse_generation_execution_report` to
+enforce Vexcalibur's canonical serialization contract before applying their
+own document and policy checks.

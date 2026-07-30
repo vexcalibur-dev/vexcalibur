@@ -229,9 +229,12 @@ VEX publication can leave a valid VEX file without a report, so consumers must
 require exit status `0` and a valid report. The report is never published
 before the document it describes.
 
-Standard output is different. Vexcalibur writes and flushes those bytes
-directly before it acquires the report lock, so it cannot stage or roll back a
-partial stream write.
+Standard output is different because Vexcalibur cannot stage or roll back a
+partial stream write. It acquires the report lock first, writes and flushes the
+document, publishes the report, and then releases the lock. See the
+[execution report reference](../reference/execution-report.md)
+for the concurrency boundary when an embedding shares one output stream across
+multiple report destinations.
 
 The report omits package names and URLs, vulnerability IDs, repository names,
 filesystem paths, provider URLs, credentials, and exception text. Counts,

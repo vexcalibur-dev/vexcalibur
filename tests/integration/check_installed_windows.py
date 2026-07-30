@@ -1,4 +1,4 @@
-"""Check the installed-wheel execution-report contract on Windows."""
+"""Check the installed-distribution execution-report contract on Windows."""
 
 from __future__ import annotations
 
@@ -18,9 +18,22 @@ FIXTURE_ROOT = ROOT / "tests" / "fixtures"
 def main() -> None:
     """Require installed Windows generation to fail closed only for reports."""
     if os.name != "nt":
-        raise SystemExit("this installed-wheel check must run on Windows")
+        raise SystemExit("this installed-distribution check must run on Windows")
 
     import vexcalibur
+
+    expected_python = os.environ.get("VEXCALIBUR_EXPECTED_PYTHON")
+    actual_python = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if expected_python is None or actual_python != expected_python:
+        raise SystemExit(
+            f"installed check uses Python {actual_python}, expected {expected_python!r}"
+        )
+    expected_version = os.environ.get("VEXCALIBUR_EXPECTED_VERSION")
+    actual_version = importlib.metadata.version("vexcalibur")
+    if expected_version is None or actual_version != expected_version:
+        raise SystemExit(
+            f"installed Vexcalibur version is {actual_version}, expected {expected_version!r}"
+        )
 
     package_path = Path(vexcalibur.__file__).resolve()
     if not package_path.is_relative_to(Path(sys.prefix).resolve()):
@@ -61,7 +74,7 @@ def main() -> None:
 
         generated = _run(base_command)
         if generated.returncode != 0:
-            _fail("ordinary installed-wheel generation failed", generated)
+            _fail("ordinary installed-distribution generation failed", generated)
         if not output_path.read_text(encoding="utf-8").startswith("{"):
             _fail("ordinary generation did not produce VEX", generated)
 

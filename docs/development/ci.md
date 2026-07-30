@@ -127,7 +127,11 @@ make release-evidence-check
 See [Build and review local release
 evidence](../how-to/build-release-evidence.md) for input review, expected files,
 and failure recovery. The full schema-2 graph is intentionally exercised on
-hosted runners because it verifies GitHub artifact IDs and transport digests.
+hosted pull-request runners because it verifies GitHub artifact IDs and
+transport digests. That unprivileged run creates an ephemeral local `v0.0.0`
+tag in a credentialless checkout and has no publication credentials. It never
+pushes the tag or changes an existing tag. Its caller explicitly permits
+uploads derived from this public repository.
 
 ## Scheduled and live checks
 

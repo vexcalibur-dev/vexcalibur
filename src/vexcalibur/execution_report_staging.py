@@ -177,6 +177,22 @@ class StagedFileWrite:
             self._committed = False
         return removed
 
+    def retain_rollback(self) -> PublishedFileRollback:
+        """Retain an independent handle that can remove this publication."""
+        if not self.committed or not self._retain_publication:
+            raise BoundFileDestinationError("staged file is not published")
+        try:
+            parent_fd = os.dup(self.parent_fd)
+        except OSError as exc:
+            raise BoundFileDestinationError(
+                "could not retain the published file rollback handle"
+            ) from exc
+        return PublishedFileRollback._create(
+            parent_fd=parent_fd,
+            name=self.destination._name_bytes,
+            expected=self.temporary_stat,
+        )
+
     def _rollback_publication(self) -> bool:
         if not self.committed:
             return True
@@ -228,6 +244,76 @@ class StagedFileWrite:
         traceback: TracebackType | None,
     ) -> None:
         self.close()
+
+    def __del__(self) -> None:
+        with suppress(Exception):
+            self.close()
+
+
+_PUBLISHED_FILE_ROLLBACK_TOKEN = object()
+
+
+class PublishedFileRollback:
+    """Independent identity-bound handle for removing one published file."""
+
+    __slots__ = ("_closed", "expected", "name", "parent_fd")
+
+    def __init__(
+        self,
+        construction_token: object,
+        *,
+        parent_fd: int,
+        name: str | bytes,
+        expected: os.stat_result,
+    ) -> None:
+        if construction_token is not _PUBLISHED_FILE_ROLLBACK_TOKEN:
+            raise TypeError("published rollback handles require a staged file")
+        self.parent_fd = parent_fd
+        self.name = name
+        self.expected = expected
+        self._closed = False
+
+    @classmethod
+    def _create(
+        cls,
+        *,
+        parent_fd: int,
+        name: str | bytes,
+        expected: os.stat_result,
+    ) -> PublishedFileRollback:
+        return cls(
+            _PUBLISHED_FILE_ROLLBACK_TOKEN,
+            parent_fd=parent_fd,
+            name=name,
+            expected=expected,
+        )
+
+    def discard(self) -> bool:
+        """Remove the publication only if it still has the retained identity."""
+        if self._closed:
+            return False
+        return _remove_matching_destination(
+            parent_fd=self.parent_fd,
+            name=self.name,
+            expected=self.expected,
+        )
+
+    def close(self) -> None:
+        """Release the retained directory descriptor."""
+        if self._closed:
+            return
+        self._closed = True
+        _close_descriptor(self.parent_fd)
+
+    def __copy__(self) -> PublishedFileRollback:
+        raise TypeError("published rollback handles cannot be copied")
+
+    def __deepcopy__(self, memo: dict[int, object]) -> PublishedFileRollback:
+        del memo
+        raise TypeError("published rollback handles cannot be copied")
+
+    def __reduce__(self) -> NoReturn:
+        raise TypeError("published rollback handles cannot be serialized")
 
     def __del__(self) -> None:
         with suppress(Exception):

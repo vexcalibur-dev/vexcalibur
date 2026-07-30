@@ -49,6 +49,50 @@ def _step_script(step: str) -> str:
     return textwrap.dedent(step.partition(marker)[2])
 
 
+def _workflow_job_dependencies(text: str) -> dict[str, set[str]]:
+    jobs_text = text.partition("\njobs:\n")[2]
+    job_names = re.findall(r"(?m)^  ([a-z][a-z0-9-]*):\n", jobs_text)
+    dependencies: dict[str, set[str]] = {}
+    for job_name in job_names:
+        job = _job(jobs_text, job_name)
+        inline = re.search(r"(?m)^    needs: \[([^\]]+)\]$", job)
+        scalar = re.search(r"(?m)^    needs: ([a-z][a-z0-9-]*)$", job)
+        block = re.search(
+            r"(?ms)^    needs:\n((?:      - [a-z][a-z0-9-]*\n)+)",
+            job,
+        )
+        if inline is not None:
+            dependencies[job_name] = {value.strip() for value in inline.group(1).split(",")}
+        elif scalar is not None:
+            dependencies[job_name] = {scalar.group(1)}
+        elif block is not None:
+            dependencies[job_name] = set(
+                re.findall(r"(?m)^      - ([a-z][a-z0-9-]*)$", block.group(1))
+            )
+        else:
+            dependencies[job_name] = set()
+    return dependencies
+
+
+def _has_job_ancestor(
+    dependencies: dict[str, set[str]],
+    *,
+    job_name: str,
+    ancestor: str,
+) -> bool:
+    pending = list(dependencies[job_name])
+    visited: set[str] = set()
+    while pending:
+        dependency = pending.pop()
+        if dependency == ancestor:
+            return True
+        if dependency in visited:
+            continue
+        visited.add(dependency)
+        pending.extend(dependencies.get(dependency, ()))
+    return False
+
+
 def _run_create_release_step(
     tmp_path: Path,
     *,
@@ -392,15 +436,29 @@ def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> 
     assert "--only-binary :all:" in build[sync:package_build]
     assert "--no-build-isolation" in build[package_build:]
     assert "--offline" in build[package_build:]
+    assert "--no-create-gitignore" in build[package_build:]
+    for required_file in (
+        "docs/execution-report-v1.schema.json",
+        "docs/examples/generate_custom_execution_report.py",
+        "docs/examples/generate_execution_report.py",
+        "docs/examples/validate_execution_report.py",
+    ):
+        assert f"--required-sdist-file {required_file}" in build
 
 
-def test_ci_does_not_upload_release_evidence_without_a_release() -> None:
+def test_ci_runs_the_unprivileged_publication_contract_with_explicit_consent() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
     result = _job(ci, "ci")
+    publication = _job(ci, "publication-contract")
 
-    assert "uses: ./.github/workflows/release-validation.yml" not in ci
-    assert "publication-contract" not in ci
-    assert "needs.publication-contract.result" not in result
+    assert "uses: ./.github/workflows/release-validation.yml" in publication
+    assert "release-sha: ${{ github.sha }}" in publication
+    assert "release-tag: v0.0.0" in publication
+    assert "release-version: 0.0.0" in publication
+    assert "publication-only: true" in publication
+    assert "unprivileged-ci-contract: true" in publication
+    assert "allow-public-evidence-upload: true" in publication
+    assert "needs.publication-contract.result" in result
 
 
 def test_release_requires_explicit_public_evidence_upload_consent() -> None:
@@ -414,12 +472,61 @@ def test_release_requires_explicit_public_evidence_upload_consent() -> None:
     assert "explicit consent to upload public evidence" in consent
     assert "needs: consent" in _job(validation, "build")
     assert "allow-public-evidence-upload: true" in release_validation
+    assert "UNPRIVILEGED_CI_CONTRACT" in consent
+    assert "synthetic version v0.0.0" in consent
 
 
-def test_windows_installed_wheel_is_included_in_hash_locked_sync() -> None:
+def test_every_reusable_workflow_uploader_descends_from_explicit_consent() -> None:
+    validation = _validation_text()
+    jobs_text = validation.partition("\njobs:\n")[2]
+    dependencies = _workflow_job_dependencies(validation)
+    uploaders = {
+        job_name
+        for job_name in dependencies
+        if "actions/upload-artifact@" in _job(jobs_text, job_name)
+    }
+
+    assert uploaders == {
+        "build",
+        "publication-inventory",
+        "direct-vex",
+        "action-vex",
+        "publication-assets",
+    }
+    assert all(
+        _has_job_ancestor(
+            dependencies,
+            job_name=job_name,
+            ancestor="consent",
+        )
+        for job_name in uploaders
+    )
+
+
+def test_uploader_consent_graph_check_rejects_an_ungated_job() -> None:
+    dependencies = {
+        "consent": set(),
+        "build": {"consent"},
+        "safe-upload": {"build"},
+        "unsafe-upload": set(),
+    }
+
+    assert _has_job_ancestor(
+        dependencies,
+        job_name="safe-upload",
+        ancestor="consent",
+    )
+    assert not _has_job_ancestor(
+        dependencies,
+        job_name="unsafe-upload",
+        ancestor="consent",
+    )
+
+
+def test_windows_installs_wheel_and_sdist_with_locked_offline_builds() -> None:
     windows = _job(CI_WORKFLOW.read_text(encoding="utf-8"), "execution-report-windows")
     checkout = _step(windows, "Checkout")
-    installed = _step(windows, "Verify installed-wheel Windows behavior")
+    installed = _step(windows, "Verify installed-distribution Windows behavior")
 
     assert 'python-version: ["3.10", "3.14"]' in windows
     assert "python-version: ${{ matrix.python-version }}" in windows
@@ -427,9 +534,22 @@ def test_windows_installed_wheel_is_included_in_hash_locked_sync() -> None:
     assert '$ErrorActionPreference = "Stop"' in installed
     assert "$PSNativeCommandUseErrorActionPreference = $true" in installed
     assert 'if ($PSVersionTable.PSVersion -lt [Version]"7.3")' in installed
-    append = installed.index("append_locked_wheel_requirement.py")
-    sync = installed.index("uv pip sync --require-hashes")
-    assert append < sync
+    assert "dist -Filter *.whl" in installed
+    assert "dist -Filter *.tar.gz" in installed
+    build_export = installed.index("--only-group sdist-build")
+    build_sync = installed.index("uv pip sync", build_export)
+    sdist_build = installed.index("uv build", build_sync)
+    append = installed.index("append_locked_distribution_requirement.py", sdist_build)
+    runtime_sync = installed.index("uv pip sync", append)
+    assert build_export < build_sync < sdist_build < append < runtime_sync
+    assert "--require-hashes" in installed[build_sync:sdist_build]
+    assert "--only-binary :all:" in installed[build_sync:sdist_build]
+    assert "--no-build-isolation" in installed[sdist_build:append]
+    assert "--offline" in installed[sdist_build:append]
+    assert "--require-hashes" in installed[runtime_sync:]
+    assert "--only-binary :all:" in installed[runtime_sync:]
+    assert "VEXCALIBUR_EXPECTED_PYTHON" in installed
+    assert "VEXCALIBUR_EXPECTED_VERSION" in installed
     assert "uv pip install" not in installed
 
 
@@ -543,7 +663,10 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "actions/checkout@" in build
     assert "persist-credentials: false" in build
     assert "scripts/prepare-local-release-tag.sh" in build
-    assert "synthetic-ci-version" not in build
+    assert "RELEASE_SHA: ${{ inputs.release-sha }}" in build
+    assert "SETUPTOOLS_SCM_PRETEND_VERSION" not in build
+    assert "SETUPTOOLS_SCM_PRETEND_METADATA" not in build
+    assert "--no-create-gitignore" in build
     assert "scripts/normalize-sdist.py" in build
     assert "normalized-sdist-second-pass.tar.gz" in build
     assert 'cmp -- "${normalized_once}" "${normalized_twice}"' in build
@@ -580,6 +703,43 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "verify-publication" in finalizer
     assert "uv sync --frozen --group dev" in finalizer
     assert "--no-install-project" not in finalizer
+
+
+def test_action_validation_and_evidence_use_one_exact_action_commit() -> None:
+    validation = _validation_text()
+    action = _job(validation, "action-vex")
+    finalizer = _job(validation, "publication-assets")
+    evidence = RELEASE_EVIDENCE.read_text(encoding="utf-8")
+    expected_match = re.search(
+        r'^PUBLICATION_ACTION_COMMIT = "([0-9a-f]{40})"',
+        evidence,
+        flags=re.MULTILINE,
+    )
+    assert expected_match is not None
+    expected = expected_match.group(1)
+
+    action_commits = set(
+        re.findall(r"uses: vexcalibur-dev/vexcalibur-action@([0-9a-f]{40})", action)
+    )
+    finalizer_commits = set(re.findall(r"--action-commit ([0-9a-f]{40})", finalizer))
+
+    assert action_commits == {expected}
+    assert finalizer_commits == {expected}
+
+
+def test_publication_only_finalizer_requires_the_installed_matrix() -> None:
+    finalizer = _job(_validation_text(), "publication-assets")
+    condition = finalizer[: finalizer.index("    steps:\n")]
+    mode_branch = condition[condition.index("      (") :]
+
+    assert "needs.installed-cli.result == 'success'" in condition
+    assert condition.index("needs.installed-cli.result == 'success'") < condition.index(
+        "inputs.publication-only"
+    )
+    assert (
+        "needs.installed-cli.result"
+        not in mode_branch[mode_branch.index("inputs.publication-only") :]
+    )
 
 
 def test_publication_inventory_never_consumes_or_executes_the_candidate() -> None:

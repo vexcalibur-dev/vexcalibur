@@ -59,7 +59,9 @@ def _write_pair(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
 
 
 def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
-    report_path, document_path, _ = _write_pair(tmp_path)
+    report_path, document_path, expected_report = _write_pair(tmp_path)
+
+    assert consumer.validate_execution_report(report_path, document_path, SCHEMA) == expected_report
 
     result = subprocess.run(  # noqa: S603
         [
@@ -76,6 +78,73 @@ def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "execution report verified\n"
+
+
+def test_consumer_example_applies_an_exploitable_count_policy(
+    tmp_path: Path,
+) -> None:
+    report_path, document_path, report = _write_pair(tmp_path)
+    report["analysis_state_counts"] = {"exploitable": 1}
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    accepted = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(EXAMPLE),
+            str(report_path),
+            str(document_path),
+            str(SCHEMA),
+            "--max-exploitable",
+            "1",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    rejected = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(EXAMPLE),
+            str(report_path),
+            str(document_path),
+            str(SCHEMA),
+            "--max-exploitable",
+            "0",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert accepted.returncode == 0
+    assert accepted.stdout == "execution report verified\n"
+    assert accepted.stderr == ""
+    assert rejected.returncode == 1
+    assert rejected.stdout == ""
+    assert rejected.stderr == ("execution report rejected: exploitable count 1 exceeds maximum 0\n")
+
+
+def test_consumer_example_rejects_a_negative_policy_limit(tmp_path: Path) -> None:
+    report_path, document_path, _ = _write_pair(tmp_path)
+
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(EXAMPLE),
+            str(report_path),
+            str(document_path),
+            str(SCHEMA),
+            "--max-exploitable",
+            "-1",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "must be a nonnegative integer" in result.stderr
 
 
 def test_python_api_generation_example_writes_a_matching_pair(

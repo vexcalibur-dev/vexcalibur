@@ -20,6 +20,13 @@ on:
         required: false
         default: false
         type: boolean
+      unprivileged-ci-contract:
+        description: >-
+          Exercise the publication graph with an ephemeral local v0.0.0 tag
+          and without publication credentials.
+        required: false
+        default: false
+        type: boolean
       allow-public-evidence-upload:
         description: >-
           Explicitly allow release artifacts, dependency inventory, and VEX
@@ -75,10 +82,18 @@ jobs:
       - name: Require explicit upload consent
         env:
           ALLOW_PUBLIC_EVIDENCE_UPLOAD: ${{ inputs.allow-public-evidence-upload }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          UNPRIVILEGED_CI_CONTRACT: ${{ inputs.unprivileged-ci-contract }}
         run: |
           set -euo pipefail
           if [[ "${ALLOW_PUBLIC_EVIDENCE_UPLOAD}" != true ]]; then
             echo "Release validation requires explicit consent to upload public evidence." >&2
+            exit 2
+          fi
+          if [[ "${UNPRIVILEGED_CI_CONTRACT}" = true ]] && \
+            { [[ "${RELEASE_TAG}" != v0.0.0 ]] || [[ "${RELEASE_VERSION}" != 0.0.0 ]]; }; then
+            echo "The unprivileged CI contract requires synthetic version v0.0.0." >&2
             exit 2
           fi
 
@@ -360,6 +375,11 @@ jobs:
           python scripts/verify-dist-metadata.py dist \
             --expected-name vexcalibur \
             --expected-version "$EXPECTED_VERSION" \
+            --source-root . \
+            --required-sdist-file docs/execution-report-v1.schema.json \
+            --required-sdist-file docs/examples/generate_custom_execution_report.py \
+            --required-sdist-file docs/examples/generate_execution_report.py \
+            --required-sdist-file docs/examples/validate_execution_report.py \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Check distributions
@@ -1458,6 +1478,7 @@ jobs:
     if: >-
       always() &&
       needs.build.result == 'success' &&
+      needs.installed-cli.result == 'success' &&
       needs.publication-inventory.result == 'success' &&
       needs.direct-vex.result == 'success' &&
       needs.action-vex.result == 'success' &&
@@ -1469,7 +1490,6 @@ jobs:
           needs.security.result == 'success' &&
           needs.test.result == 'success' &&
           needs.docs.result == 'success' &&
-          needs.installed-cli.result == 'success' &&
           needs.openvex-interoperability.result == 'success' &&
           needs.csaf-conformance.result == 'success'
         )

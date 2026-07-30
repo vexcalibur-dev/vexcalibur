@@ -18,6 +18,20 @@ if [[ ! "${release_sha}" =~ ^[0-9a-f]{40}$ ]] || \
   echo "release SHA must identify a local Git commit" >&2
   exit 2
 fi
+
+competing_tags=()
+while IFS= read -r existing_tag; do
+  if [[ "${existing_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]] && \
+    [[ "${existing_tag}" != "${release_tag}" ]]; then
+    competing_tags+=("${existing_tag}")
+  fi
+done < <(git tag --points-at "${release_sha}")
+if [[ "${#competing_tags[@]}" -ne 0 ]]; then
+  printf 'release SHA already has competing version tag(s): %s\n' \
+    "${competing_tags[*]}" >&2
+  exit 1
+fi
+
 if git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null; then
   tag_sha="$(git rev-parse --verify "refs/tags/${release_tag}^{commit}")"
   if [[ "${tag_sha}" != "${release_sha}" ]]; then
