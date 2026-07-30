@@ -67,8 +67,9 @@ publisher creates a repository-scoped GitHub App token with Administration-read
 and Contents-write permission. It uses that token to check the immutable-release
 policy before creating a tag or release. A false policy, unreadable endpoint,
 malformed response, or other request failure stops publication. The publisher
-also requires GitHub to report `immutable: true` and verify the release plus
-every asset after publication.
+checks the policy again immediately before it publishes the draft. It also
+requires GitHub to report `immutable: true` and verify the release plus every
+asset after publication.
 
 ## Prepare the release commit
 

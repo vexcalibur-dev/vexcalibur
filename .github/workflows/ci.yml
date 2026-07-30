@@ -24,15 +24,9 @@ concurrency:
   group: >-
     ci-${{ github.workflow }}-${{
       github.event.pull_request.number || github.ref
-    }}-${{
-      (
-        github.event_name == 'schedule' ||
-        (
-          github.event_name == 'workflow_dispatch' &&
-          (inputs.run_scheduled_profile || inputs.run_live_services)
-        )
-      ) && 'live' || 'standard'
-    }}
+    }}-${{ github.event_name }}-${{
+      inputs.run_scheduled_profile || false
+    }}-${{ inputs.run_live_services || false }}
   cancel-in-progress: true
 
 permissions:

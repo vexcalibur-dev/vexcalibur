@@ -401,6 +401,7 @@ def test_immutable_release_policy_preflight_uses_the_scoped_app_token() -> None:
     assert "permission-administration: read" in token
     assert "permission-contents: write" in token
     assert "GH_TOKEN: ${{ steps.app-token.outputs.token }}" in preflight
+    assert "scripts/check-immutable-release-policy.sh" in preflight
     assert "immutable-release preflight deferred" not in preflight.lower()
 
 
@@ -426,6 +427,7 @@ def test_tag_release_and_asset_bytes_are_revalidated_immediately_before_publish(
     patch = immutable.index('--input "${publication_transition}"')
 
     for contract in (
+        "scripts/check-immutable-release-policy.sh",
         "validate_tag_contract",
         "pre-publish-assets.json",
         "changed bytes before publication",
@@ -436,6 +438,7 @@ def test_tag_release_and_asset_bytes_are_revalidated_immediately_before_publish(
     ):
         assert contract in immutable[:patch]
     assert immutable[:patch].count("validate_tag_contract") >= 3
+    assert immutable[:patch].count("scripts/check-immutable-release-policy.sh") == 1
     assert "current_published" in immutable[:patch]
     assert (
         immutable.index("immediate-pre-publish-release.json")
