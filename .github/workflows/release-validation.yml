@@ -1377,7 +1377,7 @@ jobs:
           allow-development-package-spec: "true"
           constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
-          args: --version
+          args: --help
 
       - name: Reject an incorrect wheel URI hash
         id: wrong-hash
@@ -1388,7 +1388,7 @@ jobs:
           allow-development-package-spec: "true"
           constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
-          args: --version
+          args: --help
 
       - name: Reject an unhashed source-distribution fallback
         id: sdist-fallback
@@ -1399,7 +1399,7 @@ jobs:
           allow-development-package-spec: "true"
           constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
-          args: --version
+          args: --help
 
       - name: Require every negative package case to fail closed
         env:

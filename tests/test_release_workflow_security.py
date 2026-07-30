@@ -916,6 +916,19 @@ def test_action_validation_and_evidence_use_one_exact_action_commit() -> None:
     assert finalizer_commits == {expected}
 
 
+def test_negative_action_package_cases_use_a_known_success_command() -> None:
+    action = _job(_validation_text(), "action-vex")
+
+    for step_name in (
+        "Reject a missing wheel URI hash",
+        "Reject an incorrect wheel URI hash",
+        "Reject an unhashed source-distribution fallback",
+    ):
+        step = _step(action, step_name)
+        assert "args: --help" in step
+        assert "args: --version" not in step
+
+
 def test_publication_only_finalizer_requires_the_installed_matrix() -> None:
     finalizer = _job(_validation_text(), "publication-assets")
     condition = finalizer[: finalizer.index("    steps:\n")]

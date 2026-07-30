@@ -540,9 +540,20 @@ jobs:
             exit 1
           fi
 
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: read
+          permission-contents: write
+
       - name: Preflight immutable release policy and target
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
           RELEASE_SHA: ${{ needs.validation.outputs.sha }}
           RELEASE_TAG: ${{ needs.validation.outputs.tag }}
@@ -561,9 +572,6 @@ jobs:
               echo "Immutable releases are not enabled and owner-enforced for this repository." >&2
               exit 1
             fi
-          elif grep -Eq '\(HTTP (401|403)\)|Requires authentication|Resource not accessible' \
-            "${policy_error}"; then
-            echo "::warning title=Immutable release preflight deferred::The read-only workflow token cannot inspect the Administration-read immutable-release endpoint. Publication will still fail unless GitHub reports immutable:true and verifies the release plus every asset."
           else
             echo "Could not preflight the repository immutable-release policy." >&2
             sed -n '1,5p' "${policy_error}" >&2
@@ -593,16 +601,6 @@ jobs:
             echo "Unknown release mode ${RELEASE_MODE}." >&2
             exit 1
           fi
-
-      - name: Generate app token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.AUTOMATION_CLIENT_ID }}
-          private-key: ${{ secrets.AUTOMATION_SECRET }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
 
       - name: Create release tag
         env:

@@ -381,16 +381,27 @@ def test_all_untrusted_assets_and_notes_are_verified_before_write_token() -> Non
 
     assets = publish.index("name: Verify validated release assets")
     notes = publish.index("name: Verify scanned release notes")
-    policy = publish.index("name: Preflight immutable release policy and target")
     token = publish.index("name: Generate app token")
+    policy = publish.index("name: Preflight immutable release policy and target")
     tag = publish.index("name: Create release tag")
-    assert assets < notes < policy < token < tag
+    assert assets < notes < token < policy < tag
 
     before_token = publish[:token]
     assert "actions/runs/${GITHUB_RUN_ID}/artifacts" in before_token
     assert "sha256sum --check --strict SHA256SUMS" in before_token
     assert "Publisher release notes do not match the scanned digest" in before_token
     assert "secrets.AUTOMATION_SECRET" not in before_token
+
+
+def test_immutable_release_policy_preflight_uses_the_scoped_app_token() -> None:
+    publish = _job(_workflow_text(), "publish-release")
+    token = _step(publish, "Generate app token")
+    preflight = _step(publish, "Preflight immutable release policy and target")
+
+    assert "permission-administration: read" in token
+    assert "permission-contents: write" in token
+    assert "GH_TOKEN: ${{ steps.app-token.outputs.token }}" in preflight
+    assert "immutable-release preflight deferred" not in preflight.lower()
 
 
 def test_post_publish_state_and_attestations_are_verified_with_bounded_retries() -> None:
