@@ -303,6 +303,10 @@ def _normalized_metadata_header(
         if header in _REQUIRED_SINGLETON_HEADERS
         else metadata.get_all(header, [])
     )
+    if header == "Requires-Dist" and not values:
+        raise SystemExit(
+            "Artifact must contain at least one nonempty Requires-Dist metadata header."
+        )
     try:
         if header == "Requires-Python":
             return tuple(str(SpecifierSet(value)) for value in values)

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -475,6 +477,35 @@ def test_distribution_metadata_checks_use_one_isolated_locked_wrapper() -> None:
         "packaging>=24,<27",
         "tomli>=2.4.0,<3; python_version < '3.11'",
     ]
+
+
+def test_distribution_verifier_dependencies_do_not_enter_runtime_export(
+    tmp_path: Path,
+) -> None:
+    uv = shutil.which("uv")
+    assert uv is not None
+    result = subprocess.run(  # noqa: S603 - resolved developer tool and reviewed project lock.
+        [
+            uv,
+            "export",
+            "--quiet",
+            "--frozen",
+            "--no-dev",
+            "--no-emit-project",
+            "--no-annotate",
+            "--no-header",
+            "--python",
+            sys.executable,
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")},
+    )
+
+    assert re.search(r"(?m)^httpx==", result.stdout) is not None
+    assert re.search(r"(?m)^(?:packaging|tomli)(?:==| @ )", result.stdout) is None
 
 
 def test_ci_runs_the_unprivileged_publication_contract_with_explicit_consent() -> None:

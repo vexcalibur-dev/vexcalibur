@@ -143,7 +143,7 @@ The default public endpoint fails closed without that flag. Fetching an SBOM fro
 - Start with the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html).
 - Follow the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html) generation guide.
 - Use the [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html) for flags and failure behavior.
-- The default-branch [execution report reference](docs/reference/execution-report.md) covers machine-readable generation metadata. Before using it, verify that the selected release lists `--execution-report` in `vexcalibur generate --help`.
+- The default-branch [execution report reference](https://vexcalibur-dev.github.io/vexcalibur/reference/execution-report.html) covers machine-readable generation metadata. Before using it, verify that the selected release lists `--execution-report` in `vexcalibur generate --help`.
 - The CLI report transaction supports Linux and macOS. Windows embeddings can construct and validate the same report through the Python API.
 - Read the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/reference/csaf-output.html) output contract before consuming generated files.
 - Read the [architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html) before adding a source or output format.

@@ -16,6 +16,7 @@ WRAPPER = REPO_ROOT / "scripts" / "run-dist-metadata-verifier.sh"
 DEFAULT_METADATA_HEADERS = (
     "Metadata-Version: 2.4",
     "Requires-Python: >=3.10",
+    "Requires-Dist: httpx>=0.27,<1",
 )
 
 
@@ -81,7 +82,7 @@ def write_project_metadata(
     source_root: Path,
     *,
     requires_python: str | None = ">=3.10",
-    dependencies: tuple[str, ...] = (),
+    dependencies: tuple[str, ...] = ("httpx>=0.27,<1",),
     optional_dependencies: dict[str, tuple[str, ...]] | None = None,
     console_scripts: tuple[tuple[str, str], ...] = (),
 ) -> None:
@@ -229,6 +230,37 @@ def test_verifier_rejects_sdist_dependency_metadata_drift(tmp_path: Path) -> Non
     assert "Built wheel and sdist Requires-Dist metadata do not match." in result.stderr
 
 
+@pytest.mark.parametrize("artifact_without_dependencies", ["wheel", "sdist", "both"])
+def test_verifier_rejects_missing_dependency_metadata(
+    tmp_path: Path,
+    artifact_without_dependencies: str,
+) -> None:
+    headers_without_dependencies = (
+        "Metadata-Version: 2.4",
+        "Requires-Python: >=3.10",
+    )
+    wheel_headers = (
+        headers_without_dependencies
+        if artifact_without_dependencies in {"wheel", "both"}
+        else DEFAULT_METADATA_HEADERS
+    )
+    sdist_headers = (
+        headers_without_dependencies
+        if artifact_without_dependencies in {"sdist", "both"}
+        else DEFAULT_METADATA_HEADERS
+    )
+    write_wheel(tmp_path, metadata_headers=wheel_headers)
+    write_sdist(tmp_path, metadata_headers=sdist_headers)
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert (
+        "Artifact must contain at least one nonempty Requires-Dist metadata header."
+        in result.stderr
+    )
+
+
 def test_verifier_rejects_console_script_metadata_drift(tmp_path: Path) -> None:
     write_wheel(
         tmp_path,
@@ -276,7 +308,10 @@ def test_verifier_rejects_missing_project_dependency_in_both_artifacts(
     write_wheel(tmp_path)
     write_sdist(tmp_path)
     source_root = tmp_path / "source"
-    write_project_metadata(source_root, dependencies=("httpx>=0.27,<1",))
+    write_project_metadata(
+        source_root,
+        dependencies=("httpx>=0.27,<1", "packageurl-python>=0.17,<1"),
+    )
 
     result = run_verifier(tmp_path, source_root=source_root)
 
