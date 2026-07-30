@@ -58,22 +58,19 @@ jobs:
 
           release_path="${RUNNER_TEMP}/resolved-release.json"
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > "${release_path}"
-          read -r api_tag is_draft is_prerelease is_immutable author target release_id < <(
+          read -r api_tag author target release_id < <(
             jq -r \
-              '[.tag_name, (.draft | tostring), (.prerelease | tostring),
-                (.immutable | tostring), .author.login, .target_commitish,
-                (.id | tostring)] | @tsv' "${release_path}"
+              '[.tag_name, .author.login, .target_commitish, (.id | tostring)]
+               | @tsv' "${release_path}"
           )
           if [[ "${api_tag}" != "${tag}" ]]; then
             echo "::error::Release API returned tag ${api_tag}, expected ${tag}."
             exit 1
           fi
-          if [[ "${is_draft}" != "false" || "${is_prerelease}" != "false" ]]; then
-            echo "::error::PyPI requires a published, non-prerelease GitHub Release."
-            exit 1
-          fi
-          if [[ "${is_immutable}" != "true" ]]; then
-            echo "::error::PyPI requires a GitHub Release protected by immutable releases."
+          if ! jq -e \
+            '.draft == false and .prerelease == false and .immutable == true' \
+            "${release_path}" >/dev/null; then
+            echo "::error::PyPI requires an immutable, published, non-prerelease GitHub Release."
             exit 1
           fi
           if [[ "${author}" != "${AUTOMATION_BOT_LOGIN}" ]]; then
@@ -621,17 +618,18 @@ jobs:
           release_path="${RUNNER_TEMP}/pre-oidc-release.json"
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
             > "${release_path}"
-          read -r api_tag is_draft is_prerelease is_immutable author target release_id < <(
+          read -r api_tag author target release_id < <(
             jq -r \
-              '[.tag_name, (.draft | tostring), (.prerelease | tostring),
-                (.immutable | tostring), .author.login, .target_commitish,
-                (.id | tostring)] | @tsv' "${release_path}"
+              '[.tag_name, .author.login, .target_commitish, (.id | tostring)]
+               | @tsv' "${release_path}"
           )
           if [[ "${api_tag}" != "${RELEASE_TAG}" || "${release_id}" != "${EXPECTED_RELEASE_ID}" ]]; then
             echo "::error::The immutable release changed after validation."
             exit 1
           fi
-          if [[ "${is_draft}" != "false" || "${is_prerelease}" != "false" || "${is_immutable}" != "true" ]]; then
+          if ! jq -e \
+            '.draft == false and .prerelease == false and .immutable == true' \
+            "${release_path}" >/dev/null; then
             echo "::error::Release is no longer an immutable, published, non-prerelease release."
             exit 1
           fi

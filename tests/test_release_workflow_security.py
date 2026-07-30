@@ -949,7 +949,7 @@ def test_transient_archives_are_rest_verified_but_not_manifest_provenance() -> N
 
     rest_verification = _step(finalizer, "Verify producer artifact identities and upload digests")
     assert "actions/artifacts/${expected_id}" in rest_verification
-    assert "[.id, .name, .digest, (.expired | tostring), .workflow_run.id]" in rest_verification
+    assert 'if .expired == false then "current" else "invalid" end' in rest_verification
     assert "actions/artifacts/${expected_id}/zip" in rest_verification
     assert 'test "${run_id}" = "${GITHUB_RUN_ID}"' in rest_verification
     assert "sha256sum --check --strict" in rest_verification

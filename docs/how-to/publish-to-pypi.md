@@ -157,21 +157,69 @@ Do not create or edit the tag or release manually while this workflow runs.
 
 Use recovery only for an existing annotated release tag created by the
 automation contract. The dispatch itself must run from `main`; the workflow's
-resolver rejects every other Git ref. With a recent authenticated GitHub CLI:
+resolver rejects every other Git ref.
+
+Run this Bash procedure from the repository root with a recent authenticated
+GitHub CLI. It updates your local `main` branch, so move unfinished work to
+another worktree before you begin.
 
 ```bash
+set -euo pipefail
+
 RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
 
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$ ]]; then
+  printf 'Release tag must look like v1.2.3 without leading zeros.\n' >&2
+  exit 1
+fi
+
 gh auth status --active --hostname github.com
+
+git switch main
+git pull --ff-only origin main
+git diff --quiet
+git diff --cached --quiet
+
+RECOVERY_REF="refs/vexcalibur-recovery/${RELEASE_TAG}"
+cleanup_recovery_ref() {
+  git update-ref -d "$RECOVERY_REF" 2>/dev/null || true
+}
+trap cleanup_recovery_ref EXIT
+
+git fetch --force --no-tags origin \
+  "refs/tags/${RELEASE_TAG}:${RECOVERY_REF}"
+if [[ "$(git cat-file -t "$RECOVERY_REF")" != "tag" ]] ||
+  [[ "$(git cat-file -p "$RECOVERY_REF" | sed -n '2s/^type //p')" != "commit" ]]; then
+  printf 'Recovery requires an annotated tag that directly names a commit.\n' >&2
+  exit 1
+fi
+
+RELEASE_SHA="$(git rev-parse --verify "${RECOVERY_REF}^{commit}")"
+MAIN_SHA="$(git rev-parse --verify origin/main)"
+if ! git merge-base --is-ancestor "$RELEASE_SHA" "$MAIN_SHA"; then
+  printf '%s is not contained in current main.\n' "$RELEASE_TAG" >&2
+  exit 1
+fi
+
+python3 -I scripts/check-recovery-contract.py --ref "$RELEASE_SHA"
+
+read -r -p "Type ${RELEASE_TAG} to dispatch immutable release recovery: " CONFIRM_TAG
+if [[ "$CONFIRM_TAG" != "$RELEASE_TAG" ]]; then
+  printf 'Confirmation did not match; recovery was not dispatched.\n' >&2
+  exit 1
+fi
+
 gh workflow run release.yml \
   --repo vexcalibur-dev/vexcalibur \
   --ref main \
   -f recovery-tag="$RELEASE_TAG"
 ```
 
-Leave `version` empty and inspect every reconciliation message. GitHub Release
-recovery deliberately uses `--ref main`; the later PyPI recovery dispatch uses
-the exact release tag as both `--ref` and `release-tag`.
+The final command exits after GitHub accepts the dispatch; it does not wait for
+recovery to finish. Leave `version` empty, open the queued run, and inspect every
+reconciliation message. GitHub Release recovery deliberately uses `--ref main`;
+the later PyPI recovery dispatch uses the exact release tag as both `--ref` and
+`release-tag`.
 
 The tag must directly annotate a commit that is still an ancestor of current
 `main`; it need not remain the tip. Its commit must also contain

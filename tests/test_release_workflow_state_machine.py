@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
@@ -18,6 +19,8 @@ PYPI_WORKFLOW = ROOT / ".github" / "workflows" / "pypi.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_EVIDENCE = ROOT / "scripts" / "release_evidence.py"
 PYPI_SELECTOR = ROOT / "scripts" / "select-pypi-release-files.py"
+PYPI_RELEASE_STATE_QUERY = ".draft == false and .prerelease == false and .immutable == true"
+ARTIFACT_EXPIRATION_QUERY = 'if .expired == false then "current" else "invalid" end'
 
 
 def _workflow_text() -> str:
@@ -207,7 +210,7 @@ def test_release_publisher_rest_binds_the_downloaded_validation_artifact() -> No
     assert "needs.validation.outputs.release-assets-sha256" in publish
     assert "actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" in verification
     assert "Expected exactly one current-run artifact" in verification
-    assert ".name, .expired, .digest" in verification
+    assert ARTIFACT_EXPIRATION_QUERY in verification
     assert "sha256sum --check --strict SHA256SUMS" in verification
 
 
@@ -499,6 +502,103 @@ def test_pypi_uses_exact_immutable_release_bytes_and_supports_partial_recovery()
     assert "published_record != expected_record" in selector
     assert "_copy_distributions_exclusively(missing" in selector
     assert '"missing_files": [distribution.filename for distribution in missing]' in selector
+
+
+@pytest.mark.parametrize(
+    ("release", "accepted"),
+    (
+        (
+            {"draft": False, "prerelease": False, "immutable": True},
+            True,
+        ),
+        (
+            {"draft": "false", "prerelease": False, "immutable": True},
+            False,
+        ),
+        (
+            {"draft": False, "prerelease": "false", "immutable": True},
+            False,
+        ),
+        (
+            {"draft": False, "prerelease": False, "immutable": "true"},
+            False,
+        ),
+        (
+            {"draft": None, "prerelease": False, "immutable": True},
+            False,
+        ),
+        (
+            {"draft": False, "prerelease": None, "immutable": True},
+            False,
+        ),
+        (
+            {"draft": False, "prerelease": False, "immutable": None},
+            False,
+        ),
+        (
+            {"prerelease": False, "immutable": True},
+            False,
+        ),
+        (
+            {"draft": False, "immutable": True},
+            False,
+        ),
+        (
+            {"draft": False, "prerelease": False},
+            False,
+        ),
+    ),
+)
+def test_pypi_release_state_check_preserves_json_types(
+    release: dict[str, object],
+    *,
+    accepted: bool,
+) -> None:
+    pypi = _pypi_text()
+    assert pypi.count(f"'{PYPI_RELEASE_STATE_QUERY}'") == 2
+    jq = shutil.which("jq")
+    assert jq is not None
+
+    completed = subprocess.run(  # noqa: S603 - fixed jq command and test-owned input
+        [jq, "-e", PYPI_RELEASE_STATE_QUERY],
+        check=False,
+        capture_output=True,
+        input=json.dumps(release),
+        text=True,
+    )
+
+    assert (completed.returncode == 0) is accepted
+
+
+@pytest.mark.parametrize(
+    ("artifact", "expected"),
+    (
+        ({"expired": False}, "current"),
+        ({"expired": True}, "invalid"),
+        ({"expired": "false"}, "invalid"),
+        ({"expired": "true"}, "invalid"),
+        ({"expired": None}, "invalid"),
+        ({}, "invalid"),
+    ),
+)
+def test_artifact_expiration_check_preserves_json_types(
+    artifact: dict[str, object],
+    expected: str,
+) -> None:
+    workflows = _workflow_text() + _validation_text()
+    assert workflows.count(ARTIFACT_EXPIRATION_QUERY) == 2
+    jq = shutil.which("jq")
+    assert jq is not None
+
+    completed = subprocess.run(  # noqa: S603 - fixed jq command and test-owned input
+        [jq, "--raw-output", ARTIFACT_EXPIRATION_QUERY],
+        check=True,
+        capture_output=True,
+        input=json.dumps(artifact),
+        text=True,
+    )
+
+    assert completed.stdout == f"{expected}\n"
 
 
 def test_pypi_oidc_publisher_has_no_build_or_toolchain_bootstrap() -> None:

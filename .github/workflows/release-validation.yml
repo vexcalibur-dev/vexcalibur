@@ -1905,19 +1905,21 @@ jobs:
             local expected_id="$1"
             local expected_name="$2"
             local expected_digest="$3"
-            local actual_id actual_name actual_digest expired run_id
+            local actual_id actual_name actual_digest expiration_state run_id
             local archive
 
             [[ "${expected_id}" =~ ^[1-9][0-9]*$ ]]
             [[ "${expected_digest}" =~ ^[0-9a-f]{64}$ ]]
-            IFS=$'\t' read -r actual_id actual_name actual_digest expired run_id < <(
+            IFS=$'\t' read -r actual_id actual_name actual_digest expiration_state run_id < <(
               gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${expected_id}" \
-                --jq '[.id, .name, .digest, (.expired | tostring), .workflow_run.id] | @tsv'
+                --jq '[.id, .name, .digest,
+                       (if .expired == false then "current" else "invalid" end),
+                       .workflow_run.id] | @tsv'
             )
             test "${actual_id}" = "${expected_id}"
             test "${actual_name}" = "${expected_name}"
             test "${actual_digest}" = "sha256:${expected_digest}"
-            test "${expired}" = false
+            test "${expiration_state}" = current
             test "${run_id}" = "${GITHUB_RUN_ID}"
             archive="${transport_dir}/${expected_id}.zip"
             test ! -e "${archive}"

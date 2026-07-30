@@ -428,11 +428,11 @@ jobs:
 
           matches=0
           observed_artifact_digest=""
-          while IFS=$'\t' read -r name expired digest; do
+          while IFS=$'\t' read -r name expiration_state digest; do
             if [[ "${name}" == "${ARTIFACT_NAME}" ]]; then
               matches=$((matches + 1))
-              if [[ "${expired}" != "false" ]]; then
-                echo "The validated release-asset artifact has expired." >&2
+              if [[ "${expiration_state}" != "current" ]]; then
+                echo "The validated release-asset artifact is expired or malformed." >&2
                 exit 1
               fi
               observed_artifact_digest="${digest#sha256:}"
@@ -440,7 +440,10 @@ jobs:
           done < <(
             gh api --paginate \
               "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
-              --jq '.artifacts[] | [.name, .expired, .digest] | @tsv'
+              --jq '.artifacts[] |
+                    [.name,
+                     (if .expired == false then "current" else "invalid" end),
+                     .digest] | @tsv'
           )
           if ((matches != 1)); then
             echo "Expected exactly one current-run artifact named ${ARTIFACT_NAME}; found ${matches}." >&2
