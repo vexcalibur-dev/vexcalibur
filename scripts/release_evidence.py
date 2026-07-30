@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
 from packageurl import PackageURL
 
 MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024
@@ -236,7 +234,15 @@ def _canonical_execution_report_json(document: object) -> str:
     )
 
 
-def _execution_report_schema_validator() -> Draft202012Validator:
+def _execution_report_schema_validator() -> Any:
+    try:
+        from jsonschema import Draft202012Validator
+        from jsonschema.exceptions import SchemaError
+    except ImportError as exc:
+        raise EvidenceError(
+            "execution report publication validation requires the locked jsonschema dependency"
+        ) from exc
+
     schema = load_json(EXECUTION_REPORT_SCHEMA_PATH)
     try:
         Draft202012Validator.check_schema(schema)
@@ -248,7 +254,7 @@ def _execution_report_schema_validator() -> Draft202012Validator:
 def _validate_execution_report_document(
     document: object,
     *,
-    validator: Draft202012Validator,
+    validator: Any,
 ) -> dict[str, Any]:
     errors = sorted(validator.iter_errors(document), key=lambda error: list(error.absolute_path))
     if errors:
@@ -280,7 +286,7 @@ def _validate_execution_report_document(
 def _load_execution_report(
     path: Path,
     *,
-    validator: Draft202012Validator,
+    validator: Any,
 ) -> dict[str, Any]:
     if not path.is_file() or path.is_symlink():
         raise EvidenceError(f"expected a regular, non-symlink execution report: {path}")
