@@ -136,11 +136,13 @@ an existing report before it validates timestamps, source combinations, or
 document metadata. Any later failure leaves no stale success marker from that
 transaction.
 
-The destination locks begin during commit, after generation. Another process
-can publish a newer report after the failed transaction removes the old one.
-It can also replace a successful report after this command exits. Give each
-job its own output directory when consumers must retain a one-to-one mapping
-between a VEX document and its report.
+Stale-report cleanup briefly takes the report directory lock while Vexcalibur
+prepares the destination. The long-lived locks that keep document and report
+publication in one transaction begin during commit, after generation. Another
+process can publish a newer report after the failed transaction removes the
+old one. It can also replace a successful report after this command exits.
+Give each job its own output directory when consumers must retain a one-to-one
+mapping between a VEX document and its report.
 
 After generation, Vexcalibur publishes in this order:
 

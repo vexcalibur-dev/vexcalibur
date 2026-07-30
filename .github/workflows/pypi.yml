@@ -449,7 +449,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          uv run --frozen python scripts/verify-dist-metadata.py "${DIST_DIR}" \
+          scripts/run-dist-metadata-verifier.sh "${DIST_DIR}" \
             --expected-name vexcalibur \
             --expected-version "${RELEASE_VERSION}"
           uv run --frozen twine check "${DIST_DIR}"/*

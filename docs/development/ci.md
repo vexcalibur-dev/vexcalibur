@@ -175,6 +175,12 @@ The publication graph has five independent roles:
    and document digest, requires direct/Action byte equivalence, runs official
    validators, and creates a fresh flat asset set.
 
+Every distribution-metadata check runs through
+`scripts/run-dist-metadata-verifier.sh`. The wrapper uses an isolated
+`dist-verify` environment from `uv.lock`, so the verifier never depends on
+packages that happen to exist in a runner's system Python or in the environment
+that built the artifact.
+
 Each source-distribution matrix cell also uses two environments. The first
 hash-syncs the exact PEP 517 tools from the `sdist-build` lock group and builds
 the candidate sdist into a wheel with `uv` in offline, no-isolation mode. The

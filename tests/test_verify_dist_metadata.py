@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tarfile
@@ -7,8 +8,15 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "verify-dist-metadata.py"
+WRAPPER = REPO_ROOT / "scripts" / "run-dist-metadata-verifier.sh"
+DEFAULT_METADATA_HEADERS = (
+    "Metadata-Version: 2.4",
+    "Requires-Python: >=3.10",
+)
 
 
 def write_wheel(
@@ -16,7 +24,7 @@ def write_wheel(
     name: str = "vexcalibur",
     version: str = "0.1.0",
     *,
-    metadata_headers: tuple[str, ...] = (),
+    metadata_headers: tuple[str, ...] = DEFAULT_METADATA_HEADERS,
     console_scripts: tuple[tuple[str, str], ...] = (),
 ) -> Path:
     path = dist_dir / f"{name}-{version}-py3-none-any.whl"
@@ -37,7 +45,7 @@ def write_sdist(
     name: str = "vexcalibur",
     version: str = "0.1.0",
     *,
-    metadata_headers: tuple[str, ...] = (),
+    metadata_headers: tuple[str, ...] = DEFAULT_METADATA_HEADERS,
     console_scripts: tuple[tuple[str, str], ...] = (),
 ) -> Path:
     path = dist_dir / f"{name}-{version}.tar.gz"
@@ -72,7 +80,7 @@ def add_sdist_file(path: Path, member_name: str, contents: bytes) -> None:
 def write_project_metadata(
     source_root: Path,
     *,
-    requires_python: str | None = None,
+    requires_python: str | None = ">=3.10",
     dependencies: tuple[str, ...] = (),
     optional_dependencies: dict[str, tuple[str, ...]] | None = None,
     console_scripts: tuple[tuple[str, str], ...] = (),
@@ -115,10 +123,10 @@ def run_verifier(
     github_output: Path | None = None,
     source_root: Path | None = None,
     required_sdist_files: tuple[str, ...] = (),
+    wrapper: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     command = [
-        sys.executable,
-        str(SCRIPT),
+        *(("/bin/bash", str(WRAPPER)) if wrapper else (sys.executable, str(SCRIPT))),
         str(dist_dir),
         "--expected-name",
         expected_name,
@@ -136,6 +144,7 @@ def run_verifier(
         check=False,
         text=True,
         capture_output=True,
+        env=({**os.environ, "UV_OFFLINE": "1"} if wrapper else None),
     )
 
 
@@ -168,6 +177,38 @@ def test_verifier_writes_github_output(tmp_path: Path) -> None:
         f"wheel={wheel}",
         f"sdist={sdist}",
     ]
+
+
+def test_locked_wrapper_runs_verifier_in_an_isolated_environment(tmp_path: Path) -> None:
+    write_wheel(tmp_path)
+    write_sdist(tmp_path)
+
+    result = run_verifier(tmp_path, wrapper=True)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("header", ["Name", "Version", "Metadata-Version", "Requires-Python"])
+def test_verifier_rejects_repeated_singleton_metadata(
+    tmp_path: Path,
+    header: str,
+) -> None:
+    duplicate_value = {
+        "Name": "vexcalibur",
+        "Version": "0.1.0",
+        "Metadata-Version": "2.4",
+        "Requires-Python": ">=3.10",
+    }[header]
+    write_wheel(
+        tmp_path,
+        metadata_headers=(*DEFAULT_METADATA_HEADERS, f"{header}: {duplicate_value}"),
+    )
+    write_sdist(tmp_path)
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert f"Artifact must contain exactly one nonempty {header} metadata header." in result.stderr
 
 
 def test_verifier_rejects_sdist_dependency_metadata_drift(tmp_path: Path) -> None:
@@ -203,6 +244,7 @@ def test_verifier_rejects_console_script_metadata_drift(tmp_path: Path) -> None:
 
 def test_verifier_checks_artifact_metadata_against_pyproject(tmp_path: Path) -> None:
     headers = (
+        "Metadata-Version: 2.4",
         "Requires-Python: <4,>=3.10",
         "Requires-Dist: httpx<1,>=0.27",
         'Requires-Dist: sphinx<9,>=8; extra == "docs"',

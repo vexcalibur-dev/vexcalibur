@@ -2561,6 +2561,10 @@ dev = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "twine" },
 ]
+dist-verify = [
+    { name = "packaging" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+]
 fuzz = [
     { name = "atheris", marker = "python_full_version >= '3.12' and python_full_version < '3.15' and implementation_name == 'cpython' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
@@ -2601,6 +2605,10 @@ dev = [
     { name = "setuptools-scm", specifier = "==10.2.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.4.0,<3" },
     { name = "twine", specifier = ">=6,<7" },
+]
+dist-verify = [
+    { name = "packaging", specifier = ">=24,<27" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.4.0,<3" },
 ]
 fuzz = [{ name = "atheris", marker = "python_full_version >= '3.12' and python_full_version < '3.15' and implementation_name == 'cpython' and platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=3.1,<4" }]
 sdist-build = [

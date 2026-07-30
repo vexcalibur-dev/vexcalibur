@@ -33,6 +33,12 @@ _METADATA_CONTRACT_HEADERS = (
     "Requires-Dist",
     "Provides-Extra",
 )
+_REQUIRED_SINGLETON_HEADERS = (
+    "Name",
+    "Version",
+    "Metadata-Version",
+    "Requires-Python",
+)
 
 
 @dataclass(frozen=True)
@@ -67,8 +73,8 @@ def main() -> None:
     }
 
     for artifact_type, artifact_metadata in metadata.items():
-        actual_name = artifact_metadata.message["Name"]
-        actual_version = artifact_metadata.message["Version"]
+        actual_name = _required_singleton_header(artifact_metadata.message, "Name")
+        actual_version = _required_singleton_header(artifact_metadata.message, "Version")
         if actual_name != expected_name:
             raise SystemExit(
                 f"Built {artifact_type} name {actual_name!r} "
@@ -292,11 +298,13 @@ def _normalized_metadata_header(
     metadata: email.message.Message,
     header: str,
 ) -> tuple[str, ...]:
-    values = metadata.get_all(header, [])
+    values = (
+        [_required_singleton_header(metadata, header)]
+        if header in _REQUIRED_SINGLETON_HEADERS
+        else metadata.get_all(header, [])
+    )
     try:
         if header == "Requires-Python":
-            if len(values) > 1:
-                raise SystemExit("Artifact contains repeated Requires-Python metadata.")
             return tuple(str(SpecifierSet(value)) for value in values)
         if header == "Requires-Dist":
             return tuple(sorted(str(Requirement(value)) for value in values))
@@ -305,6 +313,16 @@ def _normalized_metadata_header(
     except (InvalidRequirement, InvalidSpecifier) as exc:
         raise SystemExit(f"Artifact contains invalid {header} metadata.") from exc
     return tuple(values)
+
+
+def _required_singleton_header(
+    metadata: email.message.Message,
+    header: str,
+) -> str:
+    values = metadata.get_all(header, [])
+    if len(values) != 1 or not values[0].strip():
+        raise SystemExit(f"Artifact must contain exactly one nonempty {header} metadata header.")
+    return values[0]
 
 
 def _read_project_metadata(source_root: Path) -> ProjectMetadata:

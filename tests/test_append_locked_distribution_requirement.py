@@ -111,6 +111,47 @@ def test_uv_rejects_wheel_tampered_after_requirement_is_locked(tmp_path: Path) -
     assert "hash" in result.stderr.lower()
 
 
+def test_locked_installer_does_not_install_constraint_only_packages(tmp_path: Path) -> None:
+    wheel = tmp_path / "vexcalibur-0.0-py3-none-any.whl"
+    _write_test_wheel(wheel)
+    venv = tmp_path / "venv"
+    requirements = tmp_path / "requirements.txt"
+    environment = {
+        **os.environ,
+        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+        "UV_OFFLINE": "1",
+    }
+
+    subprocess.run(  # noqa: S603 - repository-owned script and local test artifact.
+        [
+            str(Path(__file__).parents[1] / "scripts" / "install-locked-distribution.sh"),
+            str(venv),
+            str(wheel),
+            str(requirements),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    installed = subprocess.run(  # noqa: S603 - test-owned virtual environment.
+        [
+            str(venv / "bin" / "python"),
+            "-I",
+            "-c",
+            (
+                "from importlib.metadata import distributions; "
+                "print('\\n'.join(sorted(d.metadata['Name'] for d in distributions())))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert installed.stdout.splitlines() == ["vexcalibur"]
+
+
 def test_append_locked_distribution_requirement_rejects_non_file(
     tmp_path: Path,
 ) -> None:

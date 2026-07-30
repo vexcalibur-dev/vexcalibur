@@ -494,7 +494,7 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ inputs.release-version }}
         run: |
-          python scripts/verify-dist-metadata.py dist \
+          scripts/run-dist-metadata-verifier.sh dist \
             --expected-name vexcalibur \
             --expected-version "$EXPECTED_VERSION" \
             --source-root . \
@@ -593,7 +593,7 @@ jobs:
           sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
           printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
           printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
-          python scripts/verify-dist-metadata.py dist \
+          scripts/run-dist-metadata-verifier.sh dist \
             --expected-name vexcalibur \
             --expected-version "$EXPECTED_VERSION" \
             --github-output "$GITHUB_OUTPUT"
@@ -733,7 +733,7 @@ jobs:
           sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
           printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
           printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
-          python scripts/verify-dist-metadata.py dist \
+          scripts/run-dist-metadata-verifier.sh dist \
             --expected-name vexcalibur \
             --expected-version "$EXPECTED_VERSION" \
             --github-output "$GITHUB_OUTPUT"
@@ -958,25 +958,19 @@ jobs:
       - name: Install the exact locked wheel
         env:
           RELEASE_VERSION: ${{ inputs.release-version }}
-          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          VEXCALIBUR_EXPECTED_PYTHON: ${{ env.MAX_PYTHON }}
         run: |
           set -euo pipefail
 
           wheel="${RUNNER_TEMP}/direct-dist/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
-          wheel_uri="$(python3 -c \
-            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
-            "${wheel}")"
           requirements="${RUNNER_TEMP}/direct-install-requirements.txt"
-          cp -- "${RUNNER_TEMP}/direct-inventory/runtime-constraints.txt" "${requirements}"
-          {
-            printf '\nvexcalibur @ %s \\\n' "${wheel_uri}"
-            printf '    --hash=sha256:%s\n' "${EXPECTED_WHEEL_SHA256}"
-          } >> "${requirements}"
-          uv venv --python "${MAX_PYTHON}" "${RUNNER_TEMP}/direct-venv"
-          uv pip sync \
-            --require-hashes \
-            --python "${RUNNER_TEMP}/direct-venv/bin/python" \
+          scripts/install-locked-distribution.sh \
+            "${RUNNER_TEMP}/direct-venv" \
+            "${wheel}" \
             "${requirements}"
+          cmp -- \
+            "${RUNNER_TEMP}/direct-inventory/runtime-constraints.txt" \
+            "${requirements}.constraints"
           env -u PYTHONHOME -u PYTHONPATH \
             "${RUNNER_TEMP}/direct-venv/bin/python" -c \
             'from importlib.metadata import version; import os; assert version("vexcalibur") == os.environ["RELEASE_VERSION"]'
@@ -1356,16 +1350,14 @@ jobs:
           mkdir -- "${RUNNER_TEMP}/action-vex"
 
           requirements="${RUNNER_TEMP}/action-validator-requirements.txt"
-          cp -- "${inventory_dir}/runtime-constraints.txt" "${requirements}"
-          {
-            printf '\nvexcalibur @ %s \\\n' "${wheel_uri}"
-            printf '    --hash=sha256:%s\n' "${EXPECTED_WHEEL_SHA256}"
-          } >> "${requirements}"
-          uv venv --python "${MAX_PYTHON}" "${RUNNER_TEMP}/action-validator-venv"
-          uv pip sync \
-            --require-hashes \
-            --python "${RUNNER_TEMP}/action-validator-venv/bin/python" \
-            "${requirements}"
+          VEXCALIBUR_EXPECTED_PYTHON="${MAX_PYTHON}" \
+            scripts/install-locked-distribution.sh \
+              "${RUNNER_TEMP}/action-validator-venv" \
+              "${wheel}" \
+              "${requirements}"
+          cmp -- \
+            "${inventory_dir}/runtime-constraints.txt" \
+            "${requirements}.constraints"
 
       - name: Reject a missing wheel URI hash
         id: missing-hash

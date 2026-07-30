@@ -24,6 +24,7 @@ EXECUTION_REPORT_ORACLE = ROOT / "scripts" / "execution_report_oracle.py"
 POSIX_PLATFORM_CONTRACT = ROOT / "scripts" / "check-execution-report-posix.sh"
 WINDOWS_PLATFORM_CONTRACT = ROOT / "scripts" / "check-execution-report-windows.ps1"
 PYPI_SELECTOR = ROOT / "scripts" / "select-pypi-release-files.py"
+DIST_METADATA_WRAPPER = ROOT / "scripts" / "run-dist-metadata-verifier.sh"
 
 
 def _workflow_text() -> str:
@@ -445,6 +446,7 @@ def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> 
     assert "--no-build-isolation" in build[package_build:]
     assert "--offline" in build[package_build:]
     assert "--no-create-gitignore" in build[package_build:]
+    assert "scripts/run-dist-metadata-verifier.sh dist" in build
     for required_file in (
         "pyproject.toml",
         "docs/execution-report-v1.schema.json",
@@ -453,6 +455,26 @@ def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> 
         "docs/examples/validate_execution_report.py",
     ):
         assert f"--required-sdist-file {required_file}" in build
+
+
+def test_distribution_metadata_checks_use_one_isolated_locked_wrapper() -> None:
+    validation = _validation_text()
+    wrapper = DIST_METADATA_WRAPPER.read_text(encoding="utf-8")
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert validation.count("scripts/run-dist-metadata-verifier.sh dist") == 3
+    assert "python scripts/verify-dist-metadata.py" not in validation
+    assert "scripts/run-dist-metadata-verifier.sh" in PYPI_WORKFLOW.read_text(encoding="utf-8")
+    assert "--isolated" in wrapper
+    assert "--frozen" in wrapper
+    assert "--only-group dist-verify" in wrapper
+    assert "python -I scripts/verify-dist-metadata.py" in wrapper
+    assert pyproject["tool"]["uv"]["default-groups"] == ["dev"]
+    assert {"include-group": "dist-verify"} in pyproject["dependency-groups"]["dev"]
+    assert pyproject["dependency-groups"]["dist-verify"] == [
+        "packaging>=24,<27",
+        "tomli>=2.4.0,<3; python_version < '3.11'",
+    ]
 
 
 def test_ci_runs_the_unprivileged_publication_contract_with_explicit_consent() -> None:
@@ -805,6 +827,9 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "actions/checkout@" not in direct
     assert "vexcalibur-action@" not in direct
     assert "Install the exact locked wheel" in direct
+    assert "scripts/install-locked-distribution.sh" in direct
+    assert 'runtime-constraints.txt" \\\n            "${requirements}.constraints"' in direct
+    assert "uv pip sync" not in direct
     assert "Upload only direct VEX output" in direct
 
     assert "needs: [build, publication-inventory]" in action
@@ -812,6 +837,9 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "actions/checkout@" not in action
     assert "vexcalibur-dev/vexcalibur-action@" in action
     assert "action-validator-venv" in action
+    assert "scripts/install-locked-distribution.sh" in action
+    assert 'runtime-constraints.txt" \\\n            "${requirements}.constraints"' in action
+    assert "uv pip sync" not in action
     assert "Upload only Action VEX output" in action
 
     for producer in ("build", "publication-inventory", "direct-vex", "action-vex"):
