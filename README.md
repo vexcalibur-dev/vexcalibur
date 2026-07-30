@@ -35,7 +35,7 @@ unresolved placeholder cannot reach `pip`:
 set -euo pipefail
 
 read -r -p "Vexcalibur version from the release page: " VEXCALIBUR_VERSION
-if [[ ! "$VEXCALIBUR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ ! "$VEXCALIBUR_VERSION" =~ ^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
   printf 'Enter a MAJOR.MINOR.PATCH release version\n' >&2
   exit 2
 fi
@@ -59,7 +59,7 @@ In PowerShell 7.3 or newer, use:
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 $VEXCALIBUR_VERSION = Read-Host "Vexcalibur version from the release page"
-if ($VEXCALIBUR_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+if ($VEXCALIBUR_VERSION -notmatch '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$') {
     throw "Enter a MAJOR.MINOR.PATCH release version"
 }
 $VEXCALIBUR_VENV = ".venv-vexcalibur-$VEXCALIBUR_VERSION"

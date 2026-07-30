@@ -2,7 +2,13 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RECOVERY_TAG_PATTERN = r"^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$"
+VERSION_BODY_PATTERN = (
+    r"(0|[1-9][0-9]{0,5})\."
+    r"(0|[1-9][0-9]{0,5})\."
+    r"(0|[1-9][0-9]{0,5})"
+)
+RELEASE_VERSION_PATTERN = f"^{VERSION_BODY_PATTERN}$"
+RECOVERY_TAG_PATTERN = f"^v{VERSION_BODY_PATTERN}$"
 
 
 def test_windows_documentation_uses_the_canonical_platform_contract() -> None:
@@ -22,6 +28,7 @@ def test_execution_report_schema_checkout_bytes_are_pinned_to_lf() -> None:
 
 
 def test_release_recovery_guide_preflights_before_dispatch() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
     documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     pypi_workflow = (ROOT / ".github/workflows/pypi.yml").read_text(encoding="utf-8")
@@ -31,6 +38,7 @@ def test_release_recovery_guide_preflights_before_dispatch() -> None:
     assert RECOVERY_TAG_PATTERN in section
     assert RECOVERY_TAG_PATTERN in workflow
     assert RECOVERY_TAG_PATTERN in pypi_workflow
+    assert readme.count(RELEASE_VERSION_PATTERN) == 2
     contracts = (
         "Release tag must look like v1.2.3 without leading zeros.",
         "git pull --ff-only origin main",
@@ -45,7 +53,11 @@ def test_release_recovery_guide_preflights_before_dispatch() -> None:
     positions = [section.index(contract) for contract in contracts]
     assert positions == sorted(positions)
 
-    for tag in ("v0.0.0", "v1.2.3", "v999999.999999.999999"):
+    for version in ("0.0.0", "1.2.3", "999999.999999.999999"):
+        assert re.fullmatch(RELEASE_VERSION_PATTERN, version) is not None
+        tag = f"v{version}"
         assert re.fullmatch(RECOVERY_TAG_PATTERN, tag) is not None
-    for tag in ("v01.2.3", "v1.02.3", "v1.2.03", "v1000000.0.0", "v1.2.3-rc1"):
+    for version in ("01.2.3", "1.02.3", "1.2.03", "1000000.0.0", "1.2.3-rc1"):
+        assert re.fullmatch(RELEASE_VERSION_PATTERN, version) is None
+        tag = f"v{version}"
         assert re.fullmatch(RECOVERY_TAG_PATTERN, tag) is None
