@@ -55,6 +55,21 @@ tag_commit() {
   git rev-parse --verify "refs/tags/${tag}^{commit}"
 }
 
+require_direct_annotated_commit_tag() {
+  local tag="$1"
+  local target_type
+
+  if [[ "$(git cat-file -t "refs/tags/${tag}")" != "tag" ]]; then
+    printf 'release tag %q must be annotated\n' "${tag}" >&2
+    exit 1
+  fi
+  target_type="$(git cat-file -p "refs/tags/${tag}" | sed -n '2s/^type //p')"
+  if [[ "${target_type}" != "commit" ]]; then
+    printf 'release tag %q must directly annotate a commit\n' "${tag}" >&2
+    exit 1
+  fi
+}
+
 classify_bump() {
   local messages="$1"
 
@@ -69,11 +84,16 @@ classify_bump() {
   fi
 }
 
+head_sha="$(git rev-parse HEAD)"
 while IFS= read -r head_tag; do
-  if [[ "${head_tag}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  if [[ "$(tag_commit "${head_tag}")" == "${head_sha}" ]]; then
     require_version "$(normalize_version "${head_tag}")"
+    require_direct_annotated_commit_tag "${head_tag}"
   fi
-done < <(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*')
+done < <(
+  git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' |
+    grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true
+)
 
 mapfile -t release_tags < <(
   git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' |
@@ -89,8 +109,6 @@ fi
 if ((${#release_tags[@]} > 1)); then
   previous_tag="${release_tags[$((${#release_tags[@]} - 2))]}"
 fi
-
-head_sha="$(git rev-parse HEAD)"
 
 if [[ -z "${manual_version}" ]] && [[ -n "${latest_tag}" ]] && [[ "$(tag_commit "${latest_tag}")" == "${head_sha}" ]]; then
   existing_version="$(normalize_version "${latest_tag}")"
