@@ -292,6 +292,7 @@ class GenerationOutputTransaction:
                         try:
                             staged_report.commit(destination_lock_held=True)
                             report_rollback = staged_report.retain_rollback()
+                            self._report_rollback = report_rollback
                         except BoundFileDestinationError as exc:
                             raise GenerationReportWriteError(
                                 self.report_destination.requested_path,
@@ -313,9 +314,6 @@ class GenerationOutputTransaction:
             if report_rollback is not None:
                 report_rollback.close()
             raise
-        if report_rollback is None:
-            raise AssertionError("published report rollback handle is unavailable")
-        self._report_rollback = report_rollback
 
     def close(self) -> None:
         """Close every retained destination descriptor."""

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import inspect
 import os
+import sys
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 import pytest
 
@@ -103,6 +107,66 @@ def test_cleanup_cancellation_removes_the_published_success_report(
             _generation_result(monkeypatch),
             binary_stdout=None,
         )
+
+    assert interrupted
+    assert output_path.exists()
+    assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_rollback_handoff_cancellation_removes_the_published_success_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    commit_implementation = GenerationOutputTransaction._commit
+    source_lines, first_line = inspect.getsourcelines(commit_implementation)
+    handoff_line = first_line + next(
+        index
+        for index, line in enumerate(source_lines)
+        if "self._report_rollback = report_rollback" in line
+    )
+    interrupted = False
+
+    def interrupt_rollback_handoff(
+        frame: FrameType,
+        event: str,
+        argument: object,
+    ) -> Any:
+        del argument
+        nonlocal interrupted
+        if (
+            not interrupted
+            and frame.f_code is commit_implementation.__code__
+            and event == "line"
+            and frame.f_lineno == handoff_line
+        ):
+            interrupted = True
+            sys.settrace(None)
+            raise KeyboardInterrupt("synthetic rollback handoff cancellation")
+        return interrupt_rollback_handoff
+
+    sys.settrace(interrupt_rollback_handoff)
+    try:
+        with (
+            transaction,
+            pytest.raises(
+                KeyboardInterrupt,
+                match="synthetic rollback handoff cancellation",
+            ),
+        ):
+            transaction.commit(
+                _generation_result(monkeypatch),
+                binary_stdout=None,
+            )
+    finally:
+        sys.settrace(None)
 
     assert interrupted
     assert output_path.exists()
