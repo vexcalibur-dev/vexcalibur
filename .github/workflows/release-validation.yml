@@ -957,20 +957,27 @@ jobs:
 
       - name: Install the exact locked wheel
         env:
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
           RELEASE_VERSION: ${{ inputs.release-version }}
           VEXCALIBUR_EXPECTED_PYTHON: ${{ env.MAX_PYTHON }}
         run: |
           set -euo pipefail
 
           wheel="${RUNNER_TEMP}/direct-dist/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          constraints="${RUNNER_TEMP}/direct-inventory/runtime-constraints.txt"
           requirements="${RUNNER_TEMP}/direct-install-requirements.txt"
-          scripts/install-locked-distribution.sh \
-            "${RUNNER_TEMP}/direct-venv" \
-            "${wheel}" \
-            "${requirements}"
-          cmp -- \
-            "${RUNNER_TEMP}/direct-inventory/runtime-constraints.txt" \
-            "${requirements}.constraints"
+          wheel_uri="$(python3 -c \
+            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
+            "${wheel}")"
+          printf 'vexcalibur @ %s \\\n    --hash=sha256:%s\n' \
+            "${wheel_uri}" "${EXPECTED_WHEEL_SHA256}" > "${requirements}"
+          uv venv --python "${VEXCALIBUR_EXPECTED_PYTHON}" "${RUNNER_TEMP}/direct-venv"
+          uv pip install \
+            --require-hashes \
+            --only-binary :all: \
+            --constraint "${constraints}" \
+            --python "${RUNNER_TEMP}/direct-venv/bin/python" \
+            --requirements "${requirements}"
           env -u PYTHONHOME -u PYTHONPATH \
             "${RUNNER_TEMP}/direct-venv/bin/python" -c \
             'from importlib.metadata import version; import os; assert version("vexcalibur") == os.environ["RELEASE_VERSION"]'
@@ -1349,15 +1356,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           mkdir -- "${RUNNER_TEMP}/action-vex"
 
+          constraints="${inventory_dir}/runtime-constraints.txt"
           requirements="${RUNNER_TEMP}/action-validator-requirements.txt"
-          VEXCALIBUR_EXPECTED_PYTHON="${MAX_PYTHON}" \
-            scripts/install-locked-distribution.sh \
-              "${RUNNER_TEMP}/action-validator-venv" \
-              "${wheel}" \
-              "${requirements}"
-          cmp -- \
-            "${inventory_dir}/runtime-constraints.txt" \
-            "${requirements}.constraints"
+          printf 'vexcalibur @ %s \\\n    --hash=sha256:%s\n' \
+            "${wheel_uri}" "${EXPECTED_WHEEL_SHA256}" > "${requirements}"
+          uv venv --python "${MAX_PYTHON}" "${RUNNER_TEMP}/action-validator-venv"
+          uv pip install \
+            --require-hashes \
+            --only-binary :all: \
+            --constraint "${constraints}" \
+            --python "${RUNNER_TEMP}/action-validator-venv/bin/python" \
+            --requirements "${requirements}"
 
       - name: Reject a missing wheel URI hash
         id: missing-hash

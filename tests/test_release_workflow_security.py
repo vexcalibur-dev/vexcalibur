@@ -827,8 +827,12 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "actions/checkout@" not in direct
     assert "vexcalibur-action@" not in direct
     assert "Install the exact locked wheel" in direct
-    assert "scripts/install-locked-distribution.sh" in direct
-    assert 'runtime-constraints.txt" \\\n            "${requirements}.constraints"' in direct
+    assert "scripts/" not in direct
+    assert 'constraints="${RUNNER_TEMP}/direct-inventory/runtime-constraints.txt"' in direct
+    assert '--constraint "${constraints}"' in direct
+    assert '--requirements "${requirements}"' in direct
+    assert "--require-hashes" in direct
+    assert "--only-binary :all:" in direct
     assert "uv pip sync" not in direct
     assert "Upload only direct VEX output" in direct
 
@@ -837,8 +841,12 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "actions/checkout@" not in action
     assert "vexcalibur-dev/vexcalibur-action@" in action
     assert "action-validator-venv" in action
-    assert "scripts/install-locked-distribution.sh" in action
-    assert 'runtime-constraints.txt" \\\n            "${requirements}.constraints"' in action
+    assert "scripts/" not in action
+    assert 'constraints="${inventory_dir}/runtime-constraints.txt"' in action
+    assert '--constraint "${constraints}"' in action
+    assert '--requirements "${requirements}"' in action
+    assert "--require-hashes" in action
+    assert "--only-binary :all:" in action
     assert "uv pip sync" not in action
     assert "Upload only Action VEX output" in action
 
