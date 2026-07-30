@@ -41,7 +41,7 @@ returns zero or more immutable findings.
 
 See the tested [custom generation
 example](../examples/generate_custom_execution_report.py) for a provider that
-returns a finding and writes a report.
+returns no findings and prints a custom execution report.
 
 `execution_report_finding_source` is optional. Implement it when the provider
 supports generation execution reports but does not match a built-in source

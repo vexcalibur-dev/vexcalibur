@@ -20,6 +20,13 @@ on:
         required: false
         default: false
         type: boolean
+      require-release-platform-contracts:
+        description: >-
+          Require exact-commit Windows, macOS, and Action Python-version
+          contracts before finalizing publication assets.
+        required: false
+        default: false
+        type: boolean
       unprivileged-ci-contract:
         description: >-
           Exercise the publication graph without publication credentials,
@@ -217,6 +224,241 @@ jobs:
 
       - name: Run offline tests
         run: uv run --frozen pytest -m "not live" --cov-fail-under=75
+
+  execution-report-windows:
+    name: Release execution report Windows contract (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    needs: [consent, build]
+    if: >-
+      inputs.require-release-platform-contracts &&
+      needs.consent.result == 'success' &&
+      needs.build.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release-sha }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version-file: .tool-versions
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download exact release distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ${{ runner.temp }}/release-dist
+
+      - name: Verify fail-closed Windows behavior
+        run: >-
+          uv run --frozen pytest -q
+          tests/test_execution_report_destination.py::test_native_windows_report_request_fails_closed
+          tests/test_cli_execution_report.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output
+
+      - name: Verify installed-distribution Windows behavior
+        shell: pwsh
+        env:
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+          EXPECTED_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($PSVersionTable.PSVersion -lt [Version]"7.3") {
+            throw "PowerShell 7.3 or newer is required"
+          }
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dist = Join-Path $env:RUNNER_TEMP "release-dist"
+          $wheels = @(Get-ChildItem -Path $dist -Filter *.whl)
+          $sdists = @(Get-ChildItem -Path $dist -Filter *.tar.gz)
+          if ($wheels.Count -ne 1) {
+            throw "Expected exactly one release wheel, found $($wheels.Count)"
+          }
+          if ($sdists.Count -ne 1) {
+            throw "Expected exactly one release sdist, found $($sdists.Count)"
+          }
+          $actualWheelSha256 = (
+            Get-FileHash -Algorithm SHA256 -LiteralPath $wheels[0].FullName
+          ).Hash.ToLowerInvariant()
+          if ($actualWheelSha256 -ne $env:EXPECTED_WHEEL_SHA256) {
+            throw "Downloaded release wheel digest did not match the canonical build"
+          }
+          $actualSdistSha256 = (
+            Get-FileHash -Algorithm SHA256 -LiteralPath $sdists[0].FullName
+          ).Hash.ToLowerInvariant()
+          if ($actualSdistSha256 -ne $env:EXPECTED_SDIST_SHA256) {
+            throw "Downloaded release sdist digest did not match the canonical build"
+          }
+          $buildRequirements = Join-Path $env:RUNNER_TEMP "sdist-build-requirements.txt"
+          $buildVenv = Join-Path $env:RUNNER_TEMP "vexcalibur-sdist-build"
+          uv export `
+            --quiet `
+            --frozen `
+            --only-group sdist-build `
+            --no-emit-project `
+            --no-annotate `
+            --output-file $buildRequirements
+          uv venv $buildVenv
+          $buildPython = Join-Path $buildVenv "Scripts/python.exe"
+          uv pip sync `
+            --require-hashes `
+            --only-binary :all: `
+            --python $buildPython `
+            $buildRequirements
+
+          $distributions = @(
+            @{ Name = "wheel"; Path = $wheels[0].FullName },
+            @{ Name = "sdist"; Path = $sdists[0].FullName }
+          )
+          foreach ($distribution in $distributions) {
+            $installDistribution = $distribution.Path
+            if ($distribution.Name -eq "sdist") {
+              $wheelDir = Join-Path $env:RUNNER_TEMP "vexcalibur-sdist-wheel"
+              New-Item -ItemType Directory -Path $wheelDir | Out-Null
+              $previousVirtualEnv = $env:VIRTUAL_ENV
+              try {
+                $env:VIRTUAL_ENV = $buildVenv
+                uv build `
+                  --wheel `
+                  --no-build-isolation `
+                  --offline `
+                  --python $buildPython `
+                  --out-dir $wheelDir `
+                  $distribution.Path
+              } finally {
+                if ($null -eq $previousVirtualEnv) {
+                  Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+                } else {
+                  $env:VIRTUAL_ENV = $previousVirtualEnv
+                }
+              }
+              $builtWheels = @(Get-ChildItem -Path $wheelDir -Filter *.whl)
+              if ($builtWheels.Count -ne 1) {
+                throw "Expected one wheel built from the sdist, found $($builtWheels.Count)"
+              }
+              $installDistribution = $builtWheels[0].FullName
+            }
+
+            $venv = Join-Path $env:RUNNER_TEMP "vexcalibur-installed-$($distribution.Name)"
+            $requirements = Join-Path `
+              $env:RUNNER_TEMP `
+              "runtime-requirements-$($distribution.Name).txt"
+            uv export `
+              --quiet `
+              --frozen `
+              --no-dev `
+              --no-emit-project `
+              --no-annotate `
+              --output-file $requirements
+            python scripts/append_locked_distribution_requirement.py `
+              $installDistribution `
+              $requirements
+            uv venv $venv
+            $python = Join-Path $venv "Scripts/python.exe"
+            uv pip sync `
+              --require-hashes `
+              --only-binary :all: `
+              --python $python `
+              $requirements
+            $env:VEXCALIBUR_EXPECTED_PYTHON = "${{ matrix.python-version }}"
+            $env:VEXCALIBUR_EXPECTED_VERSION = $env:EXPECTED_VERSION
+            & $python tests/integration/check_installed_windows.py
+          }
+
+  execution-report-macos:
+    name: Release execution report macOS contract (Python ${{ matrix.python-version }})
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    needs: [consent, build]
+    if: >-
+      inputs.require-release-platform-contracts &&
+      needs.consent.result == 'success' &&
+      needs.build.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release-sha }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version-file: .tool-versions
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download exact release distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ${{ runner.temp }}/release-dist
+
+      - name: Verify native POSIX report transactions
+        run: >-
+          uv run --frozen pytest -q
+          tests/test_execution_report_destination.py
+          tests/test_execution_report_destination_cli.py
+          tests/test_execution_report_destination_locks.py
+          tests/test_execution_report_hardening.py
+          tests/test_generation_output.py
+          tests/test_generation_output_concurrency.py
+          tests/test_cli_execution_report.py
+
+      - name: Verify installed-distribution report generation
+        shell: bash
+        env:
+          EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+          EXPECTED_VERSION: ${{ inputs.release-version }}
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+        run: |
+          shopt -s nullglob
+          wheels=("${RUNNER_TEMP}"/release-dist/*.whl)
+          sdists=("${RUNNER_TEMP}"/release-dist/*.tar.gz)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            printf 'expected one wheel, found %s\n' "${#wheels[@]}" >&2
+            exit 2
+          fi
+          if [ "${#sdists[@]}" -ne 1 ]; then
+            printf 'expected one sdist, found %s\n' "${#sdists[@]}" >&2
+            exit 2
+          fi
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheels[0]}" |
+            shasum --algorithm 256 --check
+          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdists[0]}" |
+            shasum --algorithm 256 --check
+          for distribution in "${wheels[0]}" "${sdists[0]}"; do
+            VEXCALIBUR_DISTRIBUTION="${distribution}" \
+              VEXCALIBUR_EXPECTED_PYTHON="${{ matrix.python-version }}" \
+              VEXCALIBUR_EXPECTED_VERSION="${EXPECTED_VERSION}" \
+              make installed-cli-check
+          done
 
   docs:
     name: Build docs
@@ -1003,6 +1245,166 @@ jobs:
           overwrite: true
           retention-days: 14
 
+  action-python-matrix:
+    name: Pinned Action install (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    needs: [build, publication-inventory]
+    if: >-
+      inputs.require-release-platform-contracts &&
+      needs.build.result == 'success' &&
+      needs.publication-inventory.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Download exact distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ${{ runner.temp }}/action-matrix-dist
+
+      - name: Download publication inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publication-inventory.outputs.artifact-name }}
+          path: ${{ runner.temp }}/action-matrix-inventory
+
+      - name: Verify inputs and construct the package URI
+        id: package
+        env:
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
+          EXPECTED_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
+          MANIFEST: ${{ runner.temp }}/action-matrix-inventory/manifest.json
+        run: |
+          set -euo pipefail
+
+          dist_dir="${RUNNER_TEMP}/action-matrix-dist"
+          inventory_dir="${RUNNER_TEMP}/action-matrix-inventory"
+          wheel="${dist_dir}/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" |
+            sha256sum --check --strict
+          (cd "${inventory_dir}" && sha256sum --check --strict SHA256SUMS)
+          python3 -c \
+            'import json, os, pathlib; m=json.loads(pathlib.Path(os.environ["MANIFEST"]).read_text()); assert m["release"]["commit"] == os.environ["RELEASE_SHA"]; assert m["release"]["version"] == os.environ["RELEASE_VERSION"]; assert m["release"]["timestamp"] == os.environ["EXPECTED_TIMESTAMP"]' \
+            </dev/null
+          wheel_uri="$(python3 -c \
+            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
+            "${wheel}")"
+          printf 'hashed-wheel-uri=%s#sha256=%s\n' \
+            "${wheel_uri}" \
+            "${EXPECTED_WHEEL_SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate through the exact wheel and pinned Action
+        uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
+        with:
+          package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
+          allow-development-package-spec: "true"
+          constraints-file: ${{ runner.temp }}/action-matrix-inventory/runtime-constraints.txt
+          python-version: ${{ matrix.python-version }}
+          args: |
+            generate
+            ${{ runner.temp }}/action-matrix-inventory/sbom.cdx.json
+            --findings-file
+            ${{ runner.temp }}/action-matrix-inventory/findings.json
+            --offline
+            --timestamp
+            ${{ needs.publication-inventory.outputs.timestamp }}
+            --output
+            ${{ runner.temp }}/action-matrix-vex.json
+            --execution-report
+            ${{ runner.temp }}/action-matrix-execution.json
+
+      - name: Independently verify the generated report
+        env:
+          EXPECTED_VERSION: ${{ inputs.release-version }}
+          FINDINGS: ${{ runner.temp }}/action-matrix-inventory/findings.json
+          OUTPUT: ${{ runner.temp }}/action-matrix-vex.json
+          REPORT: ${{ runner.temp }}/action-matrix-execution.json
+          SBOM: ${{ runner.temp }}/action-matrix-inventory/sbom.cdx.json
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          report_path = Path(os.environ["REPORT"])
+          output_bytes = Path(os.environ["OUTPUT"]).read_bytes()
+          report_bytes = report_path.read_bytes()
+          assert len(report_bytes) <= 16 * 1024
+          report = json.loads(report_bytes)
+          assert set(report) == {
+              "analysis_state_counts",
+              "command",
+              "component_count",
+              "document",
+              "finding_count",
+              "finding_source",
+              "inventory_source",
+              "output_format",
+              "schema_version",
+              "vexcalibur_version",
+          }
+          canonical = (
+              json.dumps(report, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+              + "\n"
+          ).encode("ascii")
+          assert report_bytes == canonical
+          assert report["schema_version"] == 1
+          assert report["command"] == "generate"
+          assert report["vexcalibur_version"] == os.environ["EXPECTED_VERSION"]
+          assert report["inventory_source"] == "sbom_file"
+          assert report["finding_source"] == "local_file"
+          assert report["output_format"] == "cyclonedx"
+          assert report["document"] == {
+              "bytes": len(output_bytes),
+              "sha256": hashlib.sha256(output_bytes).hexdigest(),
+          }
+
+          findings_document = json.loads(Path(os.environ["FINDINGS"]).read_bytes())
+          assert set(findings_document) == {"findings"}
+          findings = findings_document["findings"]
+          assert isinstance(findings, list)
+          state_counts = Counter(item["analysis_state"] for item in findings)
+          assert report["finding_count"] == len(findings)
+          state_order = (
+              "resolved",
+              "exploitable",
+              "in_triage",
+              "false_positive",
+              "not_affected",
+          )
+          expected_state_counts = {
+              state: state_counts[state] for state in state_order if state_counts[state]
+          }
+          assert report["analysis_state_counts"] == expected_state_counts
+
+          sbom = json.loads(Path(os.environ["SBOM"]).read_bytes())
+          roots = list(sbom.get("components", []))
+          metadata_component = sbom.get("metadata", {}).get("component")
+          if metadata_component is not None:
+              roots.append(metadata_component)
+          identities = set()
+          stack = list(roots)
+          while stack:
+              component = stack.pop()
+              stack.extend(component.get("components", []))
+              purl = component.get("purl")
+              if purl is not None:
+                  identities.add((component.get("bom-ref", purl), purl))
+          assert identities
+          assert report["component_count"] == len(identities)
+
+          output = json.loads(output_bytes)
+          assert output["bomFormat"] == "CycloneDX"
+          PY
+
   action-vex:
     name: Pinned Action VEX
     runs-on: ubuntu-latest
@@ -1475,6 +1877,8 @@ jobs:
       - workflow-lint
       - security
       - test
+      - execution-report-windows
+      - execution-report-macos
       - docs
       - build
       - installed-cli
@@ -1482,6 +1886,7 @@ jobs:
       - csaf-conformance
       - publication-inventory
       - direct-vex
+      - action-python-matrix
       - action-vex
     outputs:
       artifact-name: ${{ steps.metadata.outputs.artifact-name }}
@@ -1494,6 +1899,14 @@ jobs:
       needs.publication-inventory.result == 'success' &&
       needs.direct-vex.result == 'success' &&
       needs.action-vex.result == 'success' &&
+      (
+        !inputs.require-release-platform-contracts ||
+        (
+          needs.execution-report-windows.result == 'success' &&
+          needs.execution-report-macos.result == 'success' &&
+          needs.action-python-matrix.result == 'success'
+        )
+      ) &&
       (
         inputs.publication-only ||
         (

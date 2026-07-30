@@ -42,6 +42,7 @@ from vexcalibur.sources.osv import (
     OsvClient,
     OsvSource,
 )
+from vexcalibur.vex import CycloneDxJsonRenderer
 
 MAX_VEX_OUTPUT_BYTES = MAX_GENERATED_DOCUMENT_BYTES
 _OUTPUT_MEASUREMENT_CHUNK_CHARACTERS = 64 * 1024
@@ -57,9 +58,9 @@ def generate_vex_from_source(
     """Generate VEX JSON from a CycloneDX SBOM and source provider."""
     return _render_legacy_generation(
         components=load_cyclonedx_sbom(input_file),
-        source=select_finding_source(source),
+        source=source,
         timestamp=timestamp,
-        renderer=select_renderer(renderer),
+        renderer=renderer,
     )
 
 
@@ -99,9 +100,9 @@ def generate_vex_from_components(
     """Generate VEX JSON from component identities and a source provider."""
     return _render_legacy_generation(
         components=components,
-        source=select_finding_source(source),
+        source=source,
         timestamp=timestamp,
-        renderer=select_renderer(renderer),
+        renderer=renderer,
     )
 
 
@@ -165,14 +166,15 @@ def _require_components(components: tuple[ComponentIdentity, ...]) -> None:
 def _render_legacy_generation(
     *,
     components: tuple[ComponentIdentity, ...],
-    source: SelectedFindingSource,
+    source: VulnerabilitySource,
     timestamp: datetime | None,
-    renderer: SelectedRenderer,
+    renderer: VexRenderer | None,
 ) -> str:
     """Render through the compatibility path without copying extension values."""
     _require_components(components)
-    findings = _findings_for_components(source.source, components)
-    rendered = renderer.renderer.render(
+    findings = _findings_for_components(source, components)
+    selected_renderer = CycloneDxJsonRenderer() if renderer is None else renderer
+    rendered = selected_renderer.render(
         components=components,
         findings=findings,
         timestamp=timestamp,
@@ -370,17 +372,15 @@ def generate_vex_from_sbom(
     """Generate VEX JSON from a CycloneDX SBOM."""
     return _render_legacy_generation(
         components=load_cyclonedx_sbom(input_file),
-        source=select_finding_source(
-            _osv_source(
-                client=osv_client,
-                osv_base_url=osv_base_url,
-                allow_public_osv=allow_public_osv,
-                source_name=osv_source_name,
-                source_url=osv_source_url,
-            )
+        source=_osv_source(
+            client=osv_client,
+            osv_base_url=osv_base_url,
+            allow_public_osv=allow_public_osv,
+            source_name=osv_source_name,
+            source_url=osv_source_url,
         ),
         timestamp=timestamp,
-        renderer=select_renderer(renderer),
+        renderer=renderer,
     )
 
 
@@ -445,9 +445,9 @@ def generate_vex_from_github_sbom(
     validate_source_before_inventory_load(raw_source)
     return _render_legacy_generation(
         components=_github_components(repository, github_client),
-        source=select_finding_source(raw_source),
+        source=raw_source,
         timestamp=timestamp,
-        renderer=select_renderer(renderer),
+        renderer=renderer,
     )
 
 

@@ -329,8 +329,9 @@ The report classes validate their complete constructor state:
    * - ``GenerationResult``
      - ``rendered_document`` is exact built-in ``str``; ``components`` and
        ``findings`` are tuples containing their corresponding domain types;
-       ``execution_context`` is optional. The first ``execution_report`` call
-       snapshots and validates the installed package version.
+       ``execution_context`` is optional. Construction snapshots the loaded
+       Vexcalibur version. Each ``execution_report`` call verifies that snapshot
+       against installed package metadata.
      - ``TypeError`` for invalid constructor values; ``VexRenderError`` when
        ``rendered_bytes`` cannot encode strict UTF-8;
        ``GenerationReportMetadataError`` when package metadata is unavailable

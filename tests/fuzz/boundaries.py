@@ -87,6 +87,7 @@ _CONSUMER_REPORT = (
     )
     + "\n"
 ).encode("ascii")
+VALID_CONSUMER_SEED = b"R" + _CONSUMER_REPORT
 
 Outcome = tuple[str, str]
 Exercise = Callable[[bytes], str]

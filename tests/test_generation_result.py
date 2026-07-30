@@ -152,6 +152,8 @@ def test_legacy_generation_preserves_extension_objects() -> None:
     rendered = RenderedDocument('{"extended":true}\n')
 
     class PreservingSource:
+        execution_report_finding_source = "legacy metadata"
+
         def findings_for_components(
             self,
             supplied_components: tuple[ComponentIdentity, ...],
@@ -162,6 +164,8 @@ def test_legacy_generation_preserves_extension_objects() -> None:
             return findings
 
     class PreservingRenderer:
+        execution_report_output_format = "legacy metadata"
+
         def render(
             self,
             *,

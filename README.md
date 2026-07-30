@@ -53,7 +53,7 @@ test "$INSTALLED_VERSION" = "$VEXCALIBUR_VERSION"
 "$VEXCALIBUR_VENV/bin/vexcalibur" --help
 ```
 
-In PowerShell, use:
+In PowerShell 7.3 or newer, use:
 
 ```powershell
 $ErrorActionPreference = "Stop"

@@ -350,11 +350,12 @@ def test_release_and_pypi_bind_every_asset_to_the_automation_uploader() -> None:
         assert '(.label == null or .label == "")' in boundary
 
 
-def test_distributions_are_built_once_and_never_rebuilt_for_pypi() -> None:
+def test_canonical_distributions_are_built_once_and_never_rebuilt_for_pypi() -> None:
     validation = _validation_text()
     pypi = _pypi_text()
+    build = _job(validation, "build")
 
-    assert len(re.findall(r"(?<![\w-])uv\s+build(?=\s|$)", validation)) == 1
+    assert len(re.findall(r"(?<![\w-])uv\s+build(?=\s|$)", build)) == 1
     for build_command in (
         r"(?<![\w-])uv\s+build(?=\s|$)",
         r"python(?:3)?\s+-m\s+build(?=\s|$)",
@@ -590,6 +591,67 @@ def test_macos_runs_native_lock_and_concurrency_contracts() -> None:
     assert "VEXCALIBUR_DISTRIBUTION=" in installed
 
 
+def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> None:
+    validation = _validation_text()
+    release = _job(_workflow_text(), "validation")
+    windows = _job(validation, "execution-report-windows")
+    macos = _job(validation, "execution-report-macos")
+    action_matrix = _job(validation, "action-python-matrix")
+    finalizer = _job(validation, "publication-assets")
+    finalizer_condition = finalizer[: finalizer.index("    steps:\n")]
+
+    assert "require-release-platform-contracts:" in validation
+    assert (
+        "default: false"
+        in validation[
+            validation.index("require-release-platform-contracts:") : validation.index(
+                "unprivileged-ci-contract:"
+            )
+        ]
+    )
+    assert "require-release-platform-contracts: true" in release
+
+    for native_job in (windows, macos):
+        checkout = _step(native_job, "Checkout exact release source")
+        download = _step(native_job, "Download exact release distributions")
+        assert "inputs.require-release-platform-contracts" in native_job
+        assert 'python-version: ["3.10", "3.14"]' in native_job
+        assert "needs: [consent, build]" in native_job
+        assert "ref: ${{ inputs.release-sha }}" in checkout
+        assert "persist-credentials: false" in checkout
+        assert "needs.build.outputs.artifact-name" in download
+        assert "EXPECTED_WHEEL_SHA256" in native_job
+        assert "EXPECTED_SDIST_SHA256" in native_job
+        assert "needs.build.outputs.wheel-sha256" in native_job
+        assert "needs.build.outputs.sdist-sha256" in native_job
+        assert "VEXCALIBUR_EXPECTED_VERSION" in native_job
+
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in action_matrix
+    assert "inputs.require-release-platform-contracts" in action_matrix
+    assert "python-version: ${{ matrix.python-version }}" in action_matrix
+    assert 'allow-development-package-spec: "true"' in action_matrix
+    assert "runtime-constraints.txt" in action_matrix
+    assert "EXPECTED_WHEEL_SHA256" in action_matrix
+    assert "sha256sum --check --strict" in action_matrix
+    assert "action-matrix-execution.json" in action_matrix
+    assert "action-matrix-vex.json" in action_matrix
+    assert "Independently verify the generated report" in action_matrix
+    assert 'report["vexcalibur_version"] == os.environ["EXPECTED_VERSION"]' in action_matrix
+    assert 'report["component_count"] == len(identities)' in action_matrix
+    assert 'report["finding_count"] == len(findings)' in action_matrix
+    assert "hashlib.sha256(output_bytes).hexdigest()" in action_matrix
+    assert "report_bytes == canonical" in action_matrix
+
+    for required_job in (
+        "execution-report-windows",
+        "execution-report-macos",
+        "action-python-matrix",
+    ):
+        assert f"      - {required_job}" in finalizer
+        assert f"needs.{required_job}.result == 'success'" in finalizer_condition
+    assert "!inputs.require-release-platform-contracts" in finalizer_condition
+
+
 def test_candidate_publication_contract_runs_installed_distribution_matrix() -> None:
     installed = _job(_validation_text(), "installed-cli")
 
@@ -738,6 +800,7 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
 def test_action_validation_and_evidence_use_one_exact_action_commit() -> None:
     validation = _validation_text()
     action = _job(validation, "action-vex")
+    action_matrix = _job(validation, "action-python-matrix")
     finalizer = _job(validation, "publication-assets")
     evidence = RELEASE_EVIDENCE.read_text(encoding="utf-8")
     expected_match = re.search(
@@ -749,7 +812,10 @@ def test_action_validation_and_evidence_use_one_exact_action_commit() -> None:
     expected = expected_match.group(1)
 
     action_commits = set(
-        re.findall(r"uses: vexcalibur-dev/vexcalibur-action@([0-9a-f]{40})", action)
+        re.findall(
+            r"uses: vexcalibur-dev/vexcalibur-action@([0-9a-f]{40})",
+            action + action_matrix,
+        )
     )
     finalizer_commits = set(re.findall(r"--action-commit ([0-9a-f]{40})", finalizer))
 

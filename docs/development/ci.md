@@ -117,15 +117,23 @@ try {
     if ($distribution.Name -eq "sdist") {
       $wheelDir = Join-Path $work "sdist-wheel"
       New-Item -ItemType Directory -Path $wheelDir | Out-Null
-      $env:VIRTUAL_ENV = $buildVenv
-      uv build `
-        --wheel `
-        --no-build-isolation `
-        --offline `
-        --python $buildPython `
-        --out-dir $wheelDir `
-        $distribution.Path
-      Remove-Item Env:VIRTUAL_ENV
+      $previousVirtualEnv = $env:VIRTUAL_ENV
+      try {
+        $env:VIRTUAL_ENV = $buildVenv
+        uv build `
+          --wheel `
+          --no-build-isolation `
+          --offline `
+          --python $buildPython `
+          --out-dir $wheelDir `
+          $distribution.Path
+      } finally {
+        if ($null -eq $previousVirtualEnv) {
+          Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+        } else {
+          $env:VIRTUAL_ENV = $previousVirtualEnv
+        }
+      }
       $builtWheels = @(Get-ChildItem -Path $wheelDir -Filter *.whl)
       if ($builtWheels.Count -ne 1) {
         throw "Expected one wheel built from the sdist, found $($builtWheels.Count)"
@@ -228,6 +236,14 @@ version. Its ordinary mode runs repository gates before publication jobs. Its
 publication-only mode runs just the immutable-asset contract. Both modes
 require the caller to consent explicitly to uploading the dependency inventory
 and generated evidence.
+
+The release and recovery workflows also require the release-platform
+contracts. They rerun the exact commit on Windows and macOS with Python 3.10
+and 3.14, then install the exact wheel through the pinned companion Action on
+every supported Python version. Publication assets are not finalized until
+those jobs pass. Pull-request CI does not repeat that matrix inside its
+unprivileged publication rehearsal because the parent CI workflow already
+requires the same native checks.
 
 The publication graph has five independent roles:
 

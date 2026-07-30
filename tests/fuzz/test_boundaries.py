@@ -13,6 +13,7 @@ from tests.fuzz.boundaries import (
     FUZZ_TARGETS,
     MAX_FUZZ_INPUT_BYTES,
     OSV_PAGE_SEPARATOR,
+    VALID_CONSUMER_SEED,
     assert_deterministic_boundary,
     deterministic_outcome,
 )
@@ -73,6 +74,10 @@ def test_every_checked_in_seed_has_an_explicit_security_expectation() -> None:
     }
 
     assert checked_in_seeds == set(CORPUS_EXPECTATIONS)
+
+
+def test_valid_consumer_seed_matches_the_canonical_builder() -> None:
+    assert CORPUS_ROOT.joinpath("consumer/valid-report.json").read_bytes() == VALID_CONSUMER_SEED
 
 
 def test_duplicate_json_keys_have_a_stable_typed_rejection() -> None:

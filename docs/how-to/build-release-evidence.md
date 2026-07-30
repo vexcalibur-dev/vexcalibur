@@ -52,7 +52,7 @@ uv run --frozen python scripts/release_evidence.py validate-review \
   --lock uv.lock
 ```
 
-The initial zero-finding review prints:
+The current zero-finding review prints:
 
 ```text
 production	0

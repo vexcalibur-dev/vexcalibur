@@ -250,15 +250,23 @@ jobs:
             if ($distribution.Name -eq "sdist") {
               $wheelDir = Join-Path $env:RUNNER_TEMP "vexcalibur-sdist-wheel"
               New-Item -ItemType Directory -Path $wheelDir | Out-Null
-              $env:VIRTUAL_ENV = $buildVenv
-              uv build `
-                --wheel `
-                --no-build-isolation `
-                --offline `
-                --python $buildPython `
-                --out-dir $wheelDir `
-                $distribution.Path
-              Remove-Item Env:VIRTUAL_ENV
+              $previousVirtualEnv = $env:VIRTUAL_ENV
+              try {
+                $env:VIRTUAL_ENV = $buildVenv
+                uv build `
+                  --wheel `
+                  --no-build-isolation `
+                  --offline `
+                  --python $buildPython `
+                  --out-dir $wheelDir `
+                  $distribution.Path
+              } finally {
+                if ($null -eq $previousVirtualEnv) {
+                  Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+                } else {
+                  $env:VIRTUAL_ENV = $previousVirtualEnv
+                }
+              }
               $builtWheels = @(Get-ChildItem -Path $wheelDir -Filter *.whl)
               if ($builtWheels.Count -ne 1) {
                 throw "Expected one wheel built from the sdist, found $($builtWheels.Count)"
