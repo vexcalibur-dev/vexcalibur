@@ -232,6 +232,16 @@ def test_existing_head_tag_can_create_missing_release(tmp_path: Path) -> None:
     }
 
 
+def test_existing_head_tag_rejects_unbounded_version_component(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v1000000.0.0", "-m", "Invalid release tag")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "version component 1000000 must be less than or equal to 999999" in result.stderr
+
+
 def test_docs_only_change_after_tag_skips_release(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")

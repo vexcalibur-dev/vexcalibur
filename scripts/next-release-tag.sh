@@ -87,9 +87,11 @@ fi
 head_sha="$(git rev-parse HEAD)"
 
 if [[ -z "${manual_version}" ]] && [[ -n "${latest_tag}" ]] && [[ "$(tag_commit "${latest_tag}")" == "${head_sha}" ]]; then
+  existing_version="$(normalize_version "${latest_tag}")"
+  require_version "${existing_version}"
   emit skip false
   emit tag "${latest_tag}"
-  emit version "$(normalize_version "${latest_tag}")"
+  emit version "${existing_version}"
   emit previous_tag "${previous_tag}"
   emit bump existing
   exit 0
