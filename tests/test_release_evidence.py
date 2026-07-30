@@ -274,6 +274,20 @@ def test_checked_production_review_is_bound_to_the_lock_and_has_zero_findings() 
     assert review["inventory"]["sha256"].replace(":", "") == release_evidence.sha256_file(LOCK)
 
 
+@pytest.mark.parametrize("schema_version", [True, 1.0])
+def test_review_requires_exact_integer_schema_version(schema_version: object) -> None:
+    review = copy.deepcopy(release_evidence.load_json(PRODUCTION_REVIEW))
+    review["schema_version"] = schema_version
+
+    with pytest.raises(release_evidence.EvidenceError, match="review schema_version must be 1"):
+        release_evidence.validate_review(
+            review,
+            release_evidence.load_json(PRODUCTION_FINDINGS),
+            lock_path=LOCK,
+            findings_path=PRODUCTION_FINDINGS,
+        )
+
+
 def test_synthetic_review_requires_explicit_opt_in() -> None:
     review = release_evidence.load_json(FIXTURE_REVIEW)
     findings_document = release_evidence.load_json(FIXTURE_FINDINGS)
@@ -525,6 +539,28 @@ def test_uv_sbom_normalization_removes_random_fields_and_sorts_inventory() -> No
         "pkg:pypi/vexcalibur@0.4.0",
         "z-2@2.0",
     ]
+
+
+@pytest.mark.parametrize("document_version", [True, 1.0])
+def test_uv_sbom_normalization_requires_exact_integer_version(
+    document_version: object,
+) -> None:
+    document = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": document_version,
+    }
+
+    with pytest.raises(
+        release_evidence.EvidenceError,
+        match="uv export CycloneDX document version must be 1",
+    ):
+        release_evidence.normalize_sbom(
+            document,
+            release_version="0.4.0",
+            timestamp="2026-07-15T17:05:56Z",
+            lock_sha256="a" * 64,
+        )
 
 
 def test_existing_nonempty_goldens_are_cross_format_equivalent() -> None:
@@ -834,6 +870,29 @@ def test_publication_inventory_rejects_self_checksummed_constraint_forgery(
     release_evidence.write_checksums(inventory)
 
     with pytest.raises(release_evidence.EvidenceError, match="runtime constraint"):
+        release_evidence.verify_publication_inventory(
+            inventory_dir=inventory,
+            expected_release_sha="a" * 40,
+            expected_release_version="0.4.0",
+        )
+
+
+@pytest.mark.parametrize("schema_version", [True, 1.0])
+def test_publication_inventory_requires_exact_integer_schema_version(
+    tmp_path: Path,
+    schema_version: object,
+) -> None:
+    inventory, _ = _write_zero_publication_inventory(tmp_path)
+    manifest_path = inventory / "manifest.json"
+    manifest = release_evidence.load_json(manifest_path)
+    manifest["schema_version"] = schema_version
+    manifest_path.write_text(release_evidence.canonical_json(manifest))
+    release_evidence.write_checksums(inventory)
+
+    with pytest.raises(
+        release_evidence.EvidenceError,
+        match="publication inventory schema version must be 1",
+    ):
         release_evidence.verify_publication_inventory(
             inventory_dir=inventory,
             expected_release_sha="a" * 40,

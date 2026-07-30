@@ -265,6 +265,46 @@ def test_publication_finalization_binds_distributions_and_action_output(tmp_path
     assert sdist.name in checksum_names
 
 
+def test_publication_bundle_requires_exact_integer_schema_version(tmp_path: Path) -> None:
+    inventory, wheel = _write_zero_publication_inventory(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist)
+    direct_output = tmp_path / "direct-output"
+    _write_zero_vex_output(direct_output)
+    action_output = tmp_path / "action-output"
+    _write_zero_vex_output(action_output)
+    action_commit = release_evidence.PUBLICATION_ACTION_COMMIT
+    bundle = tmp_path / "publication"
+    release_evidence.finalize_publication_bundle(
+        output_dir=bundle,
+        inventory_dir=inventory,
+        wheel_path=wheel,
+        sdist_path=sdist,
+        direct_output_dir=direct_output,
+        action_output_dir=action_output,
+        release_tag="v0.4.0",
+        action_commit=action_commit,
+        expected_wheel_sha256=release_evidence.sha256_file(wheel),
+        expected_sdist_sha256=release_evidence.sha256_file(sdist),
+    )
+    manifest_path = bundle / "manifest.json"
+    manifest = release_evidence.load_json(manifest_path)
+    manifest["schema_version"] = 2.0
+    manifest_path.write_text(release_evidence.canonical_json(manifest))
+    release_evidence.write_checksums(bundle)
+
+    with pytest.raises(
+        release_evidence.EvidenceError,
+        match="publication manifest schema version must be 2",
+    ):
+        release_evidence.verify_publication_bundle(
+            bundle_dir=bundle,
+            expected_release_tag="v0.4.0",
+            expected_release_sha="a" * 40,
+            expected_action_commit=action_commit,
+        )
+
+
 def test_publication_assets_are_reproducible_across_recovery_runs(tmp_path: Path) -> None:
     inventory, wheel = _write_zero_publication_inventory(tmp_path)
     sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"

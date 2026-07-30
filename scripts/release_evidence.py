@@ -306,8 +306,11 @@ def normalize_sbom(
     """Normalize uv's CycloneDX 1.5 export for one exact release."""
     if document.get("bomFormat") != "CycloneDX" or document.get("specVersion") != "1.5":
         raise EvidenceError("uv export must be a CycloneDX 1.5 document")
-    if document.get("version") != 1:
-        raise EvidenceError("uv export must use CycloneDX document version 1")
+    _require_exact_integer(
+        document.get("version"),
+        expected=1,
+        field="uv export CycloneDX document version",
+    )
     _require_sha256(lock_sha256, name="lock SHA-256")
     _parse_timestamp(timestamp, field="release timestamp")
 
@@ -412,8 +415,11 @@ def validate_review(
         raise EvidenceError(
             f"review keys must be exactly {sorted(REVIEW_KEYS)!r}; got {sorted(review)!r}"
         )
-    if review.get("schema_version") != 1:
-        raise EvidenceError("review schema_version must be 1")
+    _require_exact_integer(
+        review.get("schema_version"),
+        expected=1,
+        field="review schema_version",
+    )
     review_kind = review.get("review_kind")
     if review_kind not in {"production", "synthetic_fixture"}:
         raise EvidenceError("review_kind must be production or synthetic_fixture")
@@ -1031,8 +1037,11 @@ def verify_publication_inventory(
         "uv_version",
     }:
         raise EvidenceError("publication inventory manifest contains unexpected fields")
-    if manifest.get("schema_version") != 1:
-        raise EvidenceError("publication inventory schema version must be 1")
+    _require_exact_integer(
+        manifest.get("schema_version"),
+        expected=1,
+        field="publication inventory schema version",
+    )
     if manifest.get("inventory_kind") != "publication_oracle":
         raise EvidenceError("publication inventory has the wrong kind")
     if manifest.get("source_tree_clean") is not True:
@@ -1455,8 +1464,11 @@ def verify_publication_bundle(
     }
     if set(manifest) != expected_top_level_keys:
         raise EvidenceError("publication manifest contains unexpected top-level fields")
-    if manifest.get("schema_version") != 2:
-        raise EvidenceError("publication manifest must use schema version 2")
+    _require_exact_integer(
+        manifest.get("schema_version"),
+        expected=2,
+        field="publication manifest schema version",
+    )
     if manifest.get("evidence_kind") != "production":
         raise EvidenceError("publication manifest must contain production evidence")
     if manifest.get("intended_use") != "immutable_release_candidate":
@@ -2201,6 +2213,12 @@ def validate_cyclonedx(path: Path, *, spec_version: str) -> None:
 def _require_dict(value: Any, *, field: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise EvidenceError(f"{field} must be an object")
+    return value
+
+
+def _require_exact_integer(value: Any, *, expected: int, field: str) -> int:
+    if type(value) is not int or value != expected:
+        raise EvidenceError(f"{field} must be {expected}")
     return value
 
 
