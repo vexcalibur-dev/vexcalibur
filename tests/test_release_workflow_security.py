@@ -702,6 +702,12 @@ def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> N
     assert "python-version: ${{ matrix.python-version }}" in action_producer
     assert 'allow-development-package-spec: "true"' in action_producer
     assert "runtime-constraints.txt" in action_producer
+    assert "action-matrix-install-constraints.txt" in action_producer
+    assert "printf '%s\\n' \"-r ${requirements_uri}\"" in action_producer
+    assert (
+        "constraints-file: ${{ runner.temp }}/action-matrix-install-constraints.txt"
+        in action_producer
+    )
     assert "EXPECTED_WHEEL_SHA256" in action_producer
     assert "sha256sum --check --strict" in action_producer
     assert "action-matrix-execution.json" in action_producer
@@ -874,6 +880,9 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "action-validator-venv" in action
     assert "scripts/" not in action
     assert 'constraints="${inventory_dir}/runtime-constraints.txt"' in action
+    assert "action-install-constraints.txt" in action
+    assert "printf '%s\\n' \"-r ${constraints_uri}\"" in action
+    assert action.count("constraints-file: ${{ runner.temp }}/action-install-constraints.txt") == 10
     assert '--constraint "${constraints}"' in action
     assert '--requirements "${requirements}"' in action
     assert "--require-hashes" in action

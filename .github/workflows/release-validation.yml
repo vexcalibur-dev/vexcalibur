@@ -1160,6 +1160,14 @@ jobs:
           printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" |
             sha256sum --check --strict
           (cd "${inventory_dir}" && sha256sum --check --strict SHA256SUMS)
+          runtime_requirements="${inventory_dir}/runtime-constraints.txt"
+          requirements_uri="$(python3 -c \
+            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
+            "${runtime_requirements}")"
+          install_constraints="${RUNNER_TEMP}/action-matrix-install-constraints.txt"
+          umask 077
+          printf '%s\n' "-r ${requirements_uri}" > "${install_constraints}"
+          test "$(stat --format=%a -- "${install_constraints}")" = 600
           wheel_uri="$(python3 -c \
             'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
             "${wheel}")"
@@ -1172,7 +1180,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-matrix-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-matrix-install-constraints.txt
           python-version: ${{ matrix.python-version }}
           args: |
             generate
@@ -1357,6 +1365,13 @@ jobs:
           mkdir -- "${RUNNER_TEMP}/action-vex"
 
           constraints="${inventory_dir}/runtime-constraints.txt"
+          constraints_uri="$(python3 -c \
+            'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
+            "${constraints}")"
+          action_install_constraints="${RUNNER_TEMP}/action-install-constraints.txt"
+          umask 077
+          printf '%s\n' "-r ${constraints_uri}" > "${action_install_constraints}"
+          test "$(stat --format=%a -- "${action_install_constraints}")" = 600
           requirements="${RUNNER_TEMP}/action-validator-requirements.txt"
           printf 'vexcalibur @ %s \\\n    --hash=sha256:%s\n' \
             "${wheel_uri}" "${EXPECTED_WHEEL_SHA256}" > "${requirements}"
@@ -1375,7 +1390,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.unhashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: --help
 
@@ -1386,7 +1401,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.wrong-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: --help
 
@@ -1397,7 +1412,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.unhashed-sdist-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: --help
 
@@ -1429,7 +1444,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: |
             generate
@@ -1491,7 +1506,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: |
             generate
@@ -1511,7 +1526,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: |
             generate
@@ -1537,7 +1552,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: |
             generate
@@ -1587,7 +1602,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: |
             generate
@@ -1608,7 +1623,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: |
             generate
@@ -1635,7 +1650,7 @@ jobs:
         with:
           package-spec: ${{ steps.package.outputs.hashed-wheel-uri }}
           allow-development-package-spec: "true"
-          constraints-file: ${{ runner.temp }}/action-inventory/runtime-constraints.txt
+          constraints-file: ${{ runner.temp }}/action-install-constraints.txt
           python-version: ${{ env.MAX_PYTHON }}
           args: |
             generate
