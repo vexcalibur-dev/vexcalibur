@@ -1,6 +1,8 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+RECOVERY_TAG_PATTERN = r"^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$"
 
 
 def test_windows_documentation_uses_the_canonical_platform_contract() -> None:
@@ -21,9 +23,12 @@ def test_execution_report_schema_checkout_bytes_are_pinned_to_lf() -> None:
 
 def test_release_recovery_guide_preflights_before_dispatch() -> None:
     documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     section = documentation.split("## Recover an interrupted GitHub Release", maxsplit=1)[1]
     section = section.split("\n## ", maxsplit=1)[0]
 
+    assert RECOVERY_TAG_PATTERN in section
+    assert RECOVERY_TAG_PATTERN in workflow
     contracts = (
         "Release tag must look like v1.2.3 without leading zeros.",
         "git pull --ff-only origin main",
@@ -37,3 +42,8 @@ def test_release_recovery_guide_preflights_before_dispatch() -> None:
 
     positions = [section.index(contract) for contract in contracts]
     assert positions == sorted(positions)
+
+    for tag in ("v0.0.0", "v1.2.3", "v999999.999999.999999"):
+        assert re.fullmatch(RECOVERY_TAG_PATTERN, tag) is not None
+    for tag in ("v01.2.3", "v1.02.3", "v1.2.03", "v1000000.0.0", "v1.2.3-rc1"):
+        assert re.fullmatch(RECOVERY_TAG_PATTERN, tag) is None

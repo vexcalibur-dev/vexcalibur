@@ -168,7 +168,7 @@ set -euo pipefail
 
 RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
 
-if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$ ]]; then
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
   printf 'Release tag must look like v1.2.3 without leading zeros.\n' >&2
   exit 1
 fi
