@@ -52,130 +52,35 @@ uv sync --frozen
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 ```
 
+`setuptools-scm` derives the package version from the Git commit and tags, so
+the uv cache key includes both. Vexcalibur also asks uv to reinstall the local
+package on each sync. This fallback covers linked worktrees and older uv
+versions that don't invalidate an editable build when a ref changes.
+
 Execution-report changes have three native gates:
 
 | Environment | Prerequisite | Command | Success signal |
 | --- | --- | --- | --- |
-| Linux or macOS source checkout | Python, plus `uv sync --frozen` | `uv run --frozen pytest -q tests/test_execution_report_destination.py tests/test_execution_report_destination_cli.py tests/test_execution_report_destination_locks.py tests/test_execution_report_hardening.py tests/test_generation_output.py tests/test_generation_output_concurrency.py tests/test_cli_execution_report.py` | Pytest exits `0`; Windows-only cases are skipped |
-| Linux or macOS installed wheel | Bash, GNU Make, Python, and `uv` | `make installed-cli-check` | The script exits `0` after importing and running the installed wheel |
-| Windows source checkout | PowerShell, Python, and `uv sync --frozen` | The commands below | The source checks, installed wheel check, and sdist-derived wheel check exit `0` |
+| Linux or macOS source checkout | Bash, GNU Make, Python, and `uv sync --frozen` | `scripts/check-execution-report-posix.sh dist` | Native transaction tests pass; the wheel and sdist-derived wheel both generate valid reports |
+| Windows source checkout | PowerShell 7.3 or newer, Python, and `uv sync --frozen` | `./scripts/check-execution-report-windows.ps1 -DistributionDirectory dist` | Native fail-closed tests pass; the wheel and sdist-derived wheel both generate valid output without reports |
 
-On Windows, run the same fail-closed checks as CI. Then install the local wheel,
-build another wheel from the sdist with the locked backend, and test both
-installed distributions. The commands use a unique temporary directory and
-remove it in `finally`:
+Build the distributions before running either helper:
 
-```powershell
-$ErrorActionPreference = "Stop"
-if ($PSVersionTable.PSVersion -lt [Version]"7.3") {
-  throw "PowerShell 7.3 or newer is required"
-}
-$PSNativeCommandUseErrorActionPreference = $true
-$work = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
-$dist = Join-Path $work "dist"
-$buildRequirements = Join-Path $work "sdist-build-requirements.txt"
-$buildVenv = Join-Path $work "sdist-build-venv"
-try {
-  New-Item -ItemType Directory -Path $dist | Out-Null
-  uv run --frozen pytest -q `
-    tests/test_execution_report_destination.py::test_native_windows_report_request_fails_closed `
-    tests/test_cli_execution_report.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output
-  uv build --out-dir $dist --no-create-gitignore --no-sources
-  $wheels = @(Get-ChildItem -Path $dist -Filter *.whl)
-  $sdists = @(Get-ChildItem -Path $dist -Filter *.tar.gz)
-  if ($wheels.Count -ne 1) {
-    throw "Expected exactly one wheel in $dist, found $($wheels.Count)"
-  }
-  if ($sdists.Count -ne 1) {
-    throw "Expected exactly one sdist in $dist, found $($sdists.Count)"
-  }
-  $expectedVersion = (
-    uv run --frozen python -c `
-      "import importlib.metadata; print(importlib.metadata.version('vexcalibur'))"
-  )
-  uv export `
-    --quiet `
-    --frozen `
-    --only-group sdist-build `
-    --no-emit-project `
-    --no-annotate `
-    --output-file $buildRequirements
-  uv venv $buildVenv
-  $buildPython = Join-Path $buildVenv "Scripts/python.exe"
-  uv pip sync `
-    --require-hashes `
-    --only-binary :all: `
-    --python $buildPython `
-    $buildRequirements
-
-  $distributions = @(
-    @{ Name = "wheel"; Path = $wheels[0].FullName },
-    @{ Name = "sdist"; Path = $sdists[0].FullName }
-  )
-  foreach ($distribution in $distributions) {
-    $installDistribution = $distribution.Path
-    if ($distribution.Name -eq "sdist") {
-      $wheelDir = Join-Path $work "sdist-wheel"
-      New-Item -ItemType Directory -Path $wheelDir | Out-Null
-      $previousVirtualEnv = $env:VIRTUAL_ENV
-      try {
-        $env:VIRTUAL_ENV = $buildVenv
-        uv build `
-          --wheel `
-          --no-build-isolation `
-          --offline `
-          --python $buildPython `
-          --out-dir $wheelDir `
-          $distribution.Path
-      } finally {
-        if ($null -eq $previousVirtualEnv) {
-          Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
-        } else {
-          $env:VIRTUAL_ENV = $previousVirtualEnv
-        }
-      }
-      $builtWheels = @(Get-ChildItem -Path $wheelDir -Filter *.whl)
-      if ($builtWheels.Count -ne 1) {
-        throw "Expected one wheel built from the sdist, found $($builtWheels.Count)"
-      }
-      $installDistribution = $builtWheels[0].FullName
-    }
-
-    $venv = Join-Path $work "installed-$($distribution.Name)"
-    $requirements = Join-Path $work "runtime-$($distribution.Name).txt"
-    uv export `
-      --quiet `
-      --frozen `
-      --no-dev `
-      --no-emit-project `
-      --no-annotate `
-      --output-file $requirements
-    python scripts/append_locked_distribution_requirement.py `
-      $installDistribution `
-      $requirements
-    uv venv $venv
-    $python = Join-Path $venv "Scripts/python.exe"
-    uv pip sync `
-      --require-hashes `
-      --only-binary :all: `
-      --python $python `
-      $requirements
-    $env:VEXCALIBUR_EXPECTED_PYTHON = (
-      & $python -I -c `
-        "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-    )
-    $env:VEXCALIBUR_EXPECTED_VERSION = $expectedVersion
-    & $python tests/integration/check_installed_windows.py
-  }
-} finally {
-  Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
-}
+```bash
+uv build --clear --no-create-gitignore --no-sources
+scripts/check-execution-report-posix.sh dist
 ```
 
-The native-command preference turns every nonzero `uv`, Python, and pytest exit
-into a terminating error. The Windows contract rejects report requests without
-changing either output. It then proves that ordinary generation works from the
-wheel and from a wheel rebuilt offline from the sdist.
+On Windows, use the same distributions:
+
+```powershell
+uv build --clear --no-create-gitignore --no-sources
+./scripts/check-execution-report-windows.ps1 -DistributionDirectory dist
+```
+
+Both helpers own the test inventory and installed-distribution procedure used
+by CI and release validation. Release jobs pass the expected package version
+and distribution digests to the same helpers.
 
 Run CSAF conformance:
 
@@ -201,7 +106,8 @@ and failure recovery. The full schema-2 graph is intentionally exercised on
 hosted pull-request runners because it verifies GitHub artifact IDs and
 transport digests. An untagged candidate gets an ephemeral local `v0.0.0` tag;
 a rerun on a released commit uses the existing annotated release tag. The
-credentialless checkout never pushes or changes a tag, and its caller
+credentialless checkout never pushes, moves, or deletes an existing tag. It
+removes an ephemeral local candidate if version verification fails. Its caller
 explicitly permits uploads derived from this public repository.
 
 ## Scheduled and live checks

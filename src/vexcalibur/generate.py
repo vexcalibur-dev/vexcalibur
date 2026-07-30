@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-
-from packageurl import PackageURL
 
 from vexcalibur.domain import (
     ComponentIdentity,
-    VexAnalysisState,
-    VexRemediationCategory,
     VulnerabilityFinding,
     VulnerabilitySource,
     VulnerabilitySourceInputError,
@@ -23,6 +19,7 @@ from vexcalibur.generation_result import (
     GenerationExecutionContext,
     GenerationResult,
     InventorySourceCategory,
+    _GenerationInputSnapshot,
 )
 from vexcalibur.generation_selection import (
     SelectedFindingSource,
@@ -193,19 +190,20 @@ def _generate_result(
 ) -> GenerationResult:
     """Render from isolated snapshots and retain only independently owned values."""
     _require_components(components)
-    retained_components = _copy_components(components)
-    source_components = _copy_components(retained_components)
-    source_findings = _findings_for_components(source.source, source_components)
-    retained_findings = _copy_findings(source_findings)
+    input_snapshot = _GenerationInputSnapshot.capture_components(components)
+    source_findings = _findings_for_components(
+        source.source,
+        input_snapshot.materialize_components(),
+    )
+    input_snapshot = input_snapshot.capture_findings(source_findings)
     rendered = renderer.renderer.render(
-        components=_copy_components(retained_components),
-        findings=_copy_findings(retained_findings),
+        components=input_snapshot.materialize_components(),
+        findings=input_snapshot.materialize_findings(),
         timestamp=timestamp,
     )
-    return GenerationResult(
+    return GenerationResult._from_input_snapshot(
         rendered_document=_canonical_rendered_text(rendered),
-        components=retained_components,
-        findings=retained_findings,
+        input_snapshot=input_snapshot,
         execution_context=execution_context,
     )
 
@@ -218,111 +216,6 @@ def _findings_for_components(
         return source.findings_for_components(components)
     except VulnerabilitySourceInputError as exc:
         raise SbomError(str(exc)) from exc
-
-
-def _copy_components(
-    components: tuple[ComponentIdentity, ...],
-) -> tuple[ComponentIdentity, ...]:
-    return tuple(_copy_component(component) for component in components)
-
-
-def _copy_component(component: ComponentIdentity) -> ComponentIdentity:
-    """Copy one component with an ordinary, independently owned package URL."""
-    if not isinstance(component, ComponentIdentity):
-        raise TypeError("components must contain ComponentIdentity values")
-    return ComponentIdentity(
-        ref=_exact_text(component.ref, field="component ref"),
-        name=_exact_text(component.name, field="component name"),
-        version=_optional_exact_text(component.version, field="component version"),
-        purl=PackageURL(
-            type=_exact_text(component.purl.type, field="PURL type"),
-            namespace=_optional_exact_text(component.purl.namespace, field="PURL namespace"),
-            name=_exact_text(component.purl.name, field="PURL name"),
-            version=_optional_exact_text(component.purl.version, field="PURL version"),
-            qualifiers={
-                _exact_text(key, field="PURL qualifier key"): _exact_text(
-                    value,
-                    field="PURL qualifier value",
-                )
-                for key, value in component.purl.qualifiers.items()
-            },
-            subpath=_optional_exact_text(component.purl.subpath, field="PURL subpath"),
-        ),
-        type=_exact_text(component.type, field="component type"),
-    )
-
-
-def _snapshot_finding(finding: VulnerabilityFinding) -> VulnerabilityFinding:
-    """Copy one extension-supplied finding into the exact domain type."""
-    if not isinstance(finding, VulnerabilityFinding):
-        raise TypeError("findings must contain VulnerabilityFinding values")
-    return VulnerabilityFinding(
-        id=_exact_text(finding.id, field="finding id"),
-        source_name=_exact_text(finding.source_name, field="finding source name"),
-        source_url=_exact_text(finding.source_url, field="finding source URL"),
-        component_ref=_exact_text(finding.component_ref, field="finding component ref"),
-        purl=_exact_text(finding.purl, field="finding PURL"),
-        modified=_fixed_datetime(finding.modified),
-        analysis_state=VexAnalysisState(finding.analysis_state),
-        analysis_detail=_exact_text(
-            finding.analysis_detail,
-            field="finding analysis detail",
-        ),
-        action_statement=_optional_exact_text(
-            finding.action_statement,
-            field="finding action statement",
-        ),
-        impact_statement=_optional_exact_text(
-            finding.impact_statement,
-            field="finding impact statement",
-        ),
-        fixed_version=_optional_exact_text(
-            finding.fixed_version,
-            field="finding fixed version",
-        ),
-        remediation_category=(
-            None
-            if finding.remediation_category is None
-            else VexRemediationCategory(finding.remediation_category)
-        ),
-    )
-
-
-def _copy_findings(
-    findings: tuple[VulnerabilityFinding, ...],
-) -> tuple[VulnerabilityFinding, ...]:
-    return tuple(_snapshot_finding(finding) for finding in findings)
-
-
-def _exact_text(value: object, *, field: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field} must be text")
-    return value if type(value) is str else str.__str__(value)
-
-
-def _optional_exact_text(value: object, *, field: str) -> str | None:
-    if value is None:
-        return None
-    return _exact_text(value, field=field)
-
-
-def _fixed_datetime(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, datetime):
-        raise TypeError("finding modified timestamp must be a datetime")
-    offset = value.utcoffset()
-    return datetime(
-        value.year,
-        value.month,
-        value.day,
-        value.hour,
-        value.minute,
-        value.second,
-        value.microsecond,
-        tzinfo=None if offset is None else timezone(offset),
-        fold=value.fold,
-    )
 
 
 def _raise_output_limit_error() -> None:

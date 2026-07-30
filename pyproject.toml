@@ -68,6 +68,11 @@ sdist-build = [
 
 [tool.uv]
 default-groups = ["dev"]
+reinstall-package = ["vexcalibur"]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+]
 
 [project.urls]
 Documentation = "https://vexcalibur-dev.github.io/vexcalibur/"

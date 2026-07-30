@@ -36,6 +36,10 @@ from vexcalibur.generation_result import (
 def _generation_result(monkeypatch: pytest.MonkeyPatch) -> GenerationResult:
     monkeypatch.setattr(vexcalibur, "__version__", "0.4.2")
     monkeypatch.setattr(
+        "vexcalibur.generation_result.verify_source_checkout_version",
+        lambda version: None,
+    )
+    monkeypatch.setattr(
         "vexcalibur.generation_result.importlib.metadata.version",
         lambda name: "0.4.2",
     )

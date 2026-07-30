@@ -265,120 +265,19 @@ jobs:
           name: ${{ needs.build.outputs.artifact-name }}
           path: ${{ runner.temp }}/release-dist
 
-      - name: Verify fail-closed Windows behavior
-        run: >-
-          uv run --frozen pytest -q
-          tests/test_execution_report_destination.py::test_native_windows_report_request_fails_closed
-          tests/test_cli_execution_report.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output
-
-      - name: Verify installed-distribution Windows behavior
+      - name: Verify Windows platform contract
         shell: pwsh
         env:
           EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
           EXPECTED_VERSION: ${{ inputs.release-version }}
           EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
         run: |
-          $ErrorActionPreference = "Stop"
-          if ($PSVersionTable.PSVersion -lt [Version]"7.3") {
-            throw "PowerShell 7.3 or newer is required"
-          }
-          $PSNativeCommandUseErrorActionPreference = $true
-          $dist = Join-Path $env:RUNNER_TEMP "release-dist"
-          $wheels = @(Get-ChildItem -Path $dist -Filter *.whl)
-          $sdists = @(Get-ChildItem -Path $dist -Filter *.tar.gz)
-          if ($wheels.Count -ne 1) {
-            throw "Expected exactly one release wheel, found $($wheels.Count)"
-          }
-          if ($sdists.Count -ne 1) {
-            throw "Expected exactly one release sdist, found $($sdists.Count)"
-          }
-          $actualWheelSha256 = (
-            Get-FileHash -Algorithm SHA256 -LiteralPath $wheels[0].FullName
-          ).Hash.ToLowerInvariant()
-          if ($actualWheelSha256 -ne $env:EXPECTED_WHEEL_SHA256) {
-            throw "Downloaded release wheel digest did not match the canonical build"
-          }
-          $actualSdistSha256 = (
-            Get-FileHash -Algorithm SHA256 -LiteralPath $sdists[0].FullName
-          ).Hash.ToLowerInvariant()
-          if ($actualSdistSha256 -ne $env:EXPECTED_SDIST_SHA256) {
-            throw "Downloaded release sdist digest did not match the canonical build"
-          }
-          $buildRequirements = Join-Path $env:RUNNER_TEMP "sdist-build-requirements.txt"
-          $buildVenv = Join-Path $env:RUNNER_TEMP "vexcalibur-sdist-build"
-          uv export `
-            --quiet `
-            --frozen `
-            --only-group sdist-build `
-            --no-emit-project `
-            --no-annotate `
-            --output-file $buildRequirements
-          uv venv $buildVenv
-          $buildPython = Join-Path $buildVenv "Scripts/python.exe"
-          uv pip sync `
-            --require-hashes `
-            --only-binary :all: `
-            --python $buildPython `
-            $buildRequirements
-
-          $distributions = @(
-            @{ Name = "wheel"; Path = $wheels[0].FullName },
-            @{ Name = "sdist"; Path = $sdists[0].FullName }
-          )
-          foreach ($distribution in $distributions) {
-            $installDistribution = $distribution.Path
-            if ($distribution.Name -eq "sdist") {
-              $wheelDir = Join-Path $env:RUNNER_TEMP "vexcalibur-sdist-wheel"
-              New-Item -ItemType Directory -Path $wheelDir | Out-Null
-              $previousVirtualEnv = $env:VIRTUAL_ENV
-              try {
-                $env:VIRTUAL_ENV = $buildVenv
-                uv build `
-                  --wheel `
-                  --no-build-isolation `
-                  --offline `
-                  --python $buildPython `
-                  --out-dir $wheelDir `
-                  $distribution.Path
-              } finally {
-                if ($null -eq $previousVirtualEnv) {
-                  Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
-                } else {
-                  $env:VIRTUAL_ENV = $previousVirtualEnv
-                }
-              }
-              $builtWheels = @(Get-ChildItem -Path $wheelDir -Filter *.whl)
-              if ($builtWheels.Count -ne 1) {
-                throw "Expected one wheel built from the sdist, found $($builtWheels.Count)"
-              }
-              $installDistribution = $builtWheels[0].FullName
-            }
-
-            $venv = Join-Path $env:RUNNER_TEMP "vexcalibur-installed-$($distribution.Name)"
-            $requirements = Join-Path `
-              $env:RUNNER_TEMP `
-              "runtime-requirements-$($distribution.Name).txt"
-            uv export `
-              --quiet `
-              --frozen `
-              --no-dev `
-              --no-emit-project `
-              --no-annotate `
-              --output-file $requirements
-            python scripts/append_locked_distribution_requirement.py `
-              $installDistribution `
-              $requirements
-            uv venv $venv
-            $python = Join-Path $venv "Scripts/python.exe"
-            uv pip sync `
-              --require-hashes `
-              --only-binary :all: `
-              --python $python `
-              $requirements
-            $env:VEXCALIBUR_EXPECTED_PYTHON = "${{ matrix.python-version }}"
-            $env:VEXCALIBUR_EXPECTED_VERSION = $env:EXPECTED_VERSION
-            & $python tests/integration/check_installed_windows.py
-          }
+          ./scripts/check-execution-report-windows.ps1 `
+            -DistributionDirectory "${env:RUNNER_TEMP}/release-dist" `
+            -ExpectedPython "${{ matrix.python-version }}" `
+            -ExpectedVersion $env:EXPECTED_VERSION `
+            -ExpectedWheelSha256 $env:EXPECTED_WHEEL_SHA256 `
+            -ExpectedSdistSha256 $env:EXPECTED_SDIST_SHA256
 
   execution-report-macos:
     name: Release execution report macOS contract (Python ${{ matrix.python-version }})
@@ -420,45 +319,18 @@ jobs:
           name: ${{ needs.build.outputs.artifact-name }}
           path: ${{ runner.temp }}/release-dist
 
-      - name: Verify native POSIX report transactions
-        run: >-
-          uv run --frozen pytest -q
-          tests/test_execution_report_destination.py
-          tests/test_execution_report_destination_cli.py
-          tests/test_execution_report_destination_locks.py
-          tests/test_execution_report_hardening.py
-          tests/test_generation_output.py
-          tests/test_generation_output_concurrency.py
-          tests/test_cli_execution_report.py
-
-      - name: Verify installed-distribution report generation
-        shell: bash
+      - name: Verify POSIX platform contract
         env:
           EXPECTED_SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
           EXPECTED_VERSION: ${{ inputs.release-version }}
           EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
-        run: |
-          shopt -s nullglob
-          wheels=("${RUNNER_TEMP}"/release-dist/*.whl)
-          sdists=("${RUNNER_TEMP}"/release-dist/*.tar.gz)
-          if [ "${#wheels[@]}" -ne 1 ]; then
-            printf 'expected one wheel, found %s\n' "${#wheels[@]}" >&2
-            exit 2
-          fi
-          if [ "${#sdists[@]}" -ne 1 ]; then
-            printf 'expected one sdist, found %s\n' "${#sdists[@]}" >&2
-            exit 2
-          fi
-          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheels[0]}" |
-            shasum --algorithm 256 --check
-          printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdists[0]}" |
-            shasum --algorithm 256 --check
-          for distribution in "${wheels[0]}" "${sdists[0]}"; do
-            VEXCALIBUR_DISTRIBUTION="${distribution}" \
-              VEXCALIBUR_EXPECTED_PYTHON="${{ matrix.python-version }}" \
-              VEXCALIBUR_EXPECTED_VERSION="${EXPECTED_VERSION}" \
-              make installed-cli-check
-          done
+        run: >-
+          scripts/check-execution-report-posix.sh
+          "${RUNNER_TEMP}/release-dist"
+          "${{ matrix.python-version }}"
+          "${EXPECTED_VERSION}"
+          "${EXPECTED_WHEEL_SHA256}"
+          "${EXPECTED_SDIST_SHA256}"
 
   docs:
     name: Build docs

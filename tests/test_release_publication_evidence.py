@@ -185,6 +185,26 @@ def _valid_execution_report_document() -> dict[str, object]:
     }
 
 
+def test_publication_report_binds_analysis_states_to_reviewed_findings(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "vex.cdx.json").write_bytes(b'{"ok":true}\n')
+    (output / "vex.cdx.execution.json").write_text(
+        release_evidence._canonical_execution_report_json(_valid_execution_report_document())
+    )
+
+    with pytest.raises(release_evidence.EvidenceError, match="analysis-state counts"):
+        release_evidence._verify_execution_reports(
+            output_dir=output,
+            assertion_count=1,
+            expected_state_counts={"exploitable": 1},
+            expected_component_count=1,
+            release_version="0.5.0",
+        )
+
+
 def test_publication_finalization_binds_distributions_and_action_output(tmp_path: Path) -> None:
     inventory, wheel = _write_zero_publication_inventory(tmp_path)
     sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"

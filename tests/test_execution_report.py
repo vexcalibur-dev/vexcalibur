@@ -38,6 +38,14 @@ EXECUTION_REPORT_SCHEMA_PATH = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _allow_synthetic_source_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "vexcalibur.generation_result.verify_source_checkout_version",
+        lambda version: None,
+    )
+
+
 def test_windows_python_api_oracle_matches_cross_platform_contract() -> None:
     verify_python_api_report()
 

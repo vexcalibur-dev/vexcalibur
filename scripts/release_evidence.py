@@ -1160,6 +1160,7 @@ def _verify_execution_reports(
     *,
     output_dir: Path,
     assertion_count: int,
+    expected_state_counts: dict[str, int],
     expected_component_count: int,
     release_version: str,
 ) -> None:
@@ -1195,6 +1196,10 @@ def _verify_execution_reports(
             raise EvidenceError(f"{output_format} execution report component count is invalid")
         if report["finding_count"] != assertion_count:
             raise EvidenceError(f"{output_format} execution report finding count is invalid")
+        if report["analysis_state_counts"] != expected_state_counts:
+            raise EvidenceError(
+                f"{output_format} execution report analysis-state counts are invalid"
+            )
         document_metadata = _require_dict(
             report["document"],
             field=f"{output_format} execution report document",
@@ -1288,15 +1293,20 @@ def finalize_publication_bundle(
         raise EvidenceError("Action output file set differs from the format contract")
     sbom = _require_dict(load_json(inventory_dir / "sbom.cdx.json"), field="SBOM")
     expected_component_count = _normalized_sbom_component_count(sbom)
+    expected_state_counts = dict(
+        sorted(Counter(str(item["analysis_state"]) for item in findings).items())
+    )
     _verify_execution_reports(
         output_dir=direct_output_dir,
         assertion_count=len(findings),
+        expected_state_counts=expected_state_counts,
         expected_component_count=expected_component_count,
         release_version=release_version,
     )
     _verify_execution_reports(
         output_dir=action_output_dir,
         assertion_count=len(findings),
+        expected_state_counts=expected_state_counts,
         expected_component_count=expected_component_count,
         release_version=release_version,
     )
@@ -1720,6 +1730,9 @@ def verify_publication_bundle(
     _verify_execution_reports(
         output_dir=bundle_dir,
         assertion_count=len(findings),
+        expected_state_counts=dict(
+            sorted(Counter(str(item["analysis_state"]) for item in findings).items())
+        ),
         expected_component_count=_normalized_sbom_component_count(sbom_document),
         release_version=release_version,
     )

@@ -43,6 +43,11 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 @contextmanager
 def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.stat_result]]:
+    before_open = os.lstat(path)
+    if stat.S_ISLNK(before_open.st_mode):
+        raise ValueError(f"{role} must not be a symbolic link")
+    if not stat.S_ISREG(before_open.st_mode):
+        raise ValueError(f"{role} must be a regular file")
     flags = os.O_RDONLY
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
@@ -53,6 +58,14 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError(f"{role} must be a regular file")
+        after_open = os.lstat(path)
+        if stat.S_ISLNK(after_open.st_mode):
+            raise ValueError(f"{role} must not be a symbolic link")
+        if not os.path.samestat(before_open, metadata) or not os.path.samestat(
+            metadata,
+            after_open,
+        ):
+            raise ValueError(f"{role} changed while it was opened")
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
             descriptor = -1
             yield stream, metadata

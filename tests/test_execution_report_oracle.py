@@ -10,6 +10,7 @@ import pytest
 from scripts.execution_report_oracle import (
     MAX_FINDINGS_BYTES,
     ExecutionReportOracleError,
+    _component_identity_count,
     canonical_execution_report_json,
     verify_action_generation,
     verify_publication_manifest,
@@ -107,6 +108,37 @@ def _verify(paths: dict[str, Path]) -> None:
 
 def test_action_generation_oracle_accepts_bound_inputs(tmp_path: Path) -> None:
     _verify(_write_valid_inputs(tmp_path))
+
+
+def test_component_oracle_accepts_production_depth_boundary() -> None:
+    component: dict[str, object] = {
+        "bom-ref": "component-50",
+        "purl": "pkg:pypi/component-50@1",
+    }
+    for depth in reversed(range(50)):
+        component = {
+            "bom-ref": f"component-{depth}",
+            "purl": f"pkg:pypi/component-{depth}@1",
+            "components": [component],
+        }
+
+    assert _component_identity_count({"components": [component]}) == 51
+
+
+def test_component_oracle_rejects_beyond_production_depth_boundary() -> None:
+    component: dict[str, object] = {
+        "bom-ref": "component-51",
+        "purl": "pkg:pypi/component-51@1",
+    }
+    for depth in reversed(range(51)):
+        component = {
+            "bom-ref": f"component-{depth}",
+            "purl": f"pkg:pypi/component-{depth}@1",
+            "components": [component],
+        }
+
+    with pytest.raises(ExecutionReportOracleError, match="nesting limit"):
+        _component_identity_count({"components": [component]})
 
 
 def test_publication_manifest_oracle_rejects_boolean_schema_version(

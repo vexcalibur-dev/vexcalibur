@@ -58,8 +58,10 @@ Schema version 1 has this structure:
 
 `EXAMPLE` stands for the installed package version. Vexcalibur reads that
 value from Python package metadata; the source tree does not contain a release
-version constant. The all-zero digest is also a placeholder; a real report
-contains the SHA-256 of its generated document.
+version constant. In an editable Git checkout, Vexcalibur also requires the
+generated commit identifier to match the checkout's `HEAD`. The all-zero digest
+is a placeholder; a real report contains the SHA-256 of its generated
+document.
 
 The file is canonical minified JSON with one trailing newline. Object key
 order is stable, but consumers should use JSON keys rather than byte positions.
@@ -70,7 +72,7 @@ contract. It uses JSON Schema Draft 2020-12 and rejects unknown properties.
 | --- | --- | --- |
 | `schema_version` | integer | Exactly `1`. The report schema changes independently of the package version. |
 | `command` | string | Exactly `generate`. |
-| `vexcalibur_version` | string | Version of the loaded Vexcalibur code, verified against installed package metadata when the report is produced; 1–128 characters from `[0-9A-Za-z.!+_-]`, with an alphanumeric first character. |
+| `vexcalibur_version` | string | Installed Vexcalibur distribution version loaded by the process. It must match package metadata; an editable Git checkout must also identify its current `HEAD`. The value has 1–128 characters from `[0-9A-Za-z.!+_-]`, with an alphanumeric first character. |
 | `inventory_source` | string | One inventory category from the table below. |
 | `finding_source` | string | One finding category from the table below. |
 | `output_format` | string | `cyclonedx`, `openvex`, `csaf`, or `custom`. |
@@ -221,7 +223,7 @@ an execution report on every supported platform. The caller writes the VEX
 document and report separately, so those writes do not provide the CLI's
 transaction guarantees.
 
-The report is limited to 16 KiB. A missing package version, invalid report
+The report is limited to 16 KiB. A missing or stale package version, invalid report
 value, size violation, or write failure makes the command fail.
 
 The VEX file and report are separate atomic writes, not one two-file

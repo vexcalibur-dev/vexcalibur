@@ -33,6 +33,10 @@ from vexcalibur.render import (
     ExecutionReportOutputFormatDeclaration,
     VexRenderError,
 )
+from vexcalibur.version_identity import (
+    SourceVersionIdentityError,
+    verify_source_checkout_version,
+)
 
 __all__ = [
     "EXECUTION_REPORT_SCHEMA_VERSION",
@@ -114,6 +118,8 @@ class _ComponentSnapshot:
 
     @classmethod
     def from_component(cls, component: ComponentIdentity) -> _ComponentSnapshot:
+        if not isinstance(component, ComponentIdentity):
+            raise TypeError("components must contain ComponentIdentity values")
         return cls(
             ref=_snapshot_text(component.ref, field="component ref"),
             name=_snapshot_text(component.name, field="component name"),
@@ -174,6 +180,8 @@ class _FindingSnapshot:
 
     @classmethod
     def from_finding(cls, finding: VulnerabilityFinding) -> _FindingSnapshot:
+        if not isinstance(finding, VulnerabilityFinding):
+            raise TypeError("findings must contain VulnerabilityFinding values")
         return cls(
             id=_snapshot_text(finding.id, field="finding id"),
             source_name=_snapshot_text(finding.source_name, field="finding source name"),
@@ -222,14 +230,48 @@ class _FindingSnapshot:
         )
 
 
+@dataclass(frozen=True)
+class _GenerationInputSnapshot:
+    """Canonical primitive snapshot shared by generation and its result."""
+
+    components: tuple[_ComponentSnapshot, ...]
+    findings: tuple[_FindingSnapshot, ...]
+
+    @classmethod
+    def capture_components(
+        cls,
+        components: tuple[ComponentIdentity, ...],
+    ) -> _GenerationInputSnapshot:
+        return cls(
+            components=tuple(
+                _ComponentSnapshot.from_component(component) for component in components
+            ),
+            findings=(),
+        )
+
+    def capture_findings(
+        self,
+        findings: tuple[VulnerabilityFinding, ...],
+    ) -> _GenerationInputSnapshot:
+        return type(self)(
+            components=self.components,
+            findings=tuple(_FindingSnapshot.from_finding(finding) for finding in findings),
+        )
+
+    def materialize_components(self) -> tuple[ComponentIdentity, ...]:
+        return tuple(snapshot.materialize() for snapshot in self.components)
+
+    def materialize_findings(self) -> tuple[VulnerabilityFinding, ...]:
+        return tuple(snapshot.materialize() for snapshot in self.findings)
+
+
 @dataclass(frozen=True, init=False)
 class GenerationResult:
     """Rendered VEX and an immutable snapshot of the normalized render inputs."""
 
     rendered_document: str
     execution_context: GenerationExecutionContext | None
-    _component_snapshots: tuple[_ComponentSnapshot, ...] = field(repr=False)
-    _finding_snapshots: tuple[_FindingSnapshot, ...] = field(repr=False)
+    _input_snapshot: _GenerationInputSnapshot = field(repr=False)
     _vexcalibur_version: str | None = field(
         default=None,
         repr=False,
@@ -259,29 +301,61 @@ class GenerationResult:
             and type(execution_context) is not GenerationExecutionContext
         ):
             raise TypeError("execution_context must be a GenerationExecutionContext")
+        input_snapshot = _GenerationInputSnapshot.capture_components(components).capture_findings(
+            findings
+        )
+        self._initialize(
+            rendered_document=rendered_document,
+            input_snapshot=input_snapshot,
+            execution_context=execution_context,
+        )
+
+    @classmethod
+    def _from_input_snapshot(
+        cls,
+        *,
+        rendered_document: str,
+        input_snapshot: _GenerationInputSnapshot,
+        execution_context: GenerationExecutionContext | None,
+    ) -> GenerationResult:
+        result = object.__new__(cls)
+        result._initialize(
+            rendered_document=rendered_document,
+            input_snapshot=input_snapshot,
+            execution_context=execution_context,
+        )
+        return result
+
+    def _initialize(
+        self,
+        *,
+        rendered_document: str,
+        input_snapshot: _GenerationInputSnapshot,
+        execution_context: GenerationExecutionContext | None,
+    ) -> None:
+        if type(rendered_document) is not str:
+            raise TypeError("rendered_document must be exact built-in text")
+        if type(input_snapshot) is not _GenerationInputSnapshot:
+            raise TypeError("input_snapshot must be a _GenerationInputSnapshot")
+        if (
+            execution_context is not None
+            and type(execution_context) is not GenerationExecutionContext
+        ):
+            raise TypeError("execution_context must be a GenerationExecutionContext")
         object.__setattr__(self, "rendered_document", rendered_document)
         object.__setattr__(self, "execution_context", execution_context)
-        object.__setattr__(
-            self,
-            "_component_snapshots",
-            tuple(_ComponentSnapshot.from_component(component) for component in components),
-        )
-        object.__setattr__(
-            self,
-            "_finding_snapshots",
-            tuple(_FindingSnapshot.from_finding(finding) for finding in findings),
-        )
+        object.__setattr__(self, "_input_snapshot", input_snapshot)
         object.__setattr__(self, "_vexcalibur_version", _loaded_vexcalibur_version())
 
     @property
     def components(self) -> tuple[ComponentIdentity, ...]:
         """Return independent ordinary package objects from the retained snapshot."""
-        return tuple(snapshot.materialize() for snapshot in self._component_snapshots)
+        return self._input_snapshot.materialize_components()
 
     @property
     def findings(self) -> tuple[VulnerabilityFinding, ...]:
         """Return independent ordinary findings from the retained snapshot."""
-        return tuple(snapshot.materialize() for snapshot in self._finding_snapshots)
+        return self._input_snapshot.materialize_findings()
 
     @cached_property
     def rendered_bytes(self) -> bytes:
@@ -662,6 +736,10 @@ def _loaded_vexcalibur_version() -> str:
     version = vexcalibur.__version__
     if type(version) is not str or _VERSION_PATTERN.fullmatch(version) is None:
         raise GenerationReportMetadataError("loaded Vexcalibur version is not report-safe")
+    try:
+        verify_source_checkout_version(version)
+    except SourceVersionIdentityError as exc:
+        raise GenerationReportMetadataError(str(exc)) from exc
     return version
 
 

@@ -21,6 +21,8 @@ PYPI_WORKFLOW = ROOT / ".github" / "workflows" / "pypi.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_EVIDENCE = ROOT / "scripts" / "release_evidence.py"
 EXECUTION_REPORT_ORACLE = ROOT / "scripts" / "execution_report_oracle.py"
+POSIX_PLATFORM_CONTRACT = ROOT / "scripts" / "check-execution-report-posix.sh"
+WINDOWS_PLATFORM_CONTRACT = ROOT / "scripts" / "check-execution-report-windows.ps1"
 PYPI_SELECTOR = ROOT / "scripts" / "select-pypi-release-files.py"
 
 
@@ -552,44 +554,48 @@ def test_uploader_consent_graph_check_rejects_an_ungated_job() -> None:
 def test_windows_installs_wheel_and_sdist_with_locked_offline_builds() -> None:
     windows = _job(CI_WORKFLOW.read_text(encoding="utf-8"), "execution-report-windows")
     checkout = _step(windows, "Checkout")
-    installed = _step(windows, "Verify installed-distribution Windows behavior")
+    invocation = _step(windows, "Verify Windows platform contract")
+    contract = WINDOWS_PLATFORM_CONTRACT.read_text(encoding="utf-8")
 
     assert 'python-version: ["3.10", "3.14"]' in windows
     assert "python-version: ${{ matrix.python-version }}" in windows
     assert "fetch-depth: 0" in checkout
-    assert '$ErrorActionPreference = "Stop"' in installed
-    assert "$PSNativeCommandUseErrorActionPreference = $true" in installed
-    assert 'if ($PSVersionTable.PSVersion -lt [Version]"7.3")' in installed
-    assert "dist -Filter *.whl" in installed
-    assert "dist -Filter *.tar.gz" in installed
-    build_export = installed.index("--only-group sdist-build")
-    build_sync = installed.index("uv pip sync", build_export)
-    sdist_build = installed.index("uv build", build_sync)
-    append = installed.index("append_locked_distribution_requirement.py", sdist_build)
-    runtime_sync = installed.index("uv pip sync", append)
+    assert "scripts/check-execution-report-windows.ps1" in invocation
+    assert '-ExpectedPython "${{ matrix.python-version }}"' in invocation
+    assert '$ErrorActionPreference = "Stop"' in contract
+    assert "$PSNativeCommandUseErrorActionPreference = $true" in contract
+    assert 'if ($PSVersionTable.PSVersion -lt [Version]"7.3")' in contract
+    assert "Get-ChildItem -LiteralPath $resolvedDistributionDirectory -Filter *.whl" in contract
+    assert "Get-ChildItem -LiteralPath $resolvedDistributionDirectory -Filter *.tar.gz" in contract
+    build_export = contract.index("--only-group sdist-build")
+    build_sync = contract.index("uv pip sync", build_export)
+    sdist_build = contract.index("uv build", build_sync)
+    append = contract.index("append_locked_distribution_requirement.py", sdist_build)
+    runtime_sync = contract.index("uv pip sync", append)
     assert build_export < build_sync < sdist_build < append < runtime_sync
-    assert "--require-hashes" in installed[build_sync:sdist_build]
-    assert "--only-binary :all:" in installed[build_sync:sdist_build]
-    assert "--no-build-isolation" in installed[sdist_build:append]
-    assert "--offline" in installed[sdist_build:append]
-    assert "--require-hashes" in installed[runtime_sync:]
-    assert "--only-binary :all:" in installed[runtime_sync:]
-    assert "VEXCALIBUR_EXPECTED_PYTHON" in installed
-    assert "VEXCALIBUR_EXPECTED_VERSION" in installed
-    assert "uv pip install" not in installed
+    assert "--require-hashes" in contract[build_sync:sdist_build]
+    assert "--only-binary :all:" in contract[build_sync:sdist_build]
+    assert "--no-build-isolation" in contract[sdist_build:append]
+    assert "--offline" in contract[sdist_build:append]
+    assert "--require-hashes" in contract[runtime_sync:]
+    assert "--only-binary :all:" in contract[runtime_sync:]
+    assert "VEXCALIBUR_EXPECTED_PYTHON" in contract
+    assert "VEXCALIBUR_EXPECTED_VERSION" in contract
+    assert "uv pip install" not in contract
 
 
 def test_macos_runs_native_lock_and_concurrency_contracts() -> None:
     macos = _job(CI_WORKFLOW.read_text(encoding="utf-8"), "execution-report-macos")
-    native = _step(macos, "Verify native POSIX report transactions")
-    installed = _step(macos, "Verify installed-distribution report generation")
+    invocation = _step(macos, "Verify POSIX platform contract")
+    contract = POSIX_PLATFORM_CONTRACT.read_text(encoding="utf-8")
 
     assert 'python-version: ["3.10", "3.14"]' in macos
-    assert "tests/test_execution_report_destination_locks.py" in native
-    assert "tests/test_generation_output_concurrency.py" in native
-    assert "dist-macos/*.whl" in installed
-    assert "dist-macos/*.tar.gz" in installed
-    assert "VEXCALIBUR_DISTRIBUTION=" in installed
+    assert "scripts/check-execution-report-posix.sh" in invocation
+    assert "tests/test_execution_report_destination_locks.py" in contract
+    assert "tests/test_generation_output_concurrency.py" in contract
+    assert '"${dist_dir}"/*.whl' in contract
+    assert '"${dist_dir}"/*.tar.gz' in contract
+    assert "VEXCALIBUR_DISTRIBUTION=" in contract
 
 
 def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> None:
@@ -626,7 +632,9 @@ def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> N
         assert "EXPECTED_SDIST_SHA256" in native_job
         assert "needs.build.outputs.wheel-sha256" in native_job
         assert "needs.build.outputs.sdist-sha256" in native_job
-        assert "VEXCALIBUR_EXPECTED_VERSION" in native_job
+        assert "-ExpectedVersion" in native_job or '"${EXPECTED_VERSION}"' in native_job
+    assert "scripts/check-execution-report-windows.ps1" in windows
+    assert "scripts/check-execution-report-posix.sh" in macos
 
     for matrix_job in (action_producer, action_verifier):
         assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in matrix_job

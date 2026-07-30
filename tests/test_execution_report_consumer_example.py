@@ -408,10 +408,6 @@ def test_consumer_example_rejects_device_files(
         consumer.validate_execution_report(report_path, document_path, schema_path)
 
 
-@pytest.mark.skipif(
-    not hasattr(os, "O_NOFOLLOW"),
-    reason="symbolic-link rejection requires O_NOFOLLOW",
-)
 @pytest.mark.parametrize("link_role", ("report", "document", "schema"))
 def test_consumer_example_rejects_symbolic_links(
     tmp_path: Path,
@@ -425,7 +421,10 @@ def test_consumer_example_rejects_symbolic_links(
         "schema": schema_path,
     }[link_role]
     link = tmp_path / f"{link_role}.link"
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except OSError as error:
+        pytest.skip(f"symbolic links are unavailable: {error}")
     if link_role == "report":
         report_path = link
     elif link_role == "document":
@@ -433,5 +432,5 @@ def test_consumer_example_rejects_symbolic_links(
     else:
         schema_path = link
 
-    with pytest.raises(OSError):
+    with pytest.raises(ValueError, match="must not be a symbolic link"):
         consumer.validate_execution_report(report_path, document_path, schema_path)

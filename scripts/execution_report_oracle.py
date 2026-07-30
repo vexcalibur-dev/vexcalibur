@@ -422,9 +422,9 @@ def _component_identity_count(document: object) -> int:
     roots = _require_list(sbom.get("components", []), field="SBOM components")
     metadata = _require_dict(sbom.get("metadata", {}), field="SBOM metadata")
     metadata_component = metadata.get("component")
-    stack = [(component, 1) for component in roots]
+    stack = [(component, 0) for component in roots]
     if metadata_component is not None:
-        stack.append((metadata_component, 1))
+        stack.append((metadata_component, 0))
     identities: set[tuple[str, str]] = set()
     processed = 0
     while stack:
