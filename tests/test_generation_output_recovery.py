@@ -132,6 +132,7 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
         for index, line in enumerate(source_lines)
         if "self._report_rollback = report_rollback" in line
     )
+    previous_trace = sys.gettrace()
     interrupted = False
 
     def interrupt_rollback_handoff(
@@ -148,7 +149,7 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
             and frame.f_lineno == handoff_line
         ):
             interrupted = True
-            sys.settrace(None)
+            sys.settrace(previous_trace)
             raise KeyboardInterrupt("synthetic rollback handoff cancellation")
         return interrupt_rollback_handoff
 
@@ -166,7 +167,7 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
                 binary_stdout=None,
             )
     finally:
-        sys.settrace(None)
+        sys.settrace(previous_trace)
 
     assert interrupted
     assert output_path.exists()
