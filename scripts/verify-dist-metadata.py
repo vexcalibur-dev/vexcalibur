@@ -4,17 +4,53 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 import email
 import stat
 import tarfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+from packaging.markers import InvalidMarker, Marker
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.utils import canonicalize_name
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_METADATA_BYTES = 1024 * 1024
 MAX_REQUIRED_SDIST_FILE_BYTES = 1024 * 1024
+_METADATA_CONTRACT_HEADERS = (
+    "Metadata-Version",
+    "Requires-Python",
+    "Requires-Dist",
+    "Provides-Extra",
+)
+
+
+@dataclass(frozen=True)
+class DistributionMetadata:
+    """Validated package metadata and console entry points from one artifact."""
+
+    message: email.message.Message
+    console_scripts: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class ProjectMetadata:
+    """Normalized package metadata declared by ``pyproject.toml``."""
+
+    requires_python: str | None
+    requires_dist: tuple[str, ...]
+    provides_extra: tuple[str, ...]
+    console_scripts: tuple[tuple[str, str], ...]
 
 
 def main() -> None:
@@ -31,8 +67,8 @@ def main() -> None:
     }
 
     for artifact_type, artifact_metadata in metadata.items():
-        actual_name = artifact_metadata["Name"]
-        actual_version = artifact_metadata["Version"]
+        actual_name = artifact_metadata.message["Name"]
+        actual_version = artifact_metadata.message["Version"]
         if actual_name != expected_name:
             raise SystemExit(
                 f"Built {artifact_type} name {actual_name!r} "
@@ -44,6 +80,13 @@ def main() -> None:
                 f"does not match expected version {expected_version!r}."
             )
 
+    _verify_matching_artifact_contracts(metadata)
+    if args.source_root is not None:
+        _verify_project_metadata(
+            _read_project_metadata(args.source_root),
+            metadata,
+        )
+
     _verify_required_sdist_files(
         sdist,
         archive_root=f"{expected_name}-{expected_version}",
@@ -53,7 +96,7 @@ def main() -> None:
 
     if args.github_output is not None:
         with args.github_output.open("a", encoding="utf-8") as output:
-            output.write(f"version={metadata['wheel']['Version']}\n")
+            output.write(f"version={metadata['wheel'].message['Version']}\n")
             output.write(f"wheel={wheel}\n")
             output.write(f"sdist={sdist}\n")
 
@@ -107,7 +150,7 @@ def _find_artifacts(dist_dir: Path) -> tuple[Path, Path]:
     return wheels[0], sdists[0]
 
 
-def _read_wheel_metadata(path: Path) -> email.message.Message:
+def _read_wheel_metadata(path: Path) -> DistributionMetadata:
     with zipfile.ZipFile(path) as wheel:
         members = wheel.infolist()
         _validate_zip_members(members)
@@ -123,29 +166,249 @@ def _read_wheel_metadata(path: Path) -> email.message.Message:
             metadata = metadata_stream.read(MAX_METADATA_BYTES + 1)
         if len(metadata) > MAX_METADATA_BYTES:
             raise SystemExit(f"Wheel metadata exceeds the byte limit in {path}.")
-        return email.message_from_bytes(metadata)
+        entry_points = _read_bounded_zip_member(
+            wheel,
+            members,
+            suffix=".dist-info/entry_points.txt",
+            role="wheel entry points",
+        )
+        return DistributionMetadata(
+            message=email.message_from_bytes(metadata),
+            console_scripts=_parse_console_scripts(entry_points, role="wheel entry points"),
+        )
 
 
-def _read_sdist_metadata(path: Path) -> email.message.Message:
+def _read_sdist_metadata(path: Path) -> DistributionMetadata:
     with tarfile.open(path, "r:gz") as sdist:
         metadata: bytes | None = None
+        entry_points: bytes | None = None
         for member in _validated_sdist_members(sdist):
             member_path = PurePosixPath(member.name)
-            if len(member_path.parts) != 2 or member_path.name != "PKG-INFO":
-                continue
-            if metadata is not None:
-                raise SystemExit(f"Expected exactly one sdist metadata member in {path}.")
-            if not member.isfile() or member.size > MAX_METADATA_BYTES:
-                raise SystemExit(f"Sdist metadata is not a bounded regular member in {path}.")
-            metadata_file = sdist.extractfile(member)
-            if metadata_file is None:
-                raise SystemExit(f"Could not read {member.name} from {path}.")
-            metadata = metadata_file.read(MAX_METADATA_BYTES + 1)
+            if len(member_path.parts) == 2 and member_path.name == "PKG-INFO":
+                if metadata is not None:
+                    raise SystemExit(f"Expected exactly one sdist metadata member in {path}.")
+                metadata = _read_bounded_tar_member(
+                    sdist,
+                    member,
+                    role="sdist metadata",
+                )
+            elif member_path.name == "entry_points.txt" and member_path.parent.name.endswith(
+                ".egg-info"
+            ):
+                if entry_points is not None:
+                    raise SystemExit(f"Expected at most one sdist entry-points member in {path}.")
+                entry_points = _read_bounded_tar_member(
+                    sdist,
+                    member,
+                    role="sdist entry points",
+                )
         if metadata is None:
             raise SystemExit(f"Could not find sdist metadata in {path}.")
         if len(metadata) > MAX_METADATA_BYTES:
             raise SystemExit(f"Sdist metadata exceeds the byte limit in {path}.")
-        return email.message_from_bytes(metadata)
+        return DistributionMetadata(
+            message=email.message_from_bytes(metadata),
+            console_scripts=_parse_console_scripts(entry_points, role="sdist entry points"),
+        )
+
+
+def _read_bounded_zip_member(
+    archive: zipfile.ZipFile,
+    members: list[zipfile.ZipInfo],
+    *,
+    suffix: str,
+    role: str,
+) -> bytes | None:
+    matching = [member for member in members if member.filename.endswith(suffix)]
+    if not matching:
+        return None
+    if len(matching) != 1:
+        raise SystemExit(f"Expected at most one {role} member.")
+    member = matching[0]
+    if member.is_dir() or member.file_size > MAX_METADATA_BYTES:
+        raise SystemExit(f"{role.capitalize()} is not a bounded regular member.")
+    with archive.open(member) as stream:
+        value = stream.read(MAX_METADATA_BYTES + 1)
+    if len(value) > MAX_METADATA_BYTES:
+        raise SystemExit(f"{role.capitalize()} exceeds the byte limit.")
+    return value
+
+
+def _read_bounded_tar_member(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    *,
+    role: str,
+) -> bytes:
+    if not member.isfile() or member.size > MAX_METADATA_BYTES:
+        raise SystemExit(f"{role.capitalize()} is not a bounded regular member.")
+    stream = archive.extractfile(member)
+    if stream is None:
+        raise SystemExit(f"Could not read {role}.")
+    value = stream.read(MAX_METADATA_BYTES + 1)
+    if len(value) > MAX_METADATA_BYTES:
+        raise SystemExit(f"{role.capitalize()} exceeds the byte limit.")
+    return value
+
+
+def _parse_console_scripts(value: bytes | None, *, role: str) -> tuple[tuple[str, str], ...]:
+    if value is None:
+        return ()
+    try:
+        decoded = value.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise SystemExit(f"{role.capitalize()} is not valid UTF-8.") from exc
+    parser = configparser.ConfigParser(interpolation=None, strict=True)
+    parser.optionxform = str
+    try:
+        parser.read_string(decoded)
+    except configparser.Error as exc:
+        raise SystemExit(f"{role.capitalize()} is invalid.") from exc
+    if not parser.has_section("console_scripts"):
+        return ()
+    scripts = tuple(
+        sorted((name.strip(), target.strip()) for name, target in parser.items("console_scripts"))
+    )
+    if any(not name or not target for name, target in scripts):
+        raise SystemExit(f"{role.capitalize()} contains an empty console script.")
+    return scripts
+
+
+def _verify_matching_artifact_contracts(
+    metadata: dict[str, DistributionMetadata],
+) -> None:
+    wheel = metadata["wheel"]
+    sdist = metadata["sdist"]
+    for header in _METADATA_CONTRACT_HEADERS:
+        wheel_values = _normalized_metadata_header(wheel.message, header)
+        sdist_values = _normalized_metadata_header(sdist.message, header)
+        if wheel_values != sdist_values:
+            raise SystemExit(f"Built wheel and sdist {header} metadata do not match.")
+    if wheel.console_scripts != sdist.console_scripts:
+        raise SystemExit("Built wheel and sdist console scripts do not match.")
+
+
+def _normalized_metadata_header(
+    metadata: email.message.Message,
+    header: str,
+) -> tuple[str, ...]:
+    values = metadata.get_all(header, [])
+    try:
+        if header == "Requires-Python":
+            if len(values) > 1:
+                raise SystemExit("Artifact contains repeated Requires-Python metadata.")
+            return tuple(str(SpecifierSet(value)) for value in values)
+        if header == "Requires-Dist":
+            return tuple(sorted(str(Requirement(value)) for value in values))
+        if header == "Provides-Extra":
+            return tuple(sorted(canonicalize_name(value) for value in values))
+    except (InvalidRequirement, InvalidSpecifier) as exc:
+        raise SystemExit(f"Artifact contains invalid {header} metadata.") from exc
+    return tuple(values)
+
+
+def _read_project_metadata(source_root: Path) -> ProjectMetadata:
+    pyproject_path = source_root / "pyproject.toml"
+    if not pyproject_path.is_file() or pyproject_path.is_symlink():
+        raise SystemExit(f"Project metadata source is not a regular file: {pyproject_path}")
+    if pyproject_path.stat().st_size > MAX_METADATA_BYTES:
+        raise SystemExit("Project metadata source exceeds the byte limit.")
+    try:
+        project_document = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        project = project_document["project"]
+        if not isinstance(project, dict):
+            raise TypeError
+        dependencies = project.get("dependencies", [])
+        optional_dependencies = project.get("optional-dependencies", {})
+        scripts = project.get("scripts", {})
+    except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+        raise SystemExit("Project metadata source is invalid.") from exc
+    if not isinstance(dependencies, list) or not isinstance(optional_dependencies, dict):
+        raise SystemExit("Project metadata source is invalid.")
+
+    normalized_requirements = [_normalize_requirement(value) for value in dependencies]
+    extras: list[str] = []
+    for extra, values in optional_dependencies.items():
+        if not isinstance(extra, str) or not isinstance(values, list):
+            raise SystemExit("Project optional-dependency metadata is invalid.")
+        extras.append(canonicalize_name(extra))
+        normalized_requirements.extend(
+            _normalize_extra_requirement(value, extra=extra) for value in values
+        )
+    if not isinstance(scripts, dict) or any(
+        not isinstance(name, str) or not isinstance(target, str) for name, target in scripts.items()
+    ):
+        raise SystemExit("Project console-script metadata is invalid.")
+
+    requires_python = project.get("requires-python")
+    if requires_python is not None and not isinstance(requires_python, str):
+        raise SystemExit("Project Requires-Python metadata is invalid.")
+    try:
+        normalized_requires_python = (
+            None if requires_python is None else str(SpecifierSet(requires_python))
+        )
+    except InvalidSpecifier as exc:
+        raise SystemExit("Project Requires-Python metadata is invalid.") from exc
+    return ProjectMetadata(
+        requires_python=normalized_requires_python,
+        requires_dist=tuple(sorted(normalized_requirements)),
+        provides_extra=tuple(sorted(extras)),
+        console_scripts=tuple(sorted(scripts.items())),
+    )
+
+
+def _normalize_requirement(value: object) -> str:
+    if not isinstance(value, str):
+        raise SystemExit("Project dependency metadata is invalid.")
+    try:
+        return str(Requirement(value))
+    except InvalidRequirement as exc:
+        raise SystemExit("Project dependency metadata is invalid.") from exc
+
+
+def _normalize_extra_requirement(value: object, *, extra: str) -> str:
+    requirement = Requirement(_normalize_requirement(value))
+    extra_marker = f'extra == "{canonicalize_name(extra)}"'
+    try:
+        requirement.marker = Marker(
+            extra_marker
+            if requirement.marker is None
+            else f"({requirement.marker}) and {extra_marker}"
+        )
+    except InvalidMarker as exc:
+        raise SystemExit("Project optional-dependency metadata is invalid.") from exc
+    return str(requirement)
+
+
+def _verify_project_metadata(
+    expected: ProjectMetadata,
+    metadata: dict[str, DistributionMetadata],
+) -> None:
+    for artifact_type, artifact in metadata.items():
+        actual_requires_python = _normalized_metadata_header(
+            artifact.message,
+            "Requires-Python",
+        )
+        expected_requires_python = (
+            () if expected.requires_python is None else (expected.requires_python,)
+        )
+        if actual_requires_python != expected_requires_python:
+            raise SystemExit(
+                f"Built {artifact_type} Requires-Python metadata does not match pyproject.toml."
+            )
+        if _normalized_metadata_header(artifact.message, "Requires-Dist") != expected.requires_dist:
+            raise SystemExit(
+                f"Built {artifact_type} Requires-Dist metadata does not match pyproject.toml."
+            )
+        if (
+            _normalized_metadata_header(artifact.message, "Provides-Extra")
+            != expected.provides_extra
+        ):
+            raise SystemExit(
+                f"Built {artifact_type} Provides-Extra metadata does not match pyproject.toml."
+            )
+        if artifact.console_scripts != expected.console_scripts:
+            raise SystemExit(f"Built {artifact_type} console scripts do not match pyproject.toml.")
 
 
 def _verify_required_sdist_files(

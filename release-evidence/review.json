@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "review_kind": "production",
-  "analysis_revision": 4,
-  "reviewed_at": "2026-07-30T04:57:44Z",
+  "analysis_revision": 5,
+  "reviewed_at": "2026-07-30T08:06:22Z",
   "reviewed_by": "Danny Sauer (@dannysauer)",
   "inventory": {
     "path": "uv.lock",
-    "sha256": "aa2a2c509c243f74:c7f3041b57909e02:768b28e6d76ed203:2eba8b7b2fd2e11a",
+    "sha256": "378ae66dce2e984d:28a243da7f543478:614163f8348d0f1b:d812c4b43d69ae35",
     "coverage": "cross-platform-reference-runtime"
   },
   "findings": {
@@ -18,5 +18,5 @@
       "in_triage"
     ]
   },
-  "conclusion": "No reviewed vulnerability findings are included in analysis revision 4. The lock adds setuptools, setuptools-scm, vcs-versioning, and wheel for deterministic build and source-distribution validation. The findings snapshot remains empty. This is not a claim that the inventory has no vulnerabilities."
+  "conclusion": "No reviewed vulnerability findings are included in analysis revision 5. The lock now records packaging as a direct development dependency for distribution-metadata validation; its resolved package set is unchanged. The findings snapshot remains empty. This is not a claim that the inventory has no vulnerabilities."
 }

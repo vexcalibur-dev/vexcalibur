@@ -498,6 +498,7 @@ jobs:
             --expected-name vexcalibur \
             --expected-version "$EXPECTED_VERSION" \
             --source-root . \
+            --required-sdist-file pyproject.toml \
             --required-sdist-file docs/execution-report-v1.schema.json \
             --required-sdist-file docs/examples/generate_custom_execution_report.py \
             --required-sdist-file docs/examples/generate_execution_report.py \

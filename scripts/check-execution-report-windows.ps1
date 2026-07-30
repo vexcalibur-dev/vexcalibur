@@ -147,23 +147,30 @@ try {
 
     $venv = Join-Path $work "installed-$($distribution.Name)"
     $requirements = Join-Path $work "runtime-$($distribution.Name).txt"
+    $constraints = Join-Path $work "runtime-$($distribution.Name).constraints.txt"
     uv export `
       --quiet `
       --frozen `
       --no-dev `
       --no-emit-project `
       --no-annotate `
-      --output-file $requirements
+      --output-file $constraints
+    [System.IO.File]::WriteAllText(
+      $requirements,
+      "",
+      [System.Text.UTF8Encoding]::new($false)
+    )
     uv run --frozen python scripts/append_locked_distribution_requirement.py `
       $installDistribution `
       $requirements
     uv venv $venv
     $python = Join-Path $venv "Scripts/python.exe"
-    uv pip sync `
+    uv pip install `
       --require-hashes `
       --only-binary :all: `
+      --constraint $constraints `
       --python $python `
-      $requirements
+      --requirements $requirements
     $env:VEXCALIBUR_EXPECTED_PYTHON = $ExpectedPython
     $env:VEXCALIBUR_EXPECTED_VERSION = $ExpectedVersion
     & $python tests/integration/check_installed_windows.py

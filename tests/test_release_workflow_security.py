@@ -414,17 +414,21 @@ def test_sdist_validation_hash_locks_build_tools_and_builds_offline() -> None:
     export = installer.index("--only-group sdist-build")
     build_sync = installer.index("pip sync", export)
     build = installer.index('"$uv_bin" build', build_sync)
-    runtime_sync = installer.rindex("pip sync")
-    assert export < build_sync < build < runtime_sync
+    runtime_install = installer.rindex("pip install")
+    assert export < build_sync < build < runtime_install
     assert "--require-hashes" in installer[build_sync:build]
     assert "--only-binary :all:" in installer[build_sync:build]
-    assert "--no-build-isolation" in installer[build:runtime_sync]
-    assert "--offline" in installer[build:runtime_sync]
+    assert "--no-build-isolation" in installer[build:runtime_install]
+    assert "--offline" in installer[build:runtime_install]
     assert "mapfile" not in installer
     assert "shopt -s nullglob" in installer
-    assert 'distribution="${built_wheels[0]}"' in installer[build:runtime_sync]
+    assert 'distribution="${built_wheels[0]}"' in installer[build:runtime_install]
     assert '"$uv_bin" venv --python "$python_bin" "$venv_dir"' in installer
-    assert "--only-binary :all:" in installer[runtime_sync:]
+    assert "--constraint" in installer[runtime_install:]
+    assert "--requirements" in installer[runtime_install:]
+    assert "--only-binary :all:" in installer[runtime_install:]
+    assert 'constraints_file="${requirements_file}.constraints"' in installer
+    assert ': >"$requirements_file"' in installer
 
 
 def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> None:
@@ -442,6 +446,7 @@ def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> 
     assert "--offline" in build[package_build:]
     assert "--no-create-gitignore" in build[package_build:]
     for required_file in (
+        "pyproject.toml",
         "docs/execution-report-v1.schema.json",
         "docs/examples/generate_custom_execution_report.py",
         "docs/examples/generate_execution_report.py",
@@ -571,17 +576,19 @@ def test_windows_installs_wheel_and_sdist_with_locked_offline_builds() -> None:
     build_sync = contract.index("uv pip sync", build_export)
     sdist_build = contract.index("uv build", build_sync)
     append = contract.index("append_locked_distribution_requirement.py", sdist_build)
-    runtime_sync = contract.index("uv pip sync", append)
-    assert build_export < build_sync < sdist_build < append < runtime_sync
+    runtime_install = contract.index("uv pip install", append)
+    assert build_export < build_sync < sdist_build < append < runtime_install
     assert "--require-hashes" in contract[build_sync:sdist_build]
     assert "--only-binary :all:" in contract[build_sync:sdist_build]
     assert "--no-build-isolation" in contract[sdist_build:append]
     assert "--offline" in contract[sdist_build:append]
-    assert "--require-hashes" in contract[runtime_sync:]
-    assert "--only-binary :all:" in contract[runtime_sync:]
+    assert "--require-hashes" in contract[runtime_install:]
+    assert "--only-binary :all:" in contract[runtime_install:]
+    assert "--constraint $constraints" in contract[runtime_install:]
+    assert "--requirements $requirements" in contract[runtime_install:]
+    assert "[System.IO.File]::WriteAllText(" in contract
     assert "VEXCALIBUR_EXPECTED_PYTHON" in contract
     assert "VEXCALIBUR_EXPECTED_VERSION" in contract
-    assert "uv pip install" not in contract
 
 
 def test_macos_runs_native_lock_and_concurrency_contracts() -> None:

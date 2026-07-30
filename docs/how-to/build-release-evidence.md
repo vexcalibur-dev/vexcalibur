@@ -78,7 +78,8 @@ The gate generates the production and synthetic bundles twice in distinct
 temporary directories and compares every byte. It also:
 
 - verifies clean, full-commit wheel SCM metadata;
-- installs with exact hash-locked dependencies and a SHA-256-bound wheel URI;
+- installs the SHA-256-bound wheel from its own dependency metadata while the
+  lock export constrains every resolved dependency by version and hash;
 - validates CycloneDX output;
 - runs the pinned official OpenVEX parser;
 - runs the pinned CSAF schema and mandatory-test suite; and

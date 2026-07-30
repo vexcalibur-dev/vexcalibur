@@ -156,7 +156,8 @@ The publication graph has five independent roles:
 1. `build` checks out the exact source and verifies or creates the intended
    release tag on that commit without deleting or reassigning any existing tag.
    It hash-syncs the PEP 517 backend, builds offline with the commit-derived
-   `SOURCE_DATE_EPOCH`, validates both archives, and exports their exact hashes.
+   `SOURCE_DATE_EPOCH`, compares the wheel and sdist package metadata with
+   `pyproject.toml`, validates both archives, and exports their exact hashes.
 2. `publication-inventory` does not download, install, or execute either
    distribution and does not invoke the Action. It exports strict constraints
    and a normalized SBOM from `uv.lock`, then prepares the reviewed oracle.
@@ -177,9 +178,12 @@ The publication graph has five independent roles:
 Each source-distribution matrix cell also uses two environments. The first
 hash-syncs the exact PEP 517 tools from the `sdist-build` lock group and builds
 the candidate sdist into a wheel with `uv` in offline, no-isolation mode. The
-second hash-syncs that derived wheel and the runtime dependencies into a clean
-environment before running the installed CLI checks. This prevents an index
-from selecting unreviewed build requirements during validation.
+second gives `uv` only the hash-bound derived wheel as an installation
+requirement. The runtime lock export supplies constraints, not a list of
+packages to preinstall. The wheel metadata must therefore declare every
+dependency and console script needed by the installed CLI checks. This also
+prevents an index from selecting unreviewed build or runtime versions during
+validation.
 
 The canonical release build uses the same backend rule. It hash-syncs the
 `sdist-build` group before the build, then disables build isolation and network

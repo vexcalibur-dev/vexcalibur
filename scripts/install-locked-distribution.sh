@@ -16,6 +16,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 venv_dir="$1"
 distribution="$2"
 requirements_file="$3"
+constraints_file="${requirements_file}.constraints"
 build_root=
 
 cleanup() {
@@ -82,15 +83,17 @@ fi
   --no-dev \
   --no-emit-project \
   --no-annotate \
-  --output-file "$requirements_file"
+  --output-file "$constraints_file"
 
+: >"$requirements_file"
 "$python_bin" scripts/append_locked_distribution_requirement.py \
   "$distribution" \
   "$requirements_file"
 
 "$uv_bin" venv --python "$python_bin" "$venv_dir"
-"$uv_bin" pip sync \
+"$uv_bin" pip install \
   --require-hashes \
   --only-binary :all: \
+  --constraint "$constraints_file" \
   --python "$venv_dir/bin/python" \
-  "$requirements_file"
+  --requirements "$requirements_file"

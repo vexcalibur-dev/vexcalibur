@@ -11,21 +11,49 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "verify-dist-metadata.py"
 
 
-def write_wheel(dist_dir: Path, name: str = "vexcalibur", version: str = "0.1.0") -> Path:
+def write_wheel(
+    dist_dir: Path,
+    name: str = "vexcalibur",
+    version: str = "0.1.0",
+    *,
+    metadata_headers: tuple[str, ...] = (),
+    console_scripts: tuple[tuple[str, str], ...] = (),
+) -> Path:
     path = dist_dir / f"{name}-{version}-py3-none-any.whl"
-    metadata = f"Name: {name}\nVersion: {version}\n"
+    metadata = "\n".join((f"Name: {name}", f"Version: {version}", *metadata_headers, ""))
     with zipfile.ZipFile(path, "w") as wheel:
         wheel.writestr(f"{name}-{version}.dist-info/METADATA", metadata)
+        if console_scripts:
+            wheel.writestr(
+                f"{name}-{version}.dist-info/entry_points.txt",
+                "[console_scripts]\n"
+                + "".join(f"{script} = {target}\n" for script, target in console_scripts),
+            )
     return path
 
 
-def write_sdist(dist_dir: Path, name: str = "vexcalibur", version: str = "0.1.0") -> Path:
+def write_sdist(
+    dist_dir: Path,
+    name: str = "vexcalibur",
+    version: str = "0.1.0",
+    *,
+    metadata_headers: tuple[str, ...] = (),
+    console_scripts: tuple[tuple[str, str], ...] = (),
+) -> Path:
     path = dist_dir / f"{name}-{version}.tar.gz"
-    metadata = f"Name: {name}\nVersion: {version}\n".encode()
+    metadata = "\n".join((f"Name: {name}", f"Version: {version}", *metadata_headers, "")).encode()
     info = tarfile.TarInfo(f"{name}-{version}/PKG-INFO")
     info.size = len(metadata)
     with tarfile.open(path, "w:gz") as sdist:
         sdist.addfile(info, BytesIO(metadata))
+        if console_scripts:
+            entry_points = (
+                "[console_scripts]\n"
+                + "".join(f"{script} = {target}\n" for script, target in console_scripts)
+            ).encode()
+            entry_info = tarfile.TarInfo(f"{name}-{version}/src/{name}.egg-info/entry_points.txt")
+            entry_info.size = len(entry_points)
+            sdist.addfile(entry_info, BytesIO(entry_points))
     return path
 
 
@@ -39,6 +67,44 @@ def add_sdist_file(path: Path, member_name: str, contents: bytes) -> None:
         info.size = len(contents)
         target.addfile(info, BytesIO(contents))
     replacement.replace(path)
+
+
+def write_project_metadata(
+    source_root: Path,
+    *,
+    requires_python: str | None = None,
+    dependencies: tuple[str, ...] = (),
+    optional_dependencies: dict[str, tuple[str, ...]] | None = None,
+    console_scripts: tuple[tuple[str, str], ...] = (),
+) -> None:
+    lines = [
+        "[project]",
+        'name = "vexcalibur"',
+        'dynamic = ["version"]',
+    ]
+    if requires_python is not None:
+        lines.append(f'requires-python = "{requires_python}"')
+    lines.append("dependencies = [")
+    lines.extend(f'  "{requirement}",' for requirement in dependencies)
+    lines.append("]")
+    if optional_dependencies:
+        lines.extend(("", "[project.optional-dependencies]"))
+        for extra, requirements in optional_dependencies.items():
+            lines.extend(
+                (
+                    f"{extra} = [",
+                    *(f'  "{requirement}",' for requirement in requirements),
+                    "]",
+                )
+            )
+    if console_scripts:
+        lines.extend(("", "[project.scripts]"))
+        lines.extend(f'{name} = "{target}"' for name, target in console_scripts)
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "pyproject.toml").write_text(
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
 
 
 def run_verifier(
@@ -104,6 +170,78 @@ def test_verifier_writes_github_output(tmp_path: Path) -> None:
     ]
 
 
+def test_verifier_rejects_sdist_dependency_metadata_drift(tmp_path: Path) -> None:
+    common_headers = (
+        "Metadata-Version: 2.4",
+        "Requires-Python: >=3.10,<4",
+        "Requires-Dist: packageurl-python>=0.17,<1",
+    )
+    write_wheel(
+        tmp_path,
+        metadata_headers=(*common_headers, "Requires-Dist: httpx>=0.27,<1"),
+    )
+    write_sdist(tmp_path, metadata_headers=common_headers)
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert "Built wheel and sdist Requires-Dist metadata do not match." in result.stderr
+
+
+def test_verifier_rejects_console_script_metadata_drift(tmp_path: Path) -> None:
+    write_wheel(
+        tmp_path,
+        console_scripts=(("vexcalibur", "vexcalibur.cli:app"),),
+    )
+    write_sdist(tmp_path)
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert "Built wheel and sdist console scripts do not match." in result.stderr
+
+
+def test_verifier_checks_artifact_metadata_against_pyproject(tmp_path: Path) -> None:
+    headers = (
+        "Requires-Python: <4,>=3.10",
+        "Requires-Dist: httpx<1,>=0.27",
+        'Requires-Dist: sphinx<9,>=8; extra == "docs"',
+        "Provides-Extra: docs",
+    )
+    scripts = (
+        ("vexcalibur", "vexcalibur.cli:app"),
+        ("vexy", "vexcalibur.compat.vexy:app"),
+    )
+    write_wheel(tmp_path, metadata_headers=headers, console_scripts=scripts)
+    write_sdist(tmp_path, metadata_headers=headers, console_scripts=scripts)
+    source_root = tmp_path / "source"
+    write_project_metadata(
+        source_root,
+        requires_python=">=3.10,<4",
+        dependencies=("httpx>=0.27,<1",),
+        optional_dependencies={"docs": ("sphinx>=8,<9",)},
+        console_scripts=scripts,
+    )
+
+    result = run_verifier(tmp_path, source_root=source_root)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_verifier_rejects_missing_project_dependency_in_both_artifacts(
+    tmp_path: Path,
+) -> None:
+    write_wheel(tmp_path)
+    write_sdist(tmp_path)
+    source_root = tmp_path / "source"
+    write_project_metadata(source_root, dependencies=("httpx>=0.27,<1",))
+
+    result = run_verifier(tmp_path, source_root=source_root)
+
+    assert result.returncode == 1
+    assert "Built wheel Requires-Dist metadata does not match pyproject.toml." in result.stderr
+
+
 def test_verifier_rejects_missing_wheel(tmp_path: Path) -> None:
     write_sdist(tmp_path)
 
@@ -150,6 +288,7 @@ def test_verifier_requires_exact_reviewed_files_in_sdist(tmp_path: Path) -> None
     source_path = source_root / "docs" / "example.py"
     source_path.parent.mkdir(parents=True)
     source_path.write_bytes(b"print('reviewed')\n")
+    write_project_metadata(source_root)
     write_wheel(tmp_path)
     sdist = write_sdist(tmp_path)
     add_sdist_file(
@@ -172,6 +311,7 @@ def test_verifier_rejects_changed_required_sdist_file(tmp_path: Path) -> None:
     source_path = source_root / "docs" / "example.py"
     source_path.parent.mkdir(parents=True)
     source_path.write_bytes(b"print('reviewed')\n")
+    write_project_metadata(source_root)
     write_wheel(tmp_path)
     sdist = write_sdist(tmp_path)
     add_sdist_file(
@@ -195,6 +335,7 @@ def test_verifier_rejects_required_file_missing_from_sdist(tmp_path: Path) -> No
     source_path = source_root / "docs" / "example.py"
     source_path.parent.mkdir(parents=True)
     source_path.write_bytes(b"print('reviewed')\n")
+    write_project_metadata(source_root)
     write_wheel(tmp_path)
     write_sdist(tmp_path)
 
