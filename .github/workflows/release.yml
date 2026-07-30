@@ -560,7 +560,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          scripts/check-immutable-release-policy.sh
+          policy_error="${RUNNER_TEMP}/immutable-release-policy-preflight.error"
+          if ! policy_status="$(
+            gh api \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+              --jq '[.enabled, .enforced_by_owner] | @tsv' \
+              2> "${policy_error}"
+          )"; then
+            echo "Could not preflight the repository immutable-release policy." >&2
+            sed -n '1,5p' "${policy_error}" >&2
+            exit 1
+          fi
+          if [[ "${policy_status}" != $'true\ttrue' ]]; then
+            echo "Immutable releases are not enabled and owner-enforced for this repository." >&2
+            exit 1
+          fi
 
           current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
           if [[ ! "${current_main_sha}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -1154,7 +1170,23 @@ jobs:
               '{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body,
                 draft: false, prerelease: false}' \
               > "${publication_transition}"
-            scripts/check-immutable-release-policy.sh
+            policy_error="${RUNNER_TEMP}/immutable-release-policy-final.error"
+            if ! policy_status="$(
+              gh api \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2026-03-10' \
+                "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+                --jq '[.enabled, .enforced_by_owner] | @tsv' \
+                2> "${policy_error}"
+            )"; then
+              echo "Could not revalidate the repository immutable-release policy." >&2
+              sed -n '1,5p' "${policy_error}" >&2
+              exit 1
+            fi
+            if [[ "${policy_status}" != $'true\ttrue' ]]; then
+              echo "Immutable releases are no longer enabled and owner-enforced." >&2
+              exit 1
+            fi
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
               --input "${publication_transition}" > /dev/null
           fi

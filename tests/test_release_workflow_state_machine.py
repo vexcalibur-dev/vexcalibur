@@ -401,8 +401,23 @@ def test_immutable_release_policy_preflight_uses_the_scoped_app_token() -> None:
     assert "permission-administration: read" in token
     assert "permission-contents: write" in token
     assert "GH_TOKEN: ${{ steps.app-token.outputs.token }}" in preflight
-    assert "scripts/check-immutable-release-policy.sh" in preflight
+    assert "repos/${GITHUB_REPOSITORY}/immutable-releases" in preflight
+    assert "[.enabled, .enforced_by_owner] | @tsv" in preflight
+    assert r"""$'true\ttrue'""" in preflight
     assert "immutable-release preflight deferred" not in preflight.lower()
+
+    immutable = _step(publish, "Publish immutable GitHub Release")
+    patch = immutable.index('--input "${publication_transition}"')
+    assert "repos/${GITHUB_REPOSITORY}/immutable-releases" in immutable[:patch]
+    assert "[.enabled, .enforced_by_owner] | @tsv" in immutable[:patch]
+    assert r"""$'true\ttrue'""" in immutable[:patch]
+
+
+def test_checkout_free_publisher_invokes_no_repository_scripts() -> None:
+    publish = _job(_workflow_text(), "publish-release")
+
+    assert "actions/checkout@" not in publish
+    assert "scripts/" not in publish
 
 
 def test_post_publish_state_and_attestations_are_verified_with_bounded_retries() -> None:
@@ -427,7 +442,7 @@ def test_tag_release_and_asset_bytes_are_revalidated_immediately_before_publish(
     patch = immutable.index('--input "${publication_transition}"')
 
     for contract in (
-        "scripts/check-immutable-release-policy.sh",
+        "repos/${GITHUB_REPOSITORY}/immutable-releases",
         "validate_tag_contract",
         "pre-publish-assets.json",
         "changed bytes before publication",
@@ -438,7 +453,7 @@ def test_tag_release_and_asset_bytes_are_revalidated_immediately_before_publish(
     ):
         assert contract in immutable[:patch]
     assert immutable[:patch].count("validate_tag_contract") >= 3
-    assert immutable[:patch].count("scripts/check-immutable-release-policy.sh") == 1
+    assert immutable[:patch].count("repos/${GITHUB_REPOSITORY}/immutable-releases") == 1
     assert "current_published" in immutable[:patch]
     assert (
         immutable.index("immediate-pre-publish-release.json")

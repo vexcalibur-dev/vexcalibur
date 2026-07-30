@@ -471,6 +471,7 @@ def test_partial_stdout_failure_leaves_no_execution_report(
         report_path=report_path,
         protected_paths=(),
     )
+    report_path.write_bytes(b'{"intervening":true}\n')
     stdout = PartialThenBrokenStdout()
     result = _generation_result(monkeypatch)
 

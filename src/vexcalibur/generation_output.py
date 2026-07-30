@@ -253,15 +253,6 @@ class GenerationOutputTransaction:
                     with acquire_destination_locks(
                         (self.output_destination, self.report_destination)
                     ):
-                        if staged_output is None:
-                            try:
-                                if binary_stdout is None:
-                                    raise OSError("binary standard output is unavailable")
-                                _write_all(binary_stdout, result.rendered_bytes)
-                                binary_stdout.flush()
-                            except (OSError, TypeError, ValueError) as exc:
-                                raise GenerationDocumentWriteError(None, exc) from exc
-
                         try:
                             self.report_destination.remove_existing(
                                 destination_lock_held=True,
@@ -271,6 +262,15 @@ class GenerationOutputTransaction:
                                 self.report_destination.requested_path,
                                 exc,
                             ) from exc
+
+                        if staged_output is None:
+                            try:
+                                if binary_stdout is None:
+                                    raise OSError("binary standard output is unavailable")
+                                _write_all(binary_stdout, result.rendered_bytes)
+                                binary_stdout.flush()
+                            except (OSError, TypeError, ValueError) as exc:
+                                raise GenerationDocumentWriteError(None, exc) from exc
 
                         if staged_output is not None:
                             try:
