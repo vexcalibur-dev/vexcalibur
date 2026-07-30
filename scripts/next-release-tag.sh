@@ -69,9 +69,15 @@ classify_bump() {
   fi
 }
 
+while IFS= read -r head_tag; do
+  if [[ "${head_tag}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    require_version "$(normalize_version "${head_tag}")"
+  fi
+done < <(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*')
+
 mapfile -t release_tags < <(
   git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' |
-    grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' |
+    grep -E '^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$' |
     sort -V || true
 )
 

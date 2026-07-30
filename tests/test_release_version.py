@@ -242,6 +242,22 @@ def test_existing_head_tag_rejects_unbounded_version_component(tmp_path: Path) -
     assert "version component 1000000 must be less than or equal to 999999" in result.stderr
 
 
+def test_existing_head_tag_ignores_unbounded_historical_tag(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v1.0.0", "-m", "Release v1.0.0")
+    run_git(repo, "tag", "-a", "v1.1000000.0", "-m", "Invalid historical tag")
+    commit(repo, "feat: prepare second major release")
+    run_git(repo, "tag", "-a", "v2.0.0", "-m", "Release v2.0.0")
+
+    assert run_release_script(repo) == {
+        "skip": "false",
+        "tag": "v2.0.0",
+        "version": "2.0.0",
+        "previous_tag": "v1.0.0",
+        "bump": "existing",
+    }
+
+
 def test_docs_only_change_after_tag_skips_release(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")
