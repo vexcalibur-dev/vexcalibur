@@ -641,6 +641,13 @@ def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> N
     assert 'report["finding_count"] == len(findings)' in action_matrix
     assert "hashlib.sha256(output_bytes).hexdigest()" in action_matrix
     assert "report_bytes == canonical" in action_matrix
+    assert "read_regular_bounded(" in action_matrix
+    assert "os.O_NOFOLLOW" in action_matrix
+    assert "stat.S_ISREG" in action_matrix
+    assert "maximum=25 * 1024 * 1024" in action_matrix
+    assert "maximum=16 * 1024" in action_matrix
+    assert 'type(report["component_count"]) is int' in action_matrix
+    assert 'type(report["finding_count"]) is int' in action_matrix
 
     for required_job in (
         "execution-report-windows",
