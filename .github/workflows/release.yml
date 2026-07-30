@@ -115,6 +115,10 @@ jobs:
             echo "Recovery tag ${RECOVERY_TAG} is not contained in current main." >&2
             exit 1
           fi
+          if ! python3 -I scripts/check-recovery-contract.py --ref "${release_sha}"; then
+            echo "Recovery tag ${RECOVERY_TAG} predates the current recoverable asset contract." >&2
+            exit 1
+          fi
 
           previous_tag=""
           if parent_sha="$(git rev-parse --verify "${release_sha}^" 2>/dev/null)"; then

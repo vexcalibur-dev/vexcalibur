@@ -38,6 +38,7 @@ from vexcalibur.github_sbom import GithubSbomClient
 from vexcalibur.openvex import OpenVexJsonRenderer
 from vexcalibur.sources.local import LocalFindingsSource
 from vexcalibur.sources.osv import (
+    OsvClient,
     OsvPackageQuery,
     OsvQueryResult,
     OsvSource,
@@ -409,6 +410,25 @@ def test_exact_builtin_osv_source_retains_endpoint_category(
     selection = select_finding_source(OsvSource(osv_base_url=osv_base_url))
 
     assert selection.report_category is expected_finding_source
+
+
+@pytest.mark.parametrize(
+    "client_url",
+    (
+        "https://api.osv.dev",
+        "https://osv.internal.example",
+    ),
+)
+def test_injected_exact_osv_client_is_always_custom(client_url: str) -> None:
+    selection = select_finding_source(
+        OsvSource(
+            client=OsvClient(base_url=client_url),
+            osv_base_url=client_url,
+            allow_public_osv=client_url == "https://api.osv.dev",
+        )
+    )
+
+    assert selection.report_category is FindingSourceCategory.CUSTOM
 
 
 @pytest.mark.parametrize(

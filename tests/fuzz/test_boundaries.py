@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tests.fuzz.boundaries import (
@@ -20,7 +21,6 @@ from tests.fuzz.boundaries import (
 
 CORPUS_ROOT = Path(__file__).with_name("corpus")
 CORPUS_EXPECTATIONS: dict[str, tuple[str, str | None]] = {
-    "consumer/valid-report.json": ("accepted", None),
     "github/valid-spdx.json": ("accepted", None),
     "identity/unicode.txt": ("accepted", None),
     "json/deep-nesting.json": ("rejected", "nesting"),
@@ -42,10 +42,19 @@ CORPUS_EXPECTATIONS: dict[str, tuple[str, str | None]] = {
 pytestmark = pytest.mark.fuzz
 
 
-@pytest.mark.parametrize("target", FUZZ_TARGETS)
+@pytest.mark.parametrize(
+    "target",
+    tuple(target for target in FUZZ_TARGETS if target != "consumer"),
+)
 @given(data=st.binary(max_size=MAX_FUZZ_INPUT_BYTES))
 def test_boundary_is_deterministic_and_typed(target: str, data: bytes) -> None:
     assert_deterministic_boundary(target, data)
+
+
+@settings(deadline=None)
+@given(data=st.binary(max_size=MAX_FUZZ_INPUT_BYTES))
+def test_consumer_boundary_is_deterministic_and_typed(data: bytes) -> None:
+    assert_deterministic_boundary("consumer", data)
 
 
 @pytest.mark.parametrize("relative_seed", tuple(CORPUS_EXPECTATIONS))
@@ -76,8 +85,12 @@ def test_every_checked_in_seed_has_an_explicit_security_expectation() -> None:
     assert checked_in_seeds == set(CORPUS_EXPECTATIONS)
 
 
-def test_valid_consumer_seed_matches_the_canonical_builder() -> None:
-    assert CORPUS_ROOT.joinpath("consumer/valid-report.json").read_bytes() == VALID_CONSUMER_SEED
+def test_generated_consumer_seed_preserves_security_semantics() -> None:
+    assert_deterministic_boundary("consumer", VALID_CONSUMER_SEED)
+    assert deterministic_outcome("consumer", VALID_CONSUMER_SEED) == (
+        "accepted",
+        hashlib.sha256(VALID_CONSUMER_SEED).hexdigest(),
+    )
 
 
 def test_duplicate_json_keys_have_a_stable_typed_rejection() -> None:

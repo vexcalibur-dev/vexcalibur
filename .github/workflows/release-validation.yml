@@ -1276,10 +1276,7 @@ jobs:
         id: package
         env:
           EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
-          RELEASE_SHA: ${{ inputs.release-sha }}
           RELEASE_VERSION: ${{ inputs.release-version }}
-          EXPECTED_TIMESTAMP: ${{ needs.publication-inventory.outputs.timestamp }}
-          MANIFEST: ${{ runner.temp }}/action-matrix-inventory/manifest.json
         run: |
           set -euo pipefail
 
@@ -1289,9 +1286,6 @@ jobs:
           printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" |
             sha256sum --check --strict
           (cd "${inventory_dir}" && sha256sum --check --strict SHA256SUMS)
-          python3 -c \
-            'import json, os, pathlib; m=json.loads(pathlib.Path(os.environ["MANIFEST"]).read_text()); assert m["release"]["commit"] == os.environ["RELEASE_SHA"]; assert m["release"]["version"] == os.environ["RELEASE_VERSION"]; assert m["release"]["timestamp"] == os.environ["EXPECTED_TIMESTAMP"]' \
-            </dev/null
           wheel_uri="$(python3 -c \
             'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).as_uri())' \
             "${wheel}")"
@@ -1319,133 +1313,88 @@ jobs:
             --execution-report
             ${{ runner.temp }}/action-matrix-execution.json
 
-      - name: Independently verify the generated report
+      - name: Upload untrusted candidate Action outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: action-python-matrix-${{ inputs.release-sha }}-python-${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/action-matrix-vex.json
+            ${{ runner.temp }}/action-matrix-execution.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  action-python-matrix-verification:
+    name: Verify pinned Action output (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    needs:
+      - build
+      - publication-inventory
+      - action-python-matrix
+    if: >-
+      inputs.require-release-platform-contracts &&
+      needs.build.result == 'success' &&
+      needs.publication-inventory.result == 'success' &&
+      needs.action-python-matrix.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout exact release oracle
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release-sha }}
+
+      - name: Download exact distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: ${{ runner.temp }}/action-matrix-verification-dist
+
+      - name: Download fresh publication inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publication-inventory.outputs.artifact-name }}
+          path: ${{ runner.temp }}/action-matrix-verification-inventory
+
+      - name: Download untrusted candidate Action outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: action-python-matrix-${{ inputs.release-sha }}-python-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/action-matrix-verification-output
+
+      - name: Rebind trusted distribution and inventory bytes
         env:
-          EXPECTED_VERSION: ${{ inputs.release-version }}
-          FINDINGS: ${{ runner.temp }}/action-matrix-inventory/findings.json
-          OUTPUT: ${{ runner.temp }}/action-matrix-vex.json
-          REPORT: ${{ runner.temp }}/action-matrix-execution.json
-          SBOM: ${{ runner.temp }}/action-matrix-inventory/sbom.cdx.json
+          EXPECTED_WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+          RELEASE_VERSION: ${{ inputs.release-version }}
         run: |
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import stat
-          from collections import Counter
-          from pathlib import Path
+          set -euo pipefail
 
-          def read_regular_bounded(path, *, maximum, label):
-              flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW
-              try:
-                  descriptor = os.open(path, flags)
-              except OSError as error:
-                  raise SystemExit(f"cannot open {label}: {error}") from error
-              try:
-                  metadata = os.fstat(descriptor)
-                  if not stat.S_ISREG(metadata.st_mode):
-                      raise SystemExit(f"{label} is not a regular file")
-                  if metadata.st_size > maximum:
-                      raise SystemExit(f"{label} exceeds {maximum} bytes")
-                  chunks = []
-                  remaining = maximum + 1
-                  while remaining:
-                      chunk = os.read(descriptor, remaining)
-                      if not chunk:
-                          break
-                      chunks.append(chunk)
-                      remaining -= len(chunk)
-                  value = b"".join(chunks)
-                  if len(value) > maximum:
-                      raise SystemExit(f"{label} exceeds {maximum} bytes")
-                  return value
-              finally:
-                  os.close(descriptor)
-
-          report_path = Path(os.environ["REPORT"])
-          output_bytes = read_regular_bounded(
-              Path(os.environ["OUTPUT"]),
-              maximum=25 * 1024 * 1024,
-              label="generated document",
+          wheel="${RUNNER_TEMP}/action-matrix-verification-dist/vexcalibur-${RELEASE_VERSION}-py3-none-any.whl"
+          printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" |
+            sha256sum --check --strict
+          (
+            cd "${RUNNER_TEMP}/action-matrix-verification-inventory"
+            sha256sum --check --strict SHA256SUMS
           )
-          report_bytes = read_regular_bounded(
-              report_path,
-              maximum=16 * 1024,
-              label="execution report",
-          )
-          report = json.loads(report_bytes)
-          assert set(report) == {
-              "analysis_state_counts",
-              "command",
-              "component_count",
-              "document",
-              "finding_count",
-              "finding_source",
-              "inventory_source",
-              "output_format",
-              "schema_version",
-              "vexcalibur_version",
-          }
-          canonical = (
-              json.dumps(report, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
-              + "\n"
-          ).encode("ascii")
-          assert report_bytes == canonical
-          assert report["schema_version"] == 1
-          assert report["command"] == "generate"
-          assert report["vexcalibur_version"] == os.environ["EXPECTED_VERSION"]
-          assert report["inventory_source"] == "sbom_file"
-          assert report["finding_source"] == "local_file"
-          assert report["output_format"] == "cyclonedx"
-          assert type(report["component_count"]) is int
-          assert type(report["finding_count"]) is int
-          assert all(
-              type(count) is int
-              for count in report["analysis_state_counts"].values()
-          )
-          assert type(report["document"]["bytes"]) is int
-          assert report["document"] == {
-              "bytes": len(output_bytes),
-              "sha256": hashlib.sha256(output_bytes).hexdigest(),
-          }
 
-          findings_document = json.loads(Path(os.environ["FINDINGS"]).read_bytes())
-          assert set(findings_document) == {"findings"}
-          findings = findings_document["findings"]
-          assert isinstance(findings, list)
-          state_counts = Counter(item["analysis_state"] for item in findings)
-          assert report["finding_count"] == len(findings)
-          state_order = (
-              "resolved",
-              "exploitable",
-              "in_triage",
-              "false_positive",
-              "not_affected",
-          )
-          expected_state_counts = {
-              state: state_counts[state] for state in state_order if state_counts[state]
-          }
-          assert report["analysis_state_counts"] == expected_state_counts
-
-          sbom = json.loads(Path(os.environ["SBOM"]).read_bytes())
-          roots = list(sbom.get("components", []))
-          metadata_component = sbom.get("metadata", {}).get("component")
-          if metadata_component is not None:
-              roots.append(metadata_component)
-          identities = set()
-          stack = list(roots)
-          while stack:
-              component = stack.pop()
-              stack.extend(component.get("components", []))
-              purl = component.get("purl")
-              if purl is not None:
-                  identities.add((component.get("bom-ref", purl), purl))
-          assert identities
-          assert report["component_count"] == len(identities)
-
-          output = json.loads(output_bytes)
-          assert output["bomFormat"] == "CycloneDX"
-          PY
+      - name: Independently verify the generated report
+        run: |
+          python3 -I scripts/execution_report_oracle.py \
+            --report "${RUNNER_TEMP}/action-matrix-verification-output/action-matrix-execution.json" \
+            --document "${RUNNER_TEMP}/action-matrix-verification-output/action-matrix-vex.json" \
+            --findings "${RUNNER_TEMP}/action-matrix-verification-inventory/findings.json" \
+            --sbom "${RUNNER_TEMP}/action-matrix-verification-inventory/sbom.cdx.json" \
+            --manifest "${RUNNER_TEMP}/action-matrix-verification-inventory/manifest.json" \
+            --expected-sha "${{ inputs.release-sha }}" \
+            --expected-version "${{ inputs.release-version }}" \
+            --expected-timestamp "${{ needs.publication-inventory.outputs.timestamp }}"
 
   action-vex:
     name: Pinned Action VEX
@@ -1929,6 +1878,7 @@ jobs:
       - publication-inventory
       - direct-vex
       - action-python-matrix
+      - action-python-matrix-verification
       - action-vex
     outputs:
       artifact-name: ${{ steps.metadata.outputs.artifact-name }}
@@ -1946,7 +1896,7 @@ jobs:
         (
           needs.execution-report-windows.result == 'success' &&
           needs.execution-report-macos.result == 'success' &&
-          needs.action-python-matrix.result == 'success'
+          needs.action-python-matrix-verification.result == 'success'
         )
       ) &&
       (

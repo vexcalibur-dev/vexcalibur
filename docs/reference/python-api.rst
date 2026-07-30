@@ -176,13 +176,13 @@ raises ``VulnerabilitySourceInputError``, which Vexcalibur converts to
 ``SbomError``. Catch an extension's documented exception in addition to the
 classes above.
 
-Every helper passes plain ``tuple`` objects to the source and renderer. Sources
-return ``VulnerabilityFinding`` values in a tuple. Renderers return UTF-8
-encodable text.
+The ``*_result`` helpers pass plain ``tuple`` objects to the source and
+renderer. Sources return ``VulnerabilityFinding`` values in a tuple. Renderers
+return UTF-8 encodable text.
 
-The compatibility helpers preserve extension object identities. The
-``*_result`` helpers isolate each extension boundary instead. They copy
-component and finding subclasses into exact ``ComponentIdentity`` and
+The compatibility helpers preserve caller and extension container and element
+identities. The ``*_result`` helpers isolate each extension boundary instead.
+They copy component and finding subclasses into exact ``ComponentIdentity`` and
 ``VulnerabilityFinding`` values, give the renderer separate copies, and retain
 private primitive snapshots for the result. Subclass-only state is not
 retained.
@@ -194,6 +194,13 @@ retained.
 
 Execution reports
 -----------------
+
+Wrappers can detect this contract without parsing CLI help. Import
+``EXECUTION_REPORT_SCHEMA_VERSION`` from
+``vexcalibur.generation_result`` and require the exact integer ``1``. A missing
+module means the installed package predates execution reports. A missing,
+mistyped, or different value is an unsupported contract, not an older package
+fallback.
 
 The built-in result helpers retain source categories and the selected output
 format while they generate the document. Call
@@ -395,7 +402,7 @@ that does not request a report never reads that metadata.
 JSON would exceed 16 KiB. The report JSON includes one trailing newline.
 
 .. automodule:: vexcalibur.generation_result
-   :members: GenerationReportMetadataError, GenerationExecutionReportParseError, GeneratedDocumentMetadataDict, GenerationExecutionReportDict, InventorySourceCategory, FindingSourceCategory, ExecutionReportOutputFormat, ExecutionReportFindingSourceDeclaration, ExecutionReportOutputFormatDeclaration, GenerationExecutionContext, GenerationResult, GeneratedDocumentMetadata, GenerationExecutionReport, parse_generation_execution_report
+   :members: EXECUTION_REPORT_SCHEMA_VERSION, GenerationReportMetadataError, GenerationExecutionReportParseError, GeneratedDocumentMetadataDict, GenerationExecutionReportDict, InventorySourceCategory, FindingSourceCategory, ExecutionReportOutputFormat, ExecutionReportFindingSourceDeclaration, ExecutionReportOutputFormatDeclaration, GenerationExecutionContext, GenerationResult, GeneratedDocumentMetadata, GenerationExecutionReport, parse_generation_execution_report
    :show-inheritance:
 
 VEX rendering

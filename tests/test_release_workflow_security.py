@@ -515,6 +515,7 @@ def test_every_reusable_workflow_uploader_descends_from_explicit_consent() -> No
         "build",
         "publication-inventory",
         "direct-vex",
+        "action-python-matrix",
         "action-vex",
         "publication-assets",
     }
@@ -596,7 +597,8 @@ def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> N
     release = _job(_workflow_text(), "validation")
     windows = _job(validation, "execution-report-windows")
     macos = _job(validation, "execution-report-macos")
-    action_matrix = _job(validation, "action-python-matrix")
+    action_producer = _job(validation, "action-python-matrix")
+    action_verifier = _job(validation, "action-python-matrix-verification")
     finalizer = _job(validation, "publication-assets")
     finalizer_condition = finalizer[: finalizer.index("    steps:\n")]
 
@@ -626,33 +628,35 @@ def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> N
         assert "needs.build.outputs.sdist-sha256" in native_job
         assert "VEXCALIBUR_EXPECTED_VERSION" in native_job
 
-    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in action_matrix
-    assert "inputs.require-release-platform-contracts" in action_matrix
-    assert "python-version: ${{ matrix.python-version }}" in action_matrix
-    assert 'allow-development-package-spec: "true"' in action_matrix
-    assert "runtime-constraints.txt" in action_matrix
-    assert "EXPECTED_WHEEL_SHA256" in action_matrix
-    assert "sha256sum --check --strict" in action_matrix
-    assert "action-matrix-execution.json" in action_matrix
-    assert "action-matrix-vex.json" in action_matrix
-    assert "Independently verify the generated report" in action_matrix
-    assert 'report["vexcalibur_version"] == os.environ["EXPECTED_VERSION"]' in action_matrix
-    assert 'report["component_count"] == len(identities)' in action_matrix
-    assert 'report["finding_count"] == len(findings)' in action_matrix
-    assert "hashlib.sha256(output_bytes).hexdigest()" in action_matrix
-    assert "report_bytes == canonical" in action_matrix
-    assert "read_regular_bounded(" in action_matrix
-    assert "os.O_NOFOLLOW" in action_matrix
-    assert "stat.S_ISREG" in action_matrix
-    assert "maximum=25 * 1024 * 1024" in action_matrix
-    assert "maximum=16 * 1024" in action_matrix
-    assert 'type(report["component_count"]) is int' in action_matrix
-    assert 'type(report["finding_count"]) is int' in action_matrix
+    for matrix_job in (action_producer, action_verifier):
+        assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in matrix_job
+        assert "inputs.require-release-platform-contracts" in matrix_job
+    assert "python-version: ${{ matrix.python-version }}" in action_producer
+    assert 'allow-development-package-spec: "true"' in action_producer
+    assert "runtime-constraints.txt" in action_producer
+    assert "EXPECTED_WHEEL_SHA256" in action_producer
+    assert "sha256sum --check --strict" in action_producer
+    assert "action-matrix-execution.json" in action_producer
+    assert "action-matrix-vex.json" in action_producer
+    assert "Upload untrusted candidate Action outputs" in action_producer
+    assert "Independently verify the generated report" not in action_producer
+
+    assert "needs.action-python-matrix.result == 'success'" in action_verifier
+    assert "Checkout exact release oracle" in action_verifier
+    assert "ref: ${{ inputs.release-sha }}" in action_verifier
+    assert "Download fresh publication inventory" in action_verifier
+    assert "Download untrusted candidate Action outputs" in action_verifier
+    assert "sha256sum --check --strict SHA256SUMS" in action_verifier
+    assert "python3 -I scripts/execution_report_oracle.py" in action_verifier
+    assert "--manifest" in action_verifier
+    assert "--expected-sha" in action_verifier
+    assert "--expected-version" in action_verifier
+    assert "--expected-timestamp" in action_verifier
 
     for required_job in (
         "execution-report-windows",
         "execution-report-macos",
-        "action-python-matrix",
+        "action-python-matrix-verification",
     ):
         assert f"      - {required_job}" in finalizer
         assert f"needs.{required_job}.result == 'success'" in finalizer_condition

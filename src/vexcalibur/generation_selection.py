@@ -17,7 +17,6 @@ from vexcalibur.openvex import OpenVexJsonRenderer
 from vexcalibur.render import VexRenderer, execution_report_output_format
 from vexcalibur.sources.local import LocalFindingsSource
 from vexcalibur.sources.osv import (
-    OsvClient,
     OsvSource,
     is_canonical_public_osv_endpoint,
 )
@@ -71,8 +70,7 @@ def select_renderer(renderer: VexRenderer | None) -> SelectedRenderer:
 
 
 def _osv_source_category(source: OsvSource) -> FindingSourceCategory:
-    client = source.client
-    if client is not None and type(client) is not OsvClient:
+    if source.client is not None:
         return FindingSourceCategory.CUSTOM
     if is_canonical_public_osv_endpoint(source.effective_base_url):
         return FindingSourceCategory.PUBLIC_OSV

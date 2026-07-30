@@ -281,8 +281,9 @@ access. The release digests therefore bind artifacts produced by the reviewed
 backend bytes, not another copy selected from an index during the build.
 
 GitHub archive digests are same-run transport checks. The published schema-2
-manifest records stable canonical payload digests so retrying validation for an
-older recovery tag produces identical release assets.
+manifest records stable canonical payload digests so retrying validation for a
+tag with the current recovery-contract marker produces identical release
+assets.
 
 The reusable outputs bind the exact wheel and source-distribution hashes, the
 unique distribution and release-asset artifact names, the release-asset
@@ -294,7 +295,8 @@ consumers.
 `.github/workflows/release.yml` runs after a push to `main` or a manual
 dispatch. Normal mode computes or accepts the next version and repeatedly
 requires the target to equal the tip of `main`. Recovery mode accepts an
-existing annotated `recovery-tag` whose commit is still an ancestor of `main`.
+existing annotated `recovery-tag` whose commit is still an ancestor of `main`
+and declares the recovery-contract schema supported by the current workflow.
 
 Release notes are generated, digest-bound, and secret-scanned across separate
 runners. Two isolated jobs mint separate short-lived Contents-write App tokens:

@@ -158,7 +158,7 @@ automation contract. The dispatch itself must run from `main`; the workflow's
 resolver rejects every other Git ref. With a recent authenticated GitHub CLI:
 
 ```bash
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
 
 gh auth status --active --hostname github.com
 gh workflow run release.yml \
@@ -172,10 +172,15 @@ recovery deliberately uses `--ref main`; the later PyPI recovery dispatch uses
 the exact release tag as both `--ref` and `release-tag`.
 
 The tag must directly annotate a commit that is still an ancestor of current
-`main`; it need not remain the tip. Validation regenerates the complete asset
-set deterministically. Existing draft assets must have the same names and
-bytes. The workflow may delete and retry only a zero-byte GitHub
-`state=starter` upload marker. It never replaces a completed asset.
+`main`; it need not remain the tip. Its commit must also contain
+`release-evidence/recovery-contract.json` with the schema supported by the
+current workflow. Tags from before that marker cannot use automated recovery
+because their build and asset contracts differ. They remain immutable.
+
+Validation regenerates the complete asset set deterministically. Existing draft
+assets must have the same names and bytes. The workflow may delete and retry
+only a zero-byte GitHub `state=starter` upload marker. It never replaces a
+completed asset.
 
 Recovery does not trust the mutable draft body. It validates the protected tag
 ref, annotated object, target commit, automation-bot tagger, closed-world
