@@ -13,6 +13,7 @@ import vexcalibur.execution_report_locks as lock_module
 from vexcalibur.execution_report_errors import BoundFileDestinationError
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
+    _close_descriptor_retryable,
     _remove_matching_destination,
     _require_path_identity,
     _require_private_regular_file,
@@ -207,26 +208,29 @@ class StagedFileWrite:
         """Remove unpublished temporary bytes and close the parent handle."""
         if self.closed:
             return
-        self._closed = True
-        try:
-            if self.committed and not self._retain_publication:
-                self.discard_committed()
-            elif not self.committed:
-                try:
-                    expected = os.fstat(self.temporary_fd)
-                except OSError:
-                    pass
-                else:
-                    _remove_matching_destination(
-                        parent_fd=self.parent_fd,
-                        name=self.temporary_name,
-                        expected=expected,
-                    )
-        finally:
+        if self.committed and not self._retain_publication:
+            if not self.discard_committed():
+                raise BoundFileDestinationError("could not remove the published staged file")
+        elif not self.committed:
             try:
-                _close_descriptor(self.temporary_fd)
-            finally:
-                _close_descriptor(self.parent_fd)
+                expected = os.fstat(self.temporary_fd)
+            except OSError:
+                pass
+            else:
+                if not _remove_matching_destination(
+                    parent_fd=self.parent_fd,
+                    name=self.temporary_name,
+                    expected=expected,
+                ):
+                    raise BoundFileDestinationError("could not remove the unpublished staged file")
+        self._close_owned_descriptor("temporary_fd")
+        self._close_owned_descriptor("parent_fd")
+        object.__setattr__(self, "_closed", True)
+
+    def _close_owned_descriptor(self, attribute: str) -> None:
+        descriptor = getattr(self, attribute)
+        _close_descriptor_retryable(descriptor)
+        object.__setattr__(self, attribute, -1)
 
     def __copy__(self) -> StagedFileWrite:
         raise TypeError("staged file writes cannot be copied")
@@ -306,8 +310,8 @@ class PublishedFileRollback:
         """Release the retained directory descriptor."""
         if self._closed:
             return
-        self._closed = True
-        _close_descriptor(self.parent_fd)
+        _close_descriptor_retryable(self.parent_fd)
+        object.__setattr__(self, "_closed", True)
 
     def __copy__(self) -> PublishedFileRollback:
         raise TypeError("published rollback handles cannot be copied")

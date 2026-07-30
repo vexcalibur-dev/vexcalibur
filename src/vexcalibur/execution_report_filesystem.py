@@ -72,3 +72,21 @@ def _remove_matching_destination(
 def _close_descriptor(descriptor: int) -> None:
     with suppress(OSError):
         os.close(descriptor)
+
+
+def _close_descriptor_retryable(descriptor: int) -> None:
+    """Close an owned descriptor without losing retryable ownership."""
+    try:
+        expected = os.fstat(descriptor)
+    except OSError:
+        return
+    try:
+        os.close(descriptor)
+    except BaseException:
+        try:
+            actual = os.fstat(descriptor)
+        except OSError:
+            return
+        if not _same_identity(actual, expected):
+            return
+        raise

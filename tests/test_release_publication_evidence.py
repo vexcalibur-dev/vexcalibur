@@ -52,7 +52,7 @@ def _write_test_sdist(path: Path, *, version: str = "0.4.0", commit: str = "a" *
     member = tarfile.TarInfo(f"vexcalibur-{version}/PKG-INFO")
     member.size = len(metadata)
     version_source = (
-        f"__version__ = version = '{version}'\n__commit_id__ = commit_id = 'g{commit[:10]}'\n"
+        f"__version__ = version = '{version}'\n__commit_id__ = commit_id = 'g{commit}'\n"
     ).encode()
     version_member = tarfile.TarInfo(f"vexcalibur-{version}/src/vexcalibur/_version.py")
     version_member.size = len(version_source)

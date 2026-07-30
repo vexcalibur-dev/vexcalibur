@@ -85,6 +85,7 @@ class GenerationOutputTransaction:
     __slots__ = (
         "_closed",
         "_consumed",
+        "_discard_report_on_close",
         "_report_rollback",
         "output_destination",
         "output_path",
@@ -109,6 +110,7 @@ class GenerationOutputTransaction:
         self.protected_descriptors = protected_descriptors
         self._consumed = False
         self._closed = False
+        self._discard_report_on_close = False
         self._report_rollback: PublishedFileRollback | None = None
 
     @classmethod
@@ -328,18 +330,22 @@ class GenerationOutputTransaction:
             except BaseException as exc:
                 if failure is None:
                     failure = exc
-                self._discard_published_report()
-        if failure is None:
+                object.__setattr__(self, "_discard_report_on_close", True)
+        if not self._discard_report_on_close and failure is None:
             try:
                 self._release_report_rollback()
             except BaseException as exc:
                 failure = exc
+                object.__setattr__(self, "_discard_report_on_close", True)
+        if self._discard_report_on_close:
+            try:
                 self._discard_published_report()
-        else:
-            self._discard_published_report()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
         if failure is not None:
             raise failure
-        self._closed = True
+        object.__setattr__(self, "_closed", True)
 
     def __copy__(self) -> GenerationOutputTransaction:
         raise TypeError("generation output transactions cannot be copied")
@@ -386,20 +392,30 @@ class GenerationOutputTransaction:
     def _discard_published_report(self) -> None:
         rollback = self._report_rollback
         if rollback is None:
+            object.__setattr__(self, "_discard_report_on_close", False)
             return
+        failure: BaseException | None = None
         for _ in range(2):
-            with suppress(BaseException):
+            try:
                 if rollback.discard():
                     break
+            except BaseException as exc:
+                failure = exc
+        else:
+            error = GenerationOutputError("could not remove the published execution report")
+            if failure is not None:
+                raise error from failure
+            raise error
         rollback.close()
-        self._report_rollback = None
+        object.__setattr__(self, "_report_rollback", None)
+        object.__setattr__(self, "_discard_report_on_close", False)
 
     def _release_report_rollback(self) -> None:
         rollback = self._report_rollback
         if rollback is None:
             return
         rollback.close()
-        self._report_rollback = None
+        object.__setattr__(self, "_report_rollback", None)
 
 
 def _label_destination_error(

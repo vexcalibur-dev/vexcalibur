@@ -24,7 +24,10 @@ def _write_archive(path: Path, *, metadata_epoch: int, reverse: bool) -> None:
         ),
         (
             "vexcalibur-0.4.0/src/vexcalibur/_version.py",
-            b"__version__ = version = '0.4.0'\n__commit_id__ = commit_id = 'gaaaaaaaaaa'\n",
+            (
+                b"__version__ = version = '0.4.0'\n"
+                b"__commit_id__ = commit_id = 'g" + b"a" * 40 + b"'\n"
+            ),
             0o775,
         ),
     ]

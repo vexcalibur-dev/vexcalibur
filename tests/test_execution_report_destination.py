@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import vexcalibur.execution_report_destination as destination_module
+import vexcalibur.execution_report_filesystem as filesystem_module
 import vexcalibur.execution_report_staging as staging_module
 from vexcalibur.execution_report_destination import (
     BoundFileDestination,
@@ -834,6 +835,98 @@ def test_close_failure_does_not_escape_destination_verification(
     monkeypatch.setattr(destination_module.os, "close", close_then_fail)
 
     destination.verify_parent_path()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_destination_close_retains_ownership_when_interrupted_before_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    descriptor = destination._parent_descriptor
+    real_close = filesystem_module.os.close
+    interrupted = False
+
+    def interrupt_before_close(candidate: int) -> None:
+        nonlocal interrupted
+        if candidate == descriptor and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("descriptor close interrupted")
+        real_close(candidate)
+
+    monkeypatch.setattr(filesystem_module.os, "close", interrupt_before_close)
+
+    with pytest.raises(KeyboardInterrupt, match="descriptor close interrupted"):
+        destination.close()
+
+    assert not destination.closed
+    os.fstat(descriptor)
+    destination.close()
+    assert destination.closed
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_destination_close_completes_when_interrupted_after_physical_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    descriptor = destination._parent_descriptor
+    real_close = filesystem_module.os.close
+
+    def interrupt_after_close(candidate: int) -> None:
+        real_close(candidate)
+        raise KeyboardInterrupt("descriptor was already closed")
+
+    monkeypatch.setattr(filesystem_module.os, "close", interrupt_after_close)
+
+    destination.close()
+
+    assert destination.closed
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_staged_close_retries_only_descriptors_still_owned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    scope = destination.stage_bytes(b"private report")
+    staged = scope.__enter__()
+    temporary_descriptor = staged.temporary_fd
+    parent_descriptor = staged.parent_fd
+    real_close = filesystem_module.os.close
+    interrupted = False
+
+    def interrupt_parent_close(candidate: int) -> None:
+        nonlocal interrupted
+        if candidate == parent_descriptor and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("parent close interrupted")
+        real_close(candidate)
+
+    monkeypatch.setattr(filesystem_module.os, "close", interrupt_parent_close)
+
+    with pytest.raises(KeyboardInterrupt, match="parent close interrupted"):
+        staged.close()
+
+    assert staged.temporary_fd == -1
+    assert staged.parent_fd == parent_descriptor
+    assert not staged.closed
+    with pytest.raises(OSError):
+        os.fstat(temporary_descriptor)
+    os.fstat(parent_descriptor)
+
+    scope.__exit__(None, None, None)
+    assert staged.closed
+    assert staged.parent_fd == -1
+    with pytest.raises(OSError):
+        os.fstat(parent_descriptor)
+    destination.close()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

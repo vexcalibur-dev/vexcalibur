@@ -59,7 +59,7 @@ def _write_test_sdist(path: Path, *, version: str = "0.4.0", commit: str = "a" *
     member = tarfile.TarInfo(f"vexcalibur-{version}/PKG-INFO")
     member.size = len(metadata)
     version_source = (
-        f"__version__ = version = '{version}'\n__commit_id__ = commit_id = 'g{commit[:10]}'\n"
+        f"__version__ = version = '{version}'\n__commit_id__ = commit_id = 'g{commit}'\n"
     ).encode()
     version_member = tarfile.TarInfo(f"vexcalibur-{version}/src/vexcalibur/_version.py")
     version_member.size = len(version_source)
@@ -437,6 +437,21 @@ def test_distribution_metadata_rejects_sdist_from_another_commit(tmp_path: Path)
     _write_test_sdist(sdist, commit="b" * 40)
 
     with pytest.raises(release_evidence.EvidenceError, match="sdist SCM commit"):
+        release_evidence._validate_distribution_metadata(
+            wheel_path=wheel,
+            sdist_path=sdist,
+            expected_version="0.4.0",
+            expected_release_sha="a" * 40,
+        )
+
+
+def test_distribution_metadata_rejects_abbreviated_sdist_commit(tmp_path: Path) -> None:
+    wheel = tmp_path / "vexcalibur-0.4.0-py3-none-any.whl"
+    _write_test_wheel(wheel, commit="a" * 40)
+    sdist = tmp_path / "vexcalibur-0.4.0.tar.gz"
+    _write_test_sdist(sdist, commit="a" * 10)
+
+    with pytest.raises(release_evidence.EvidenceError, match="bind its version and SCM commit"):
         release_evidence._validate_distribution_metadata(
             wheel_path=wheel,
             sdist_path=sdist,

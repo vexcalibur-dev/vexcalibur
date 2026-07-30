@@ -10,13 +10,14 @@ import vexcalibur.csaf as csaf_module
 import vexcalibur.generate_command as generate_command
 from vexcalibur import cli
 from vexcalibur.compat import vexy
-from vexcalibur.domain import ComponentIdentity
+from vexcalibur.domain import ComponentIdentity, VulnerabilitySourceInputError
 from vexcalibur.generation_result import GenerationResult
 from vexcalibur.source_options import GenerateSourceOptions
 from vexcalibur.sources.osv import (
     OsvClientError,
     OsvPackageQuery,
     OsvQueryResult,
+    OsvSource,
     OsvVulnerabilitySummary,
 )
 from vexcalibur.vex import parse_timestamp
@@ -637,6 +638,31 @@ def test_generate_requires_public_osv_opt_in_before_fetching_github_sbom(monkeyp
     assert result.exit_code == 1
     assert "VEX generation failed" in result.output
     assert "--allow-public-osv" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_reports_github_source_preflight_input_errors_without_traceback(
+    monkeypatch,
+) -> None:
+    def reject_input(source: OsvSource) -> None:
+        del source
+        raise VulnerabilitySourceInputError("source preflight rejected the input")
+
+    monkeypatch.setattr(OsvSource, "validate_before_inventory_load", reject_input)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--allow-public-osv",
+            "--no-gh-auth",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "SBOM ingest failed: source preflight rejected the input" in result.output
     assert "Traceback" not in result.output
 
 

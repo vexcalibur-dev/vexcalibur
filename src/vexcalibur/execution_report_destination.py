@@ -20,6 +20,7 @@ from vexcalibur.execution_report_errors import (
 from vexcalibur.execution_report_errors import DestinationLockError as DestinationLockError
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
+    _close_descriptor_retryable,
     _require_replaceable_leaf,
     _same_identity,
 )
@@ -385,8 +386,8 @@ class BoundFileDestination:
         """Close the retained parent directory descriptor."""
         if getattr(self, "_closed", True):
             return
-        self._closed = True
-        _close_descriptor(self._parent_descriptor)
+        _close_descriptor_retryable(self._parent_descriptor)
+        object.__setattr__(self, "_closed", True)
 
     def __copy__(self) -> BoundFileDestination:
         raise TypeError("bound file destinations cannot be copied")

@@ -12,6 +12,7 @@ from vexcalibur.execution_report_destination import (
     BoundFileDestination,
 )
 from vexcalibur.generation_output import (
+    GenerationOutputError,
     GenerationOutputTransaction,
 )
 from vexcalibur.generation_result import (
@@ -364,3 +365,75 @@ def test_destination_close_cancellation_removes_published_success_report(
     assert output_path.exists()
     assert not report_path.exists()
     transaction.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_persistent_report_rollback_failure_remains_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(
+        _generation_result(monkeypatch),
+        binary_stdout=None,
+    )
+    output_destination = transaction.output_destination
+    assert output_destination is not None
+    real_close = BoundFileDestination.close
+    real_remove = staging_module._remove_matching_destination
+    interrupted = False
+
+    def interrupt_output_close(destination: BoundFileDestination) -> None:
+        nonlocal interrupted
+        if destination is output_destination and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("synthetic destination close cancellation")
+        real_close(destination)
+
+    monkeypatch.setattr(BoundFileDestination, "close", interrupt_output_close)
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        lambda **kwargs: False,
+    )
+
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="synthetic destination close cancellation",
+    ):
+        transaction.close()
+
+    assert report_path.exists()
+    assert transaction._report_rollback is not None
+    assert transaction._discard_report_on_close
+    assert not transaction.closed
+
+    with pytest.raises(
+        GenerationOutputError,
+        match="could not remove the published execution report",
+    ):
+        transaction.close()
+
+    assert report_path.exists()
+    assert transaction._report_rollback is not None
+    assert transaction._discard_report_on_close
+    assert not transaction.closed
+
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        real_remove,
+    )
+    transaction.close()
+
+    assert output_path.exists()
+    assert not report_path.exists()
+    assert transaction._report_rollback is None
+    assert not transaction._discard_report_on_close
+    assert transaction.closed

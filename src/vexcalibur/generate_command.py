@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from vexcalibur.domain import VulnerabilitySource, validate_source_before_inventory_load
+from vexcalibur.domain import VulnerabilitySource
 from vexcalibur.generate import (
     _generate_vex_from_github_selected_source_result,
+    _validate_source_before_inventory_load,
     generate_vex_from_local_findings_result,
     generate_vex_from_sbom_result,
 )
@@ -107,7 +108,7 @@ class GenerateCommandRequest:
         if repository is None:
             raise AssertionError("generate request repository validation failed")
         source = self._source
-        validate_source_before_inventory_load(source)
+        _validate_source_before_inventory_load(source)
         selected_source = select_finding_source(source)
         client = GithubSbomClient(
             api_url=self.github_api_url,

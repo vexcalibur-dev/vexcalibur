@@ -1821,7 +1821,7 @@ def _validate_distribution_metadata(
         raise EvidenceError("wheel Name or Version metadata differs from the release")
     if sdist_metadata != expected:
         raise EvidenceError("sdist Name or Version metadata differs from the release")
-    if not expected_release_sha.startswith(sdist_commit):
+    if expected_release_sha != sdist_commit:
         raise EvidenceError("sdist SCM commit differs from the release commit")
 
 
@@ -1948,9 +1948,7 @@ def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[st
     except UnicodeError as exc:
         raise EvidenceError("sdist generated version is not UTF-8") from exc
     version_match = re.search(r"(?m)^__version__ = version = '([^'\r\n]+)'$", version_text)
-    commit_match = re.search(
-        r"(?m)^__commit_id__ = commit_id = 'g?([0-9a-f]{7,40})'$", version_text
-    )
+    commit_match = re.search(r"(?m)^__commit_id__ = commit_id = 'g?([0-9a-f]{40})'$", version_text)
     if version_match is None or version_match.group(1) != version or commit_match is None:
         raise EvidenceError("sdist generated version does not bind its version and SCM commit")
     return _parse_distribution_metadata(metadata, artifact="sdist"), commit_match.group(1)
