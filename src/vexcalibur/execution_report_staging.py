@@ -181,17 +181,21 @@ class StagedFileWrite:
         """Retain an independent handle that can remove this publication."""
         if not self.committed or not self._retain_publication:
             raise BoundFileDestinationError("staged file is not published")
+        parent_fd = -1
         try:
             parent_fd = os.dup(self.parent_fd)
-        except OSError as exc:
-            raise BoundFileDestinationError(
-                "could not retain the published file rollback handle"
-            ) from exc
-        return PublishedFileRollback._create(
-            parent_fd=parent_fd,
-            name=self.destination._name_bytes,
-            expected=self.temporary_stat,
-        )
+            return PublishedFileRollback._create(
+                parent_fd=parent_fd,
+                name=self.destination._name_bytes,
+                expected=self.temporary_stat,
+            )
+        except BaseException as exc:
+            _close_descriptor(parent_fd)
+            if isinstance(exc, OSError):
+                raise BoundFileDestinationError(
+                    "could not retain the published file rollback handle"
+                ) from exc
+            raise
 
     def _rollback_publication(self) -> bool:
         if not self.committed:
@@ -377,6 +381,7 @@ def _create_temporary_file(parent_fd: int) -> tuple[int, str]:
             continue
         try:
             os.fchmod(descriptor, 0o600)
+            return _temporary_file_result(descriptor, name)
         except BaseException:
             try:
                 try:
@@ -392,8 +397,11 @@ def _create_temporary_file(parent_fd: int) -> tuple[int, str]:
             finally:
                 _close_descriptor(descriptor)
             raise
-        return descriptor, name
     raise BoundFileDestinationError("could not allocate a unique temporary file")
+
+
+def _temporary_file_result(descriptor: int, name: str) -> tuple[int, str]:
+    return descriptor, name
 
 
 def _cleanup_staged_file(

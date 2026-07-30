@@ -125,6 +125,39 @@ def test_cancellation_during_temporary_file_setup_removes_temporary_file(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_cancellation_during_temporary_file_handoff_closes_the_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    observed_descriptors: list[int] = []
+
+    def cancel_handoff(descriptor: int, name: str) -> tuple[int, str]:
+        del name
+        observed_descriptors.append(descriptor)
+        raise KeyboardInterrupt("temporary file handoff interrupted")
+
+    monkeypatch.setattr(
+        staging_module,
+        "_temporary_file_result",
+        cancel_handoff,
+    )
+
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="temporary file handoff interrupted",
+    ):
+        destination.write_bytes(b"private report")
+
+    assert len(observed_descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(observed_descriptors[0])
+    assert not path.exists()
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 def test_cancellation_during_staging_cleanup_closes_all_descriptors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -483,6 +516,48 @@ def test_interrupted_rollback_retries_without_losing_cleanup_state(
     assert rollback_interrupted
     assert not path.exists()
     assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_cancellation_during_rollback_handoff_closes_the_retained_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    observed_descriptors: list[int] = []
+
+    def cancel_handoff(
+        cls: type[staging_module.PublishedFileRollback],
+        *,
+        parent_fd: int,
+        name: str | bytes,
+        expected: os.stat_result,
+    ) -> staging_module.PublishedFileRollback:
+        del cls, name, expected
+        observed_descriptors.append(parent_fd)
+        raise KeyboardInterrupt("rollback handoff interrupted")
+
+    monkeypatch.setattr(
+        staging_module.PublishedFileRollback,
+        "_create",
+        classmethod(cancel_handoff),
+    )
+
+    with destination.stage_bytes(b"private report") as staged:
+        staged.commit()
+        with pytest.raises(
+            KeyboardInterrupt,
+            match="rollback handoff interrupted",
+        ):
+            staged.retain_rollback()
+
+    assert len(observed_descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(observed_descriptors[0])
+    assert path.read_bytes() == b"private report"
+    destination.close()
+    path.unlink()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

@@ -330,7 +330,11 @@ class GenerationOutputTransaction:
                     failure = exc
                 self._discard_published_report()
         if failure is None:
-            self._release_report_rollback()
+            try:
+                self._release_report_rollback()
+            except BaseException as exc:
+                failure = exc
+                self._discard_published_report()
         else:
             self._discard_published_report()
         if failure is not None:

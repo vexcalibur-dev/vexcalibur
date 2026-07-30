@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import inspect
 import os
-import sys
 from pathlib import Path
-from types import FrameType
-from typing import Any
 
 import pytest
 
@@ -125,53 +121,89 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
         report_path=report_path,
         protected_paths=(),
     )
-    commit_implementation = GenerationOutputTransaction._commit
-    source_lines, first_line = inspect.getsourcelines(commit_implementation)
-    handoff_line = first_line + next(
-        index
-        for index, line in enumerate(source_lines)
-        if "self._report_rollback = report_rollback" in line
-    )
-    previous_trace = sys.gettrace()
+    real_setattr = GenerationOutputTransaction.__setattr__
     interrupted = False
 
     def interrupt_rollback_handoff(
-        frame: FrameType,
-        event: str,
-        argument: object,
-    ) -> Any:
-        del argument
+        target: GenerationOutputTransaction,
+        name: str,
+        value: object,
+    ) -> None:
         nonlocal interrupted
-        if (
-            not interrupted
-            and frame.f_code is commit_implementation.__code__
-            and event == "line"
-            and frame.f_lineno == handoff_line
-        ):
+        if not interrupted and name == "_report_rollback" and value is not None:
             interrupted = True
-            sys.settrace(previous_trace)
             raise KeyboardInterrupt("synthetic rollback handoff cancellation")
-        return interrupt_rollback_handoff
+        real_setattr(target, name, value)
 
-    sys.settrace(interrupt_rollback_handoff)
-    try:
-        with (
-            transaction,
-            pytest.raises(
-                KeyboardInterrupt,
-                match="synthetic rollback handoff cancellation",
-            ),
-        ):
-            transaction.commit(
-                _generation_result(monkeypatch),
-                binary_stdout=None,
-            )
-    finally:
-        sys.settrace(previous_trace)
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "__setattr__",
+        interrupt_rollback_handoff,
+    )
+
+    with (
+        transaction,
+        pytest.raises(
+            KeyboardInterrupt,
+            match="synthetic rollback handoff cancellation",
+        ),
+    ):
+        transaction.commit(
+            _generation_result(monkeypatch),
+            binary_stdout=None,
+        )
 
     assert interrupted
     assert output_path.exists()
     assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_rollback_release_cancellation_removes_the_published_success_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(
+        _generation_result(monkeypatch),
+        binary_stdout=None,
+    )
+    real_close = staging_module.PublishedFileRollback.close
+    interrupted = False
+
+    def interrupt_rollback_release(
+        rollback: staging_module.PublishedFileRollback,
+    ) -> None:
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("synthetic rollback release cancellation")
+        real_close(rollback)
+
+    monkeypatch.setattr(
+        staging_module.PublishedFileRollback,
+        "close",
+        interrupt_rollback_release,
+    )
+
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="synthetic rollback release cancellation",
+    ):
+        transaction.close()
+
+    assert interrupted
+    assert output_path.exists()
+    assert not report_path.exists()
+    transaction.close()
+
+    assert transaction.closed
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")

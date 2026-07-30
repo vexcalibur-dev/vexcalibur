@@ -238,6 +238,13 @@ def _findings_for_components(
         raise SbomError(str(exc)) from exc
 
 
+def _validate_source_before_inventory_load(source: VulnerabilitySource) -> None:
+    try:
+        validate_source_before_inventory_load(source)
+    except VulnerabilitySourceInputError as exc:
+        raise SbomError(str(exc)) from exc
+
+
 def _raise_output_limit_error() -> None:
     msg = f"rendered VEX exceeds the {MAX_VEX_OUTPUT_BYTES} byte output limit"
     raise VexRenderError(msg)
@@ -355,7 +362,7 @@ def generate_vex_from_github_sbom(
         source_name=osv_source_name,
         source_url=osv_source_url,
     )
-    validate_source_before_inventory_load(raw_source)
+    _validate_source_before_inventory_load(raw_source)
     return _render_legacy_generation(
         components=_github_components(repository, github_client),
         source=raw_source,
@@ -374,7 +381,7 @@ def generate_vex_from_github_source_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from GitHub inventory and one source."""
-    validate_source_before_inventory_load(source)
+    _validate_source_before_inventory_load(source)
     return _generate_vex_from_github_selected_source_result(
         repository=repository,
         source=select_finding_source(source),

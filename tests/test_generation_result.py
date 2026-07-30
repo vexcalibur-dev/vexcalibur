@@ -381,6 +381,22 @@ def test_source_input_error_translation_retains_original_cause() -> None:
     assert captured.value.__cause__ is failure
 
 
+def test_source_preflight_input_error_translation_retains_original_cause() -> None:
+    failure = VulnerabilitySourceInputError("invalid source preflight input")
+
+    class InvalidPreflightSource(FakeVulnerabilitySource):
+        def validate_before_inventory_load(self) -> None:
+            raise failure
+
+    with pytest.raises(SbomError, match="invalid source preflight input") as captured:
+        generate_vex_from_github_source_result(
+            repository="vexcalibur-dev/vexcalibur",
+            source=InvalidPreflightSource(()),
+        )
+
+    assert captured.value.__cause__ is failure
+
+
 def test_custom_generation_requires_explicit_execution_report_context() -> None:
     component = _component()
     source = FakeVulnerabilitySource(())
