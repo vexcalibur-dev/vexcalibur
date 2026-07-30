@@ -80,6 +80,33 @@ def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
     assert result.stdout == "execution report verified\n"
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("schema_version",),
+        ("component_count",),
+        ("finding_count",),
+        ("analysis_state_counts", "in_triage"),
+        ("document", "bytes"),
+    ],
+)
+def test_consumer_example_rejects_integral_float_counts(
+    tmp_path: Path,
+    path: tuple[str, ...],
+) -> None:
+    report_path, document_path, report = _write_pair(tmp_path)
+    target = report
+    for key in path[:-1]:
+        nested = target[key]
+        assert isinstance(nested, dict)
+        target = nested
+    target[path[-1]] = 1.0
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        consumer.validate_execution_report(report_path, document_path, SCHEMA)
+
+
 def test_consumer_example_applies_an_exploitable_count_policy(
     tmp_path: Path,
 ) -> None:

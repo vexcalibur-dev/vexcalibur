@@ -370,6 +370,24 @@ TAG_OBJECT_SHA="$(
     "$TAG_REF"
 )"
 gh api "repos/$REPOSITORY/git/tags/$TAG_OBJECT_SHA" > "$TAG_OBJECT"
+has_exact_tag_schema_version() {
+  local tag_path="$1"
+  python3 -I - "$tag_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    tag = json.load(stream)
+message = json.loads(tag["message"])
+raise SystemExit(
+    not (
+        type(message.get("schema_version")) is int
+        and message["schema_version"] == 1
+    )
+)
+PY
+}
+has_exact_tag_schema_version "$TAG_OBJECT"
 jq --exit-status \
   --arg tag "$RELEASE_TAG" \
   --arg sha "$RELEASE_SHA" \

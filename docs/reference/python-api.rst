@@ -131,12 +131,11 @@ The result helpers differ in how they establish inventory provenance:
    * - ``generate_vex_from_components_result``
      - ``CUSTOM``. The caller supplied normalized components.
      - Inferred from the exact source type or its ``CUSTOM`` declaration.
-     - ``SbomError`` for empty components or
-       ``VulnerabilitySourceInputError``; ``LocalFindingsError``,
-       ``OsvConfigurationError``, or ``OsvClientError`` from those built-in
-       sources; ``VexRenderError`` for invalid or oversized output;
-       ``TypeError`` for mistyped values; ``ValueError`` for contradictory
-       context.
+     - ``SbomError`` for empty components or source-input failures;
+       ``LocalFindingsError``, ``OsvConfigurationError``, or ``OsvClientError``
+       from those built-in sources; ``VexRenderError`` for invalid or oversized
+       output; ``TypeError`` for mistyped values; ``ValueError`` for
+       contradictory context.
    * - ``generate_vex_from_source_result``
      - ``SBOM_FILE`` after local CycloneDX validation.
      - Inferred from the exact source type or its ``CUSTOM`` declaration.

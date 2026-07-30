@@ -297,6 +297,19 @@ def test_scanned_release_notes_are_embedded_in_every_annotated_tag_contract() ->
     assert '--rawfile message "${tag_message_path}"' in create_tag
 
 
+def test_release_note_schema_versions_use_type_preserving_checks() -> None:
+    release = _workflow_text()
+    pypi = _pypi_text()
+    exact_type_check = 'type(message.get("schema_version")) is int'
+
+    assert release.count("has_exact_tag_schema_version() {") == 3
+    assert release.count(exact_type_check) == 3
+    assert release.count('has_exact_tag_schema_version "${tag_path}"') == 3
+    assert pypi.count("has_exact_tag_schema_version() {") == 2
+    assert pypi.count(exact_type_check) == 2
+    assert pypi.count('has_exact_tag_schema_version "${tag_path}"') == 2
+
+
 def test_pypi_re_resolves_the_validated_tag_immediately_before_publish() -> None:
     text = PYPI_WORKFLOW.read_text(encoding="utf-8")
     re_resolve = text.index("name: Re-resolve validated release tag")

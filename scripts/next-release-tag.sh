@@ -86,9 +86,9 @@ classify_bump() {
 
 head_sha="$(git rev-parse HEAD)"
 while IFS= read -r head_tag; do
+  require_direct_annotated_commit_tag "${head_tag}"
   if [[ "$(tag_commit "${head_tag}")" == "${head_sha}" ]]; then
     require_version "$(normalize_version "${head_tag}")"
-    require_direct_annotated_commit_tag "${head_tag}"
   fi
 done < <(
   git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' |

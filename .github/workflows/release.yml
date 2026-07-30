@@ -207,6 +207,24 @@ jobs:
           bot_name="${APP_SLUG}[bot]"
           bot_email="${bot_user_id}+${bot_name}@users.noreply.github.com"
 
+          has_exact_tag_schema_version() {
+            local tag_path="$1"
+            python3 -I - "${tag_path}" 2>/dev/null <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              tag = json.load(stream)
+          message = json.loads(tag["message"])
+          raise SystemExit(
+              not (
+                  type(message.get("schema_version")) is int
+                  and message["schema_version"] == 1
+              )
+          )
+          PY
+          }
+
           recover_tag_notes() {
             local ref_path="$1"
             local tag_object_sha tag_path expected_notes_sha256
@@ -220,7 +238,7 @@ jobs:
             tag_object_sha="$(jq -r .object.sha "${ref_path}")"
             tag_path="${RUNNER_TEMP}/release-notes-tag-object.json"
             gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
-            if ! jq -e \
+            if ! has_exact_tag_schema_version "${tag_path}" || ! jq -e \
               --arg tag "${RELEASE_TAG}" \
               --arg sha "${RELEASE_SHA}" \
               --arg name "${bot_name}" \
@@ -637,6 +655,24 @@ jobs:
               release_notes_sha256: $notes_sha256,
               release_notes: $release_notes}' > "${tag_message_path}"
 
+          has_exact_tag_schema_version() {
+            local tag_path="$1"
+            python3 -I - "${tag_path}" 2>/dev/null <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              tag = json.load(stream)
+          message = json.loads(tag["message"])
+          raise SystemExit(
+              not (
+                  type(message.get("schema_version")) is int
+                  and message["schema_version"] == 1
+              )
+          )
+          PY
+          }
+
           validate_tag() {
             local ref_path="$1"
             local tag_object_sha tag_path
@@ -649,7 +685,7 @@ jobs:
             tag_object_sha="$(jq -r '.object.sha' "${ref_path}")"
             tag_path="${RUNNER_TEMP}/release-tag-object.json"
             gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
-            if ! jq -e \
+            if ! has_exact_tag_schema_version "${tag_path}" || ! jq -e \
               --arg tag "${RELEASE_TAG}" \
               --arg sha "${RELEASE_SHA}" \
               --arg name "${bot_name}" \
@@ -1029,6 +1065,24 @@ jobs:
           bot_name="${APP_SLUG}[bot]"
           bot_email="${bot_user_id}+${bot_name}@users.noreply.github.com"
 
+          has_exact_tag_schema_version() {
+            local tag_path="$1"
+            python3 -I - "${tag_path}" 2>/dev/null <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              tag = json.load(stream)
+          message = json.loads(tag["message"])
+          raise SystemExit(
+              not (
+                  type(message.get("schema_version")) is int
+                  and message["schema_version"] == 1
+              )
+          )
+          PY
+          }
+
           validate_tag_contract() {
             local ref_path="${RUNNER_TEMP}/pre-publish-tag-ref.json"
             local tag_path="${RUNNER_TEMP}/pre-publish-tag-object.json"
@@ -1044,7 +1098,8 @@ jobs:
             tag_object_sha="$(jq -r .object.sha "${ref_path}")"
             gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
             notes_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
-            jq -e \
+            has_exact_tag_schema_version "${tag_path}" &&
+              jq -e \
               --arg tag "${RELEASE_TAG}" \
               --arg sha "${RELEASE_SHA}" \
               --arg name "${bot_name}" \

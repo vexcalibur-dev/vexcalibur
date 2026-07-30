@@ -61,3 +61,11 @@ def test_release_recovery_guide_preflights_before_dispatch() -> None:
         assert re.fullmatch(RELEASE_VERSION_PATTERN, version) is None
         tag = f"v{version}"
         assert re.fullmatch(RECOVERY_TAG_PATTERN, tag) is None
+
+
+def test_release_recovery_guide_requires_exact_tag_schema_version() -> None:
+    documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
+
+    assert documentation.count("has_exact_tag_schema_version() {") == 1
+    assert 'type(message.get("schema_version")) is int' in documentation
+    assert 'has_exact_tag_schema_version "$TAG_OBJECT"' in documentation

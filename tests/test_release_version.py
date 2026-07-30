@@ -272,7 +272,7 @@ def test_unbounded_nested_annotated_head_tag_is_rejected(tmp_path: Path) -> None
     result = run_release_script_failure(repo, "")
 
     assert result.returncode == 1
-    assert "version component 1000000 must be less than or equal to 999999" in result.stderr
+    assert "release tag v1000000.0.0 must directly annotate a commit" in result.stderr
 
 
 def test_lightweight_head_tag_is_rejected(tmp_path: Path) -> None:
@@ -283,6 +283,18 @@ def test_lightweight_head_tag_is_rejected(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "release tag v1.2.3 must be annotated" in result.stderr
+
+
+def test_nested_annotated_historical_tag_is_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v1.0.0", "-m", "Release v1.0.0")
+    run_git(repo, "tag", "-a", "v9.0.0", "v1.0.0", "-m", "Nested release tag")
+    commit(repo, "feat: prepare next release")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v9.0.0 must directly annotate a commit" in result.stderr
 
 
 def test_existing_head_tag_ignores_unbounded_historical_tag(tmp_path: Path) -> None:

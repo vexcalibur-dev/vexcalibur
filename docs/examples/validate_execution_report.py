@@ -145,6 +145,12 @@ def _read_schema(path: Path) -> dict[str, Any]:
     return _decode_json_object(schema_bytes, role="execution report schema")
 
 
+def _require_exact_integer(value: Any, *, field: str) -> int:
+    if type(value) is not int:
+        raise ValueError(f"{field} must be an integer")
+    return value
+
+
 def validate_execution_report(
     report_path: Path,
     document_path: Path,
@@ -152,10 +158,21 @@ def validate_execution_report(
 ) -> dict[str, Any]:
     """Validate the closed report schema, cross-fields, and document binding."""
     report = _read_report(report_path)
+    for field in ("schema_version", "component_count", "finding_count"):
+        _require_exact_integer(report.get(field), field=field)
+
+    analysis_state_counts = report.get("analysis_state_counts")
+    if isinstance(analysis_state_counts, dict):
+        for state, count in analysis_state_counts.items():
+            _require_exact_integer(count, field=f"analysis_state_counts.{state}")
+
     document_metadata = report.get("document")
     if isinstance(document_metadata, dict):
-        untrusted_bytes = document_metadata.get("bytes")
-        if type(untrusted_bytes) is int and untrusted_bytes > MAX_DOCUMENT_BYTES:
+        untrusted_bytes = _require_exact_integer(
+            document_metadata.get("bytes"),
+            field="document.bytes",
+        )
+        if untrusted_bytes > MAX_DOCUMENT_BYTES:
             raise ValueError("document exceeds the 25 MiB Vexcalibur output limit")
 
     schema = _read_schema(schema_path)
