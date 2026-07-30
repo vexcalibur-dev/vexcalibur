@@ -70,13 +70,13 @@ contract. It uses JSON Schema Draft 2020-12 and rejects unknown properties.
 | --- | --- | --- |
 | `schema_version` | integer | Exactly `1`. The report schema changes independently of the package version. |
 | `command` | string | Exactly `generate`. |
-| `vexcalibur_version` | string | Installed Python package version, 1–128 characters from `[0-9A-Za-z.!+_-]`; the first character is alphanumeric. |
+| `vexcalibur_version` | string | Version of the loaded Vexcalibur code, verified against installed package metadata when the report is produced; 1–128 characters from `[0-9A-Za-z.!+_-]`, with an alphanumeric first character. |
 | `inventory_source` | string | One inventory category from the table below. |
 | `finding_source` | string | One finding category from the table below. |
 | `output_format` | string | `cyclonedx`, `openvex`, `csaf`, or `custom`. |
-| `component_count` | nonnegative integer | Normalized components sent to the finding source. |
-| `finding_count` | nonnegative integer | Normalized findings sent to the renderer. |
-| `analysis_state_counts` | object | Positive counts keyed by `resolved`, `exploitable`, `in_triage`, `false_positive`, or `not_affected`. States with zero findings are omitted. |
+| `component_count` | integer from 0 through 10,000,000 | Normalized components sent to the finding source. |
+| `finding_count` | integer from 0 through 10,000,000 | Normalized findings sent to the renderer. |
+| `analysis_state_counts` | object | Positive counts through 10,000,000, keyed by `resolved`, `exploitable`, `in_triage`, `false_positive`, or `not_affected`. States with zero findings are omitted. |
 | `document.sha256` | string | 64-character lowercase hexadecimal SHA-256 digest of the exact rendered UTF-8 document. |
 | `document.bytes` | integer from 0 through 26,214,400 | Length of the exact rendered document in UTF-8 bytes. The maximum is the 25 MiB generation limit. |
 
@@ -114,8 +114,10 @@ non-root-equivalent path or nonstandard port on the `api.osv.dev` host is
 invalid and fail before generation.
 
 The CLI emits only its concrete inventory, finding, and output categories. A
-Python embedding can use `custom` when it owns a source or renderer that does
-not match a built-in category. The value records that boundary without
+Python embedding that injects an OSV client records `custom`, even when that
+client contacts an OSV-compatible endpoint. Reserved OSV categories describe
+only the exact built-in client selected by Vexcalibur. Other custom sources and
+renderers also use `custom`. The value records the extension boundary without
 pretending the extension is CycloneDX, OSV, or a built-in VEX format.
 
 ## Write behavior
@@ -129,7 +131,14 @@ Help, completion, unknown options, missing files, and other parser failures
 leave the candidate path unchanged because Vexcalibur cannot prove the path is
 a report. Once parsing succeeds, Vexcalibur binds the destination and removes
 an existing report before it validates timestamps, source combinations, or
-document metadata. Any later failure therefore leaves no stale success marker.
+document metadata. Any later failure leaves no stale success marker from that
+transaction.
+
+The destination locks begin during commit, after generation. Another process
+can publish a newer report after the failed transaction removes the old one.
+It can also replace a successful report after this command exits. Give each
+job its own output directory when consumers must retain a one-to-one mapping
+between a VEX document and its report.
 
 After generation, Vexcalibur publishes in this order:
 

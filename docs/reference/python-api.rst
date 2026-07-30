@@ -291,13 +291,16 @@ embedding can use ``ExecutionReportOutputFormat.CUSTOM`` for its own renderer.
      - A local findings file loaded by Vexcalibur.
    * - ``FindingSourceCategory.PUBLIC_OSV``
      - ``public_osv``
-     - The canonical public OSV endpoint, after explicit consent.
+     - The canonical public OSV endpoint selected by Vexcalibur's exact
+       built-in client, after explicit consent.
    * - ``FindingSourceCategory.CUSTOM_OSV``
      - ``custom_osv``
-     - A noncanonical OSV-compatible endpoint.
+     - A noncanonical OSV-compatible endpoint selected by Vexcalibur's exact
+       built-in client.
    * - ``FindingSourceCategory.CUSTOM``
      - ``custom``
-     - Another source declared by an embedding.
+     - Another source declared by an embedding, including an injected OSV
+       client.
    * - ``ExecutionReportOutputFormat.CYCLONEDX``
      - ``cyclonedx``
      - CycloneDX VEX JSON.

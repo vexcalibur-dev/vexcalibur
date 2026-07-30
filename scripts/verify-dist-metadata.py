@@ -5,10 +5,15 @@ from __future__ import annotations
 
 import argparse
 import email
+import stat
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
+MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+MAX_METADATA_BYTES = 1024 * 1024
 MAX_REQUIRED_SDIST_FILE_BYTES = 1024 * 1024
 
 
@@ -90,32 +95,57 @@ def _find_artifacts(dist_dir: Path) -> tuple[Path, Path]:
             + ", ".join(str(path) for path in unexpected_artifacts)
         )
 
+    for artifact in expected_artifacts:
+        metadata = artifact.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or artifact.is_symlink()
+            or metadata.st_size > MAX_ARCHIVE_BYTES
+        ):
+            raise SystemExit(f"Distribution is not a bounded regular file: {artifact}")
+
     return wheels[0], sdists[0]
 
 
 def _read_wheel_metadata(path: Path) -> email.message.Message:
     with zipfile.ZipFile(path) as wheel:
-        metadata_path = next(
-            (name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")),
-            None,
-        )
-        if metadata_path is None:
-            raise SystemExit(f"Could not find wheel metadata in {path}.")
-        return email.message_from_bytes(wheel.read(metadata_path))
+        members = wheel.infolist()
+        _validate_zip_members(members)
+        metadata_members = [
+            member for member in members if member.filename.endswith(".dist-info/METADATA")
+        ]
+        if len(metadata_members) != 1:
+            raise SystemExit(f"Expected exactly one wheel metadata member in {path}.")
+        metadata_member = metadata_members[0]
+        if metadata_member.is_dir() or metadata_member.file_size > MAX_METADATA_BYTES:
+            raise SystemExit(f"Wheel metadata is not a bounded regular member in {path}.")
+        with wheel.open(metadata_member) as metadata_stream:
+            metadata = metadata_stream.read(MAX_METADATA_BYTES + 1)
+        if len(metadata) > MAX_METADATA_BYTES:
+            raise SystemExit(f"Wheel metadata exceeds the byte limit in {path}.")
+        return email.message_from_bytes(metadata)
 
 
 def _read_sdist_metadata(path: Path) -> email.message.Message:
     with tarfile.open(path, "r:gz") as sdist:
-        metadata_path = next(
-            (member for member in sdist.getmembers() if member.name.endswith("/PKG-INFO")),
-            None,
-        )
-        if metadata_path is None:
+        metadata: bytes | None = None
+        for member in _validated_sdist_members(sdist):
+            member_path = PurePosixPath(member.name)
+            if len(member_path.parts) != 2 or member_path.name != "PKG-INFO":
+                continue
+            if metadata is not None:
+                raise SystemExit(f"Expected exactly one sdist metadata member in {path}.")
+            if not member.isfile() or member.size > MAX_METADATA_BYTES:
+                raise SystemExit(f"Sdist metadata is not a bounded regular member in {path}.")
+            metadata_file = sdist.extractfile(member)
+            if metadata_file is None:
+                raise SystemExit(f"Could not read {member.name} from {path}.")
+            metadata = metadata_file.read(MAX_METADATA_BYTES + 1)
+        if metadata is None:
             raise SystemExit(f"Could not find sdist metadata in {path}.")
-        metadata_file = sdist.extractfile(metadata_path)
-        if metadata_file is None:
-            raise SystemExit(f"Could not read {metadata_path.name} from {path}.")
-        return email.message_from_bytes(metadata_file.read())
+        if len(metadata) > MAX_METADATA_BYTES:
+            raise SystemExit(f"Sdist metadata exceeds the byte limit in {path}.")
+        return email.message_from_bytes(metadata)
 
 
 def _verify_required_sdist_files(
@@ -151,14 +181,86 @@ def _verify_required_sdist_files(
         expected[f"{archive_root}/{relative_path.as_posix()}"] = source_path.read_bytes()
 
     with tarfile.open(sdist_path, "r:gz") as sdist:
-        members = {member.name: member for member in sdist.getmembers()}
-        for member_name, expected_bytes in expected.items():
-            member = members.get(member_name)
-            if member is None or not member.isfile() or member.size > MAX_REQUIRED_SDIST_FILE_BYTES:
-                raise SystemExit(f"Required file is missing or invalid in the sdist: {member_name}")
+        found: set[str] = set()
+        for member in _validated_sdist_members(sdist):
+            expected_bytes = expected.get(member.name)
+            if expected_bytes is None:
+                continue
+            if member.name in found:
+                raise SystemExit(f"Required sdist file is repeated: {member.name}")
+            found.add(member.name)
+            if not member.isfile() or member.size > MAX_REQUIRED_SDIST_FILE_BYTES:
+                raise SystemExit(f"Required file is missing or invalid in the sdist: {member.name}")
             stream = sdist.extractfile(member)
             if stream is None or stream.read(MAX_REQUIRED_SDIST_FILE_BYTES + 1) != expected_bytes:
-                raise SystemExit(f"Required sdist file differs from source: {member_name}")
+                raise SystemExit(f"Required sdist file differs from source: {member.name}")
+        missing = sorted(set(expected) - found)
+        if missing:
+            raise SystemExit(f"Required file is missing or invalid in the sdist: {missing[0]}")
+
+
+def _validate_zip_members(members: list[zipfile.ZipInfo]) -> None:
+    if len(members) > MAX_ARCHIVE_MEMBERS:
+        raise SystemExit("Wheel contains too many archive members.")
+    names: set[str] = set()
+    uncompressed_bytes = 0
+    for member in members:
+        _validate_member_name(member.filename, artifact="wheel")
+        if member.filename in names:
+            raise SystemExit(f"Wheel contains duplicate member: {member.filename}")
+        names.add(member.filename)
+        if member.flag_bits & 0x1:
+            raise SystemExit("Wheel contains an encrypted archive member.")
+        if not member.is_dir():
+            uncompressed_bytes += member.file_size
+            if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                raise SystemExit("Wheel exceeds the cumulative uncompressed byte limit.")
+        if member.create_system == 3:
+            file_type = stat.S_IFMT(member.external_attr >> 16)
+            expected_types = {0, stat.S_IFDIR} if member.is_dir() else {0, stat.S_IFREG}
+            if file_type not in expected_types:
+                raise SystemExit("Wheel contains a link or special archive member.")
+
+
+def _validated_sdist_members(
+    sdist: tarfile.TarFile,
+) -> list[tarfile.TarInfo]:
+    members: list[tarfile.TarInfo] = []
+    names: set[str] = set()
+    uncompressed_bytes = 0
+    for index, member in enumerate(sdist):
+        if index >= MAX_ARCHIVE_MEMBERS:
+            raise SystemExit("Sdist contains too many archive members.")
+        _validate_member_name(member.name, artifact="sdist")
+        if member.name in names:
+            raise SystemExit(f"Sdist contains duplicate member: {member.name}")
+        names.add(member.name)
+        if not (member.isfile() or member.isdir()):
+            raise SystemExit("Sdist contains a link or special archive member.")
+        if member.isfile():
+            uncompressed_bytes += member.size
+            if uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                raise SystemExit("Sdist exceeds the cumulative uncompressed byte limit.")
+        members.append(member)
+    return members
+
+
+def _validate_member_name(name: str, *, artifact: str) -> None:
+    canonical = name.rstrip("/")
+    if (
+        not canonical
+        or canonical.startswith(("/", "\\"))
+        or (
+            len(canonical) >= 2
+            and canonical[0].isascii()
+            and canonical[0].isalpha()
+            and canonical[1] == ":"
+        )
+        or "\\" in canonical
+        or any(ord(character) < 32 or ord(character) == 127 for character in canonical)
+        or any(part in {"", ".", ".."} for part in canonical.split("/"))
+    ):
+        raise SystemExit(f"{artifact} contains an unsafe archive member path.")
 
 
 if __name__ == "__main__":

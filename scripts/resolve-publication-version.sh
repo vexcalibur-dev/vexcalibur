@@ -16,6 +16,10 @@ fi
 release_tags=()
 while IFS= read -r existing_tag; do
   if [[ "${existing_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+    if [[ "$(git cat-file -t "refs/tags/${existing_tag}")" != "tag" ]]; then
+      printf 'release tag must be annotated: %s\n' "${existing_tag}" >&2
+      exit 1
+    fi
     release_tags+=("${existing_tag}")
   fi
 done < <(git tag --points-at "${release_sha}")

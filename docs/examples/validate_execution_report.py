@@ -21,7 +21,7 @@ MAX_EXECUTION_REPORT_BYTES = 16 * 1024
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_SCHEMA_BYTES = 256 * 1024
 EXECUTION_REPORT_SCHEMA_SHA256 = (
-    "cd4a26b0ad101e3a8a68e7cdbb44026e19f72e85f7474edfbbdb7f5aa450a111"  # pragma: allowlist secret
+    "8e49a8d5652a94bcbd46eb012e643d8300f1e7c376803def509d37e37e54ed65"  # pragma: allowlist secret
 )
 
 

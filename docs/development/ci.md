@@ -24,7 +24,7 @@ The `CI` workflow runs on pull requests and pushes to `main`:
 
 Ordinary non-scheduled CI runs the unprivileged publication contract in
 publication-only mode. An untagged candidate gets an ephemeral local `v0.0.0`
-tag; a rerun on a released commit uses that commit's single immutable release
+tag; a rerun on a released commit uses that commit's single annotated release
 tag. The contract uploads the lock-derived inventory, generated VEX documents,
 and execution reports as GitHub Actions artifacts retained for 14 days. Its
 caller explicitly sets `allow-public-evidence-upload: true`.
@@ -152,6 +152,10 @@ try {
       --only-binary :all: `
       --python $python `
       $requirements
+    $env:VEXCALIBUR_EXPECTED_PYTHON = (
+      & $python -I -c `
+        "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    )
     $env:VEXCALIBUR_EXPECTED_VERSION = $expectedVersion
     & $python tests/integration/check_installed_windows.py
   }
@@ -188,7 +192,7 @@ evidence](../how-to/build-release-evidence.md) for input review, expected files,
 and failure recovery. The full schema-2 graph is intentionally exercised on
 hosted pull-request runners because it verifies GitHub artifact IDs and
 transport digests. An untagged candidate gets an ephemeral local `v0.0.0` tag;
-a rerun on a released commit uses the existing immutable release tag. The
+a rerun on a released commit uses the existing annotated release tag. The
 credentialless checkout never pushes or changes a tag, and its caller
 explicitly permits uploads derived from this public repository.
 

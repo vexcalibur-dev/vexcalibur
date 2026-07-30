@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "review_kind": "production",
-  "analysis_revision": 3,
-  "reviewed_at": "2026-07-30T03:32:13Z",
-  "reviewed_by": "Codex automated dependency review",
+  "analysis_revision": 4,
+  "reviewed_at": "2026-07-30T04:57:44Z",
+  "reviewed_by": "Codex xhigh security and correctness reviews",
   "inventory": {
     "path": "uv.lock",
     "sha256": "aa2a2c509c243f74:c7f3041b57909e02:768b28e6d76ed203:2eba8b7b2fd2e11a",
@@ -18,5 +18,5 @@
       "in_triage"
     ]
   },
-  "conclusion": "No known vulnerabilities were found in analysis revision 3. The resolved package set is unchanged; setuptools-scm is now also declared in the development group. This is not a claim that the inventory has no vulnerabilities."
+  "conclusion": "No known vulnerabilities were found in analysis revision 4. The lock adds setuptools, setuptools-scm, vcs-versioning, and wheel for deterministic build and source-distribution validation. The findings snapshot remains empty. This is not a claim that the inventory has no vulnerabilities."
 }

@@ -74,10 +74,20 @@ def test_ignores_nonrelease_tags(tmp_path: Path) -> None:
     assert completed.stdout == "tag=v0.0.0\nversion=0.0.0\n"
 
 
-def test_rejects_multiple_release_tags_without_mutation(tmp_path: Path) -> None:
+def test_rejects_a_lightweight_release_tag(tmp_path: Path) -> None:
     repository, release_sha = _repository(tmp_path)
     _git(repository, "tag", "v1.2.3", release_sha)
-    _git(repository, "tag", "v2.0.0", release_sha)
+
+    completed = _resolve(repository, release_sha)
+
+    assert completed.returncode == 1
+    assert completed.stderr == "release tag must be annotated: v1.2.3\n"
+
+
+def test_rejects_multiple_release_tags_without_mutation(tmp_path: Path) -> None:
+    repository, release_sha = _repository(tmp_path)
+    _git(repository, "tag", "--annotate", "v1.2.3", "--message", "release", release_sha)
+    _git(repository, "tag", "--annotate", "v2.0.0", "--message", "release", release_sha)
 
     completed = _resolve(repository, release_sha)
 

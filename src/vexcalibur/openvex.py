@@ -20,8 +20,8 @@ from vexcalibur.document import (
     vex_document_from_findings,
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
-from vexcalibur.generation_context import ExecutionReportOutputFormat
 from vexcalibur.render import VexRenderError
+from vexcalibur.render_budget import RenderInputBudget
 
 OPENVEX_SPEC_VERSION = "0.2.0"
 OPENVEX_CONTEXT = f"https://openvex.dev/ns/v{OPENVEX_SPEC_VERSION}"
@@ -63,14 +63,6 @@ class OpenVexJsonRenderer:
     author: str
     role: str | None = None
 
-    def _vexcalibur_execution_report_output_format(
-        self,
-    ) -> ExecutionReportOutputFormat | None:
-        """Return the format only for the built-in renderer implementation."""
-        if type(self) is not OpenVexJsonRenderer:
-            return None
-        return ExecutionReportOutputFormat.OPENVEX
-
     def __post_init__(self) -> None:
         author, role = _validate_document_metadata(author=self.author, role=self.role)
         object.__setattr__(self, "author", author)
@@ -84,6 +76,20 @@ class OpenVexJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return OpenVEX 0.2.0 JSON."""
+        if type(self) is OpenVexJsonRenderer:
+            budget = RenderInputBudget()
+            components_by_ref = {component.ref: component for component in components}
+            referenced = {finding.component_ref for finding in findings}
+            for component in components:
+                if component.ref in referenced:
+                    budget.add_component(component, purl_copies=1)
+            for finding in findings:
+                budget.add_finding(finding)
+                finding_component = components_by_ref.get(finding.component_ref)
+                if finding_component is not None:
+                    budget.add_package_url(finding_component, copies=2)
+            budget.add_text(self.author)
+            budget.add_text(self.role)
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:

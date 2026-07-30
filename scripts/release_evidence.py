@@ -21,6 +21,25 @@ from urllib.parse import quote
 
 from packageurl import PackageURL
 
+try:
+    from scripts.execution_report_oracle import (
+        ExecutionReportOracleError,
+        ReportSchemaValidator,
+        canonical_execution_report_json,
+        execution_report_schema_validator,
+        load_execution_report,
+        validate_execution_report_document,
+    )
+except ModuleNotFoundError:
+    from execution_report_oracle import (  # type: ignore[no-redef]
+        ExecutionReportOracleError,
+        ReportSchemaValidator,
+        canonical_execution_report_json,
+        execution_report_schema_validator,
+        load_execution_report,
+        validate_execution_report_document,
+    )
+
 MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024
 MAX_EXECUTION_REPORT_BYTES = 16 * 1024
 MAX_GENERATED_DOCUMENT_BYTES = 25 * 1024 * 1024
@@ -223,95 +242,40 @@ def canonical_json(document: object) -> str:
 
 def _canonical_execution_report_json(document: object) -> str:
     """Serialize one execution report according to its public byte contract."""
-    return (
-        json.dumps(
-            document,
-            ensure_ascii=True,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    return canonical_execution_report_json(document)
 
 
-def _execution_report_schema_validator() -> Any:
+def _execution_report_schema_validator() -> ReportSchemaValidator:
     try:
-        from jsonschema import Draft202012Validator
-        from jsonschema.exceptions import SchemaError
-    except ImportError as exc:
-        raise EvidenceError(
-            "execution report publication validation requires the locked jsonschema dependency"
-        ) from exc
-
-    schema = load_json(EXECUTION_REPORT_SCHEMA_PATH)
-    try:
-        Draft202012Validator.check_schema(schema)
-    except SchemaError as exc:
-        raise EvidenceError(f"execution report schema is invalid: {exc.message}") from exc
-    return Draft202012Validator(schema)
+        return execution_report_schema_validator(EXECUTION_REPORT_SCHEMA_PATH)
+    except ExecutionReportOracleError as exc:
+        raise EvidenceError(str(exc)) from exc
 
 
 def _validate_execution_report_document(
     document: object,
     *,
-    validator: Any,
+    validator: ReportSchemaValidator,
 ) -> dict[str, Any]:
-    errors = sorted(validator.iter_errors(document), key=lambda error: list(error.absolute_path))
-    if errors:
-        first = errors[0]
-        location = ".".join(str(part) for part in first.absolute_path) or "report"
-        raise EvidenceError(f"execution report schema violation at {location}: {first.message}")
-    report = _require_dict(document, field="execution report")
-    state_counts = _require_dict(
-        report.get("analysis_state_counts"),
-        field="execution report analysis_state_counts",
-    )
-    for field in ("schema_version", "component_count", "finding_count"):
-        if type(report.get(field)) is not int:
-            raise EvidenceError(f"execution report {field} must be an integer")
-    document_metadata = _require_dict(
-        report.get("document"),
-        field="execution report document",
-    )
-    if type(document_metadata.get("bytes")) is not int:
-        raise EvidenceError("execution report document bytes must be an integer")
-    if any(type(count) is not int for count in state_counts.values()):
-        raise EvidenceError("execution report analysis-state counts must be integers")
-    finding_count = report.get("finding_count")
-    if sum(state_counts.values()) != finding_count:
-        raise EvidenceError("execution report analysis-state counts do not sum to finding count")
-    return report
+    try:
+        return validate_execution_report_document(document, validator=validator)
+    except ExecutionReportOracleError as exc:
+        raise EvidenceError(str(exc)) from exc
 
 
 def _load_execution_report(
     path: Path,
     *,
-    validator: Any,
+    validator: ReportSchemaValidator,
 ) -> dict[str, Any]:
-    if not path.is_file() or path.is_symlink():
-        raise EvidenceError(f"expected a regular, non-symlink execution report: {path}")
-    if path.stat().st_size > MAX_EXECUTION_REPORT_BYTES:
-        raise EvidenceError(
-            f"execution report exceeds the {MAX_EXECUTION_REPORT_BYTES} byte limit: {path}"
-        )
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise EvidenceError(f"could not read execution report {path}: {exc}") from exc
-    if len(raw) > MAX_EXECUTION_REPORT_BYTES:
-        raise EvidenceError(
-            f"execution report exceeds the {MAX_EXECUTION_REPORT_BYTES} byte limit: {path}"
+        return load_execution_report(
+            path,
+            validator=validator,
+            max_bytes=MAX_EXECUTION_REPORT_BYTES,
         )
-    try:
-        document = json.loads(
-            raw.decode("utf-8"),
-            object_pairs_hook=_object_without_duplicates,
-        )
-    except (UnicodeError, json.JSONDecodeError) as exc:
-        raise EvidenceError(f"execution report is not valid UTF-8 JSON: {path}: {exc}") from exc
-    if raw != _canonical_execution_report_json(document).encode("ascii"):
-        raise EvidenceError(f"execution report is not canonical JSON: {path}")
-    return _validate_execution_report_document(document, validator=validator)
+    except ExecutionReportOracleError as exc:
+        raise EvidenceError(str(exc)) from exc
 
 
 def release_timestamp(source_date_epoch: int) -> str:

@@ -7,6 +7,7 @@ from packageurl import PackageURL
 
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
 from vexcalibur.generation_result import (
+    MAX_EXECUTION_REPORT_COUNT,
     MAX_GENERATED_DOCUMENT_BYTES,
     ExecutionReportOutputFormat,
     FindingSourceCategory,
@@ -156,8 +157,18 @@ def test_document_metadata_rejects_invalid_values(
         ({"finding_source": "custom"}, TypeError, "finding_source"),
         ({"output_format": "custom"}, TypeError, "output_format"),
         ({"component_count": -1}, ValueError, "component_count"),
+        (
+            {"component_count": MAX_EXECUTION_REPORT_COUNT + 1},
+            ValueError,
+            "component_count",
+        ),
         ({"component_count": True}, ValueError, "component_count"),
         ({"finding_count": -1}, ValueError, "finding_count"),
+        (
+            {"finding_count": MAX_EXECUTION_REPORT_COUNT + 1},
+            ValueError,
+            "finding_count",
+        ),
         ({"finding_count": True}, ValueError, "finding_count"),
         ({"analysis_state_counts": []}, TypeError, "analysis_state_counts"),
         (
@@ -174,6 +185,15 @@ def test_document_metadata_rejects_invalid_values(
             {"analysis_state_counts": ((VexAnalysisState.IN_TRIAGE, 0),)},
             ValueError,
             "positive",
+        ),
+        (
+            {
+                "analysis_state_counts": (
+                    (VexAnalysisState.IN_TRIAGE, MAX_EXECUTION_REPORT_COUNT + 1),
+                )
+            },
+            ValueError,
+            "greater than",
         ),
         (
             {

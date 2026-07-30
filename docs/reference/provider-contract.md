@@ -51,7 +51,8 @@ endpoint. If the provider omits the method, callers must supply a complete
 
 Custom providers can return only `FindingSourceCategory.CUSTOM`. Vexcalibur
 reserves `local_file`, `public_osv`, and `custom_osv` for its built-in source
-implementations.
+implementations. An injected OSV client is an extension and therefore records
+`custom`, regardless of the endpoint it contacts.
 
 ## Component identity
 

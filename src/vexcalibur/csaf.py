@@ -30,7 +30,7 @@ from vexcalibur.domain import (
     VulnerabilityFinding,
 )
 from vexcalibur.errors import VexRenderError
-from vexcalibur.generation_context import ExecutionReportOutputFormat
+from vexcalibur.render_budget import RenderInputBudget
 from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
 CSAF_VERSION = "2.0"
@@ -131,14 +131,6 @@ class Csaf20VexJsonRenderer:
     metadata: Csaf20DocumentMetadata
     tool_version: str = field(default_factory=lambda: __version__)
 
-    def _vexcalibur_execution_report_output_format(
-        self,
-    ) -> ExecutionReportOutputFormat | None:
-        """Return the format only for the built-in renderer implementation."""
-        if type(self) is not Csaf20VexJsonRenderer:
-            return None
-        return ExecutionReportOutputFormat.CSAF
-
     def __post_init__(self) -> None:
         normalized_tool_version = self.tool_version.strip()
         if not normalized_tool_version:
@@ -154,6 +146,22 @@ class Csaf20VexJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return CSAF 2.0 VEX JSON."""
+        if type(self) is Csaf20VexJsonRenderer:
+            budget = RenderInputBudget()
+            referenced = {finding.component_ref for finding in findings}
+            for component in components:
+                if component.ref in referenced:
+                    budget.add_component(component, purl_copies=2)
+            for finding in findings:
+                budget.add_finding(finding)
+            for value in (
+                self.metadata.document_id,
+                self.metadata.title,
+                self.metadata.publisher_name,
+                self.metadata.publisher_namespace,
+                self.tool_version,
+            ):
+                budget.add_text(value)
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:

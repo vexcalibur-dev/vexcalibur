@@ -19,6 +19,7 @@ from vexcalibur.domain import (
 from vexcalibur.generate import MAX_VEX_OUTPUT_BYTES
 from vexcalibur.generation_result import (
     MAX_EXECUTION_REPORT_BYTES,
+    MAX_EXECUTION_REPORT_COUNT,
     ExecutionReportOutputFormat,
     FindingSourceCategory,
     GeneratedDocumentMetadata,
@@ -70,6 +71,7 @@ def _report(
     findings: tuple[VulnerabilityFinding, ...] = (),
     output_format: ExecutionReportOutputFormat = ExecutionReportOutputFormat.CYCLONEDX,
 ) -> GenerationExecutionReport:
+    monkeypatch.setattr("vexcalibur.__version__", "0.4.2.dev1+g1234567")
     monkeypatch.setattr(
         "vexcalibur.generation_result.importlib.metadata.version",
         lambda name: "0.4.2.dev1+g1234567",
@@ -447,7 +449,7 @@ def test_execution_report_rejects_non_string_package_versions(
         result.execution_report()
 
 
-def test_generation_result_snapshots_the_installed_package_version(
+def test_generation_result_captures_loaded_code_and_validates_package_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requested_versions: list[str] = []
@@ -460,6 +462,7 @@ def test_generation_result_snapshots_the_installed_package_version(
         "vexcalibur.generation_result.importlib.metadata.version",
         first_version,
     )
+    monkeypatch.setattr("vexcalibur.__version__", "0.4.2.dev1+first")
     result = GenerationResult(
         rendered_document="{}\n",
         components=(),
@@ -475,12 +478,14 @@ def test_generation_result_snapshots_the_installed_package_version(
     assert result.execution_report().vexcalibur_version == "0.4.2.dev1+first"
     assert requested_versions == ["vexcalibur"]
 
+    monkeypatch.setattr("vexcalibur.__version__", "0.4.2.dev1+second")
     monkeypatch.setattr(
         "vexcalibur.generation_result.importlib.metadata.version",
         lambda name: "0.4.2.dev1+second",
     )
 
-    assert result.execution_report().vexcalibur_version == "0.4.2.dev1+first"
+    with pytest.raises(ValueError, match="does not match installed package metadata"):
+        result.execution_report()
 
 
 def test_direct_report_factory_snapshots_the_installed_package_version(
@@ -496,6 +501,7 @@ def test_direct_report_factory_snapshots_the_installed_package_version(
         "vexcalibur.generation_result.importlib.metadata.version",
         installed_version,
     )
+    monkeypatch.setattr("vexcalibur.__version__", "0.4.2.dev1+direct")
     result = GenerationResult(
         rendered_document="{}\n",
         components=(),
@@ -512,7 +518,7 @@ def test_direct_report_factory_snapshots_the_installed_package_version(
 
     assert first.vexcalibur_version == "0.4.2.dev1+direct"
     assert second.vexcalibur_version == first.vexcalibur_version
-    assert requested_versions == ["vexcalibur"]
+    assert requested_versions == ["vexcalibur", "vexcalibur"]
 
 
 def test_package_version_snapshot_does_not_change_result_identity(
@@ -522,6 +528,7 @@ def test_package_version_snapshot_does_not_change_result_identity(
         "vexcalibur.generation_result.importlib.metadata.version",
         lambda name: "0.4.2.dev1+stable",
     )
+    monkeypatch.setattr("vexcalibur.__version__", "0.4.2.dev1+stable")
     context = GenerationExecutionContext(
         inventory_source=InventorySourceCategory.SBOM_FILE,
         finding_source=FindingSourceCategory.LOCAL_FILE,
@@ -559,6 +566,7 @@ def test_execution_report_uses_the_selected_output_format_without_reparsing(
 def test_execution_report_supports_custom_extension_categories(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("vexcalibur.__version__", "0.4.2.dev1+g1234567")
     monkeypatch.setattr(
         "vexcalibur.generation_result.importlib.metadata.version",
         lambda name: "0.4.2.dev1+g1234567",
@@ -717,6 +725,26 @@ def test_execution_report_enforces_serialized_size_limit(
 
 def test_production_execution_report_limit_is_16_kib() -> None:
     assert MAX_EXECUTION_REPORT_BYTES == 16 * 1024
+
+
+def test_parser_rejects_oversized_text_before_utf8_allocation() -> None:
+    oversized = "x" * (MAX_EXECUTION_REPORT_BYTES + 1)
+
+    with pytest.raises(GenerationExecutionReportParseError, match="byte limit"):
+        parse_generation_execution_report(oversized)
+
+
+def test_schema_and_python_contract_share_count_maximum() -> None:
+    schema = json.loads(EXECUTION_REPORT_SCHEMA_PATH.read_text(encoding="utf-8"))
+    properties = schema["properties"]
+
+    assert properties["component_count"]["maximum"] == MAX_EXECUTION_REPORT_COUNT
+    assert properties["finding_count"]["maximum"] == MAX_EXECUTION_REPORT_COUNT
+    for state in VexAnalysisState:
+        assert (
+            properties["analysis_state_counts"]["properties"][state.value]["maximum"]
+            == MAX_EXECUTION_REPORT_COUNT
+        )
 
 
 def test_execution_report_accepts_exact_size_limit_and_rejects_one_byte_over(

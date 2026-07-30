@@ -14,7 +14,7 @@ closed-world schema:
 | `review_kind` | `production` or `synthetic_fixture` |
 | `analysis_revision` | Positive integer, advanced for each review |
 | `reviewed_at` | Extended RFC 3339 UTC timestamp ending in `Z` |
-| `reviewed_by` | Nonempty public attribution; repository review history supplies provenance |
+| `reviewed_by` | Nonempty public attribution to a maintainer or named review automation; repository review history supplies provenance |
 | `inventory.path` | `uv.lock` |
 | `inventory.sha256` | Exact lock SHA-256 as four colon-delimited groups of 16 lowercase hexadecimal characters |
 | `inventory.coverage` | `cross-platform-reference-runtime` |

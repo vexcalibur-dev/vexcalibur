@@ -57,34 +57,41 @@
     },
     "component_count": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 10000000
     },
     "finding_count": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 10000000
     },
     "analysis_state_counts": {
       "type": "object",
       "properties": {
         "resolved": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 10000000
         },
         "exploitable": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 10000000
         },
         "in_triage": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 10000000
         },
         "false_positive": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 10000000
         },
         "not_affected": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 10000000
         }
       },
       "additionalProperties": false

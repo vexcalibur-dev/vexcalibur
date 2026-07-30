@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import vexcalibur
 import vexcalibur.execution_report_destination as destination_module
 import vexcalibur.execution_report_locks as lock_module
 from vexcalibur.execution_report_destination import (
@@ -30,6 +31,7 @@ from vexcalibur.generation_result import (
 
 
 def _result(monkeypatch: pytest.MonkeyPatch) -> GenerationResult:
+    monkeypatch.setattr(vexcalibur, "__version__", "0.4.2.dev1")
     monkeypatch.setattr(
         "vexcalibur.generation_result.importlib.metadata.version",
         lambda name: "0.4.2.dev1",

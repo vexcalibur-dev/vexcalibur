@@ -40,7 +40,7 @@ Everything under `release-evidence/` is intended to become public. Do not place
 embargoed advisories, private SBOM data, tokens, customer identifiers, or
 internal URLs there.
 
-## Check the human-reviewed snapshot
+## Check the reviewed snapshot
 
 Display the two digests that the review binds:
 

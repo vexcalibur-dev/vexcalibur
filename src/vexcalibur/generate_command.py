@@ -8,11 +8,12 @@ from pathlib import Path
 
 from vexcalibur.domain import VulnerabilitySource, validate_source_before_inventory_load
 from vexcalibur.generate import (
-    generate_vex_from_github_source_result,
+    _generate_vex_from_github_selected_source_result,
     generate_vex_from_local_findings_result,
     generate_vex_from_sbom_result,
 )
 from vexcalibur.generation_result import GenerationResult
+from vexcalibur.generation_selection import select_finding_source
 from vexcalibur.github_sbom import (
     GithubSbomClient,
     normalize_github_api_url,
@@ -107,6 +108,7 @@ class GenerateCommandRequest:
             raise AssertionError("generate request repository validation failed")
         source = self._source
         validate_source_before_inventory_load(source)
+        selected_source = select_finding_source(source)
         client = GithubSbomClient(
             api_url=self.github_api_url,
             token=resolve_github_token(
@@ -115,9 +117,9 @@ class GenerateCommandRequest:
                 allow_gh_cli=self.use_gh_auth,
             ),
         )
-        return generate_vex_from_github_source_result(
+        return _generate_vex_from_github_selected_source_result(
             repository=repository,
-            source=source,
+            source=selected_source,
             timestamp=self.timestamp,
             github_client=client,
             renderer=self.renderer,

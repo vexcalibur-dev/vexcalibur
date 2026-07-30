@@ -474,14 +474,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          python scripts/verify-dist-metadata.py dist \
-            --expected-name vexcalibur \
-            --expected-version "$EXPECTED_VERSION" \
-            --github-output "$GITHUB_OUTPUT"
           wheel="dist/vexcalibur-${EXPECTED_VERSION}-py3-none-any.whl"
           sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
           printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
           printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
+          python scripts/verify-dist-metadata.py dist \
+            --expected-name vexcalibur \
+            --expected-version "$EXPECTED_VERSION" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Run installed CLI checks
         env:
@@ -614,14 +614,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          python scripts/verify-dist-metadata.py dist \
-            --expected-name vexcalibur \
-            --expected-version "$EXPECTED_VERSION" \
-            --github-output "$GITHUB_OUTPUT"
           wheel="dist/vexcalibur-${EXPECTED_VERSION}-py3-none-any.whl"
           sdist="dist/vexcalibur-${EXPECTED_VERSION}.tar.gz"
           printf '%s  %s\n' "${EXPECTED_WHEEL_SHA256}" "${wheel}" | sha256sum --check --strict
           printf '%s  %s\n' "${EXPECTED_SDIST_SHA256}" "${sdist}" | sha256sum --check --strict
+          python scripts/verify-dist-metadata.py dist \
+            --expected-name vexcalibur \
+            --expected-version "$EXPECTED_VERSION" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Validate checked-in CSAF golden
         run: make csaf-interop

@@ -8,12 +8,13 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import cached_property
 from typing import Literal, TypedDict, cast
 
 from packageurl import PackageURL
 
+import vexcalibur
 from vexcalibur.domain import (
     ComponentIdentity,
     ExecutionReportFindingSourceDeclaration,
@@ -36,6 +37,7 @@ from vexcalibur.render import (
 __all__ = [
     "EXECUTION_REPORT_SCHEMA_VERSION",
     "MAX_EXECUTION_REPORT_BYTES",
+    "MAX_EXECUTION_REPORT_COUNT",
     "MAX_GENERATED_DOCUMENT_BYTES",
     "ExecutionReportFindingSourceDeclaration",
     "ExecutionReportOutputFormat",
@@ -56,6 +58,7 @@ __all__ = [
 EXECUTION_REPORT_SCHEMA_VERSION = 1
 MAX_EXECUTION_REPORT_BYTES = 16 * 1024
 MAX_GENERATED_DOCUMENT_BYTES = 25 * 1024 * 1024
+MAX_EXECUTION_REPORT_COUNT = 10_000_000
 _VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z.!+_-]{0,127}", re.ASCII)
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}", re.ASCII)
 
@@ -112,16 +115,27 @@ class _ComponentSnapshot:
     @classmethod
     def from_component(cls, component: ComponentIdentity) -> _ComponentSnapshot:
         return cls(
-            ref=component.ref,
-            name=component.name,
-            version=component.version,
-            purl_type=component.purl.type,
-            purl_namespace=component.purl.namespace,
-            purl_name=component.purl.name,
-            purl_version=component.purl.version,
-            purl_qualifiers=tuple(sorted(dict(component.purl.qualifiers).items())),
-            purl_subpath=component.purl.subpath,
-            component_type=component.type,
+            ref=_snapshot_text(component.ref, field="component ref"),
+            name=_snapshot_text(component.name, field="component name"),
+            version=_snapshot_optional_text(component.version, field="component version"),
+            purl_type=_snapshot_text(component.purl.type, field="PURL type"),
+            purl_namespace=_snapshot_optional_text(
+                component.purl.namespace,
+                field="PURL namespace",
+            ),
+            purl_name=_snapshot_text(component.purl.name, field="PURL name"),
+            purl_version=_snapshot_optional_text(component.purl.version, field="PURL version"),
+            purl_qualifiers=tuple(
+                sorted(
+                    (
+                        _snapshot_text(key, field="PURL qualifier key"),
+                        _snapshot_text(value, field="PURL qualifier value"),
+                    )
+                    for key, value in component.purl.qualifiers.items()
+                )
+            ),
+            purl_subpath=_snapshot_optional_text(component.purl.subpath, field="PURL subpath"),
+            component_type=_snapshot_text(component.type, field="component type"),
         )
 
     def materialize(self) -> ComponentIdentity:
@@ -161,18 +175,34 @@ class _FindingSnapshot:
     @classmethod
     def from_finding(cls, finding: VulnerabilityFinding) -> _FindingSnapshot:
         return cls(
-            id=finding.id,
-            source_name=finding.source_name,
-            source_url=finding.source_url,
-            component_ref=finding.component_ref,
-            purl=finding.purl,
-            modified=finding.modified,
-            analysis_state=finding.analysis_state,
-            analysis_detail=finding.analysis_detail,
-            action_statement=finding.action_statement,
-            impact_statement=finding.impact_statement,
-            fixed_version=finding.fixed_version,
-            remediation_category=finding.remediation_category,
+            id=_snapshot_text(finding.id, field="finding id"),
+            source_name=_snapshot_text(finding.source_name, field="finding source name"),
+            source_url=_snapshot_text(finding.source_url, field="finding source URL"),
+            component_ref=_snapshot_text(finding.component_ref, field="finding component ref"),
+            purl=_snapshot_text(finding.purl, field="finding PURL"),
+            modified=_snapshot_datetime(finding.modified),
+            analysis_state=VexAnalysisState(finding.analysis_state),
+            analysis_detail=_snapshot_text(
+                finding.analysis_detail,
+                field="finding analysis detail",
+            ),
+            action_statement=_snapshot_optional_text(
+                finding.action_statement,
+                field="finding action statement",
+            ),
+            impact_statement=_snapshot_optional_text(
+                finding.impact_statement,
+                field="finding impact statement",
+            ),
+            fixed_version=_snapshot_optional_text(
+                finding.fixed_version,
+                field="finding fixed version",
+            ),
+            remediation_category=(
+                None
+                if finding.remediation_category is None
+                else VexRemediationCategory(finding.remediation_category)
+            ),
         )
 
     def materialize(self) -> VulnerabilityFinding:
@@ -241,7 +271,7 @@ class GenerationResult:
             "_finding_snapshots",
             tuple(_FindingSnapshot.from_finding(finding) for finding in findings),
         )
-        object.__setattr__(self, "_vexcalibur_version", None)
+        object.__setattr__(self, "_vexcalibur_version", _loaded_vexcalibur_version())
 
     @property
     def components(self) -> tuple[ComponentIdentity, ...]:
@@ -274,11 +304,11 @@ class GenerationResult:
     def _execution_report_version(self) -> str:
         version = self._vexcalibur_version
         if version is None:
-            version = _installed_vexcalibur_version()
-            object.__setattr__(
-                self,
-                "_vexcalibur_version",
-                version,
+            raise GenerationReportMetadataError("loaded Vexcalibur version is unavailable")
+        installed_version = _installed_vexcalibur_version()
+        if installed_version != version:
+            raise GenerationReportMetadataError(
+                "loaded Vexcalibur code version does not match installed package metadata"
             )
         return version
 
@@ -353,17 +383,31 @@ class GenerationExecutionReport:
             raise TypeError("finding_source must be a FindingSourceCategory")
         if not isinstance(self.output_format, ExecutionReportOutputFormat):
             raise TypeError("output_format must be an ExecutionReportOutputFormat")
-        if type(self.component_count) is not int or self.component_count < 0:
-            raise ValueError("component_count must be a nonnegative integer")
-        if type(self.finding_count) is not int or self.finding_count < 0:
-            raise ValueError("finding_count must be a nonnegative integer")
+        if (
+            type(self.component_count) is not int
+            or self.component_count < 0
+            or self.component_count > MAX_EXECUTION_REPORT_COUNT
+        ):
+            raise ValueError(f"component_count must be between 0 and {MAX_EXECUTION_REPORT_COUNT}")
+        if (
+            type(self.finding_count) is not int
+            or self.finding_count < 0
+            or self.finding_count > MAX_EXECUTION_REPORT_COUNT
+        ):
+            raise ValueError(f"finding_count must be between 0 and {MAX_EXECUTION_REPORT_COUNT}")
         if any(
             type(item) is not tuple or len(item) != 2 or not isinstance(item[0], VexAnalysisState)
             for item in self.analysis_state_counts
         ):
             raise TypeError("analysis_state_counts must contain analysis-state pairs")
-        if any(type(count) is not int or count <= 0 for _, count in self.analysis_state_counts):
-            raise ValueError("analysis-state counts must be positive integers")
+        if any(
+            type(count) is not int or count <= 0 or count > MAX_EXECUTION_REPORT_COUNT
+            for _, count in self.analysis_state_counts
+        ):
+            raise ValueError(
+                "analysis-state counts must be positive integers no greater than "
+                f"{MAX_EXECUTION_REPORT_COUNT}"
+            )
         counts = dict(self.analysis_state_counts)
         expected_states = [state for state in VexAnalysisState if counts.get(state, 0) > 0]
         actual_states = [state for state, _ in self.analysis_state_counts]
@@ -447,6 +491,10 @@ def parse_generation_execution_report(
 ) -> GenerationExecutionReport:
     """Parse one bounded, canonical execution report into its typed value."""
     if type(serialized) is str:
+        if len(serialized) > MAX_EXECUTION_REPORT_BYTES:
+            raise GenerationExecutionReportParseError(
+                f"execution report exceeds the {MAX_EXECUTION_REPORT_BYTES} byte limit"
+            )
         try:
             report_bytes = serialized.encode("utf-8", errors="strict")
         except UnicodeEncodeError as exc:
@@ -608,3 +656,42 @@ def _installed_vexcalibur_version() -> str:
         msg = "installed Vexcalibur package version is not report-safe"
         raise GenerationReportMetadataError(msg)
     return version
+
+
+def _loaded_vexcalibur_version() -> str:
+    version = vexcalibur.__version__
+    if type(version) is not str or _VERSION_PATTERN.fullmatch(version) is None:
+        raise GenerationReportMetadataError("loaded Vexcalibur version is not report-safe")
+    return version
+
+
+def _snapshot_text(value: object, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be text")
+    return value if type(value) is str else str.__str__(value)
+
+
+def _snapshot_optional_text(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    return _snapshot_text(value, field=field)
+
+
+def _snapshot_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        raise TypeError("finding modified timestamp must be a datetime")
+    offset = value.utcoffset()
+    fixed_timezone = None if offset is None else timezone(offset)
+    return datetime(
+        value.year,
+        value.month,
+        value.day,
+        value.hour,
+        value.minute,
+        value.second,
+        value.microsecond,
+        tzinfo=fixed_timezone,
+        fold=value.fold,
+    )

@@ -1,14 +1,14 @@
 # Reviewed release-evidence inputs
 
-This directory contains the public, human-reviewed inputs for Vexcalibur's own
+This directory contains the publicly reviewed inputs for Vexcalibur's own
 release evidence. `review.json` binds the review to the exact SHA-256 digest of
 `uv.lock` and `findings.json`. The current findings snapshot is empty. That
 means it makes no VEX assertions; it does not claim that the locked inventory
 has no vulnerabilities.
 
-`reviewed_by` is a public claimed attribution. Its provenance comes from the
-repository's commit and review history; the JSON field does not independently
-authenticate a reviewer.
+`reviewed_by` identifies the maintainer or review automation responsible for
+the public claim. Its provenance comes from the repository's commit and review
+history; the JSON field does not independently authenticate the reviewer.
 
 Only explicit `in_triage` findings are accepted by the production generator.
 Do not add private reports, embargoed advisory data, credentials, or customer

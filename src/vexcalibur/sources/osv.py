@@ -24,7 +24,6 @@ from vexcalibur.domain import (
     VulnerabilitySourceInputError,
     canonical_component_version,
 )
-from vexcalibur.generation_context import FindingSourceCategory
 from vexcalibur.json_boundary import JsonFailureKind, StrictJsonError, strict_json_loads
 from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
@@ -642,16 +641,6 @@ class OsvSource:
     def effective_base_url(self) -> str:
         """Return the endpoint that this source's configured client will use."""
         return self._effective_base_url(self.client)
-
-    def _vexcalibur_execution_report_finding_source(
-        self,
-    ) -> FindingSourceCategory | None:
-        """Return provenance only for the built-in OSV source implementation."""
-        if type(self) is not OsvSource:
-            return None
-        if is_canonical_public_osv_endpoint(self.effective_base_url):
-            return FindingSourceCategory.PUBLIC_OSV
-        return FindingSourceCategory.CUSTOM_OSV
 
     def validate_before_inventory_load(self) -> None:
         """Validate built-in OSV policy before a remote inventory request."""

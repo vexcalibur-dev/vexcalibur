@@ -75,22 +75,19 @@ def test_builtin_renderers_reject_oversized_fields_before_rendering(
         )
         for index in range(32)
     )
-    selected_renderer = CycloneDxJsonRenderer() if renderer is None else renderer
-    render_was_called = False
+    document_was_built = False
 
-    def unexpected_render(
-        self: object,
-        *,
-        components: tuple[ComponentIdentity, ...],
-        findings: tuple[VulnerabilityFinding, ...],
-        timestamp: datetime | None = None,
-    ) -> str:
-        nonlocal render_was_called
-        render_was_called = True
-        return "{}"
+    def unexpected_document_build(**kwargs: object) -> object:
+        nonlocal document_was_built
+        document_was_built = True
+        raise AssertionError("renderer built a document before input preflight")
 
-    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
-    monkeypatch.setattr(type(selected_renderer), "render", unexpected_render)
+    monkeypatch.setattr(
+        "vexcalibur.render_budget.MAX_GENERATED_DOCUMENT_BYTES",
+        64 * 1024,
+    )
+    module = "vexcalibur.vex" if renderer is None else f"{type(renderer).__module__}"
+    monkeypatch.setattr(f"{module}.vex_document_from_findings", unexpected_document_build)
 
     with pytest.raises(VexRenderError, match="65536 byte output limit"):
         generate_vex_from_components(
@@ -100,7 +97,7 @@ def test_builtin_renderers_reject_oversized_fields_before_rendering(
             renderer=renderer,
         )
 
-    assert render_was_called is False
+    assert document_was_built is False
 
 
 def test_openvex_preflight_accounts_for_percent_encoded_derived_version(
@@ -122,21 +119,21 @@ def test_openvex_preflight_accounts_for_percent_encoded_derived_version(
         ),
     )
     renderer = OpenVexJsonRenderer(author="https://security.example.test")
-    render_was_called = False
+    document_was_built = False
 
-    def unexpected_render(
-        self: object,
-        *,
-        components: tuple[ComponentIdentity, ...],
-        findings: tuple[VulnerabilityFinding, ...],
-        timestamp: datetime | None = None,
-    ) -> str:
-        nonlocal render_was_called
-        render_was_called = True
-        return "{}"
+    def unexpected_document_build(**kwargs: object) -> object:
+        nonlocal document_was_built
+        document_was_built = True
+        raise AssertionError("renderer built a document before input preflight")
 
-    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
-    monkeypatch.setattr(type(renderer), "render", unexpected_render)
+    monkeypatch.setattr(
+        "vexcalibur.render_budget.MAX_GENERATED_DOCUMENT_BYTES",
+        64 * 1024,
+    )
+    monkeypatch.setattr(
+        "vexcalibur.openvex.vex_document_from_findings",
+        unexpected_document_build,
+    )
 
     with pytest.raises(VexRenderError, match="65536 byte output limit"):
         generate_vex_from_components(
@@ -146,7 +143,7 @@ def test_openvex_preflight_accounts_for_percent_encoded_derived_version(
             renderer=renderer,
         )
 
-    assert render_was_called is False
+    assert document_was_built is False
 
 
 def test_openvex_preflight_scales_derived_purl_budget_per_finding(
@@ -169,21 +166,21 @@ def test_openvex_preflight_scales_derived_purl_budget_per_finding(
         for index in range(5)
     )
     renderer = OpenVexJsonRenderer(author="https://security.example.test")
-    render_was_called = False
+    document_was_built = False
 
-    def unexpected_render(
-        self: object,
-        *,
-        components: tuple[ComponentIdentity, ...],
-        findings: tuple[VulnerabilityFinding, ...],
-        timestamp: datetime | None = None,
-    ) -> str:
-        nonlocal render_was_called
-        render_was_called = True
-        return "{}"
+    def unexpected_document_build(**kwargs: object) -> object:
+        nonlocal document_was_built
+        document_was_built = True
+        raise AssertionError("renderer built a document before input preflight")
 
-    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
-    monkeypatch.setattr(type(renderer), "render", unexpected_render)
+    monkeypatch.setattr(
+        "vexcalibur.render_budget.MAX_GENERATED_DOCUMENT_BYTES",
+        64 * 1024,
+    )
+    monkeypatch.setattr(
+        "vexcalibur.openvex.vex_document_from_findings",
+        unexpected_document_build,
+    )
 
     with pytest.raises(VexRenderError, match="65536 byte output limit"):
         generate_vex_from_components(
@@ -193,7 +190,7 @@ def test_openvex_preflight_scales_derived_purl_budget_per_finding(
             renderer=renderer,
         )
 
-    assert render_was_called is False
+    assert document_was_built is False
 
 
 def test_preflight_ignores_unreferenced_component_text(
@@ -206,6 +203,10 @@ def test_preflight_ignores_unreferenced_component_text(
         purl=PackageURL.from_string("pkg:pypi/clean@1.0.0"),
     )
     monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64 * 1024)
+    monkeypatch.setattr(
+        "vexcalibur.render_budget.MAX_GENERATED_DOCUMENT_BYTES",
+        64 * 1024,
+    )
 
     rendered = generate_vex_from_components(
         components=(component,),

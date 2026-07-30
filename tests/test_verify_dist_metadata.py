@@ -75,7 +75,12 @@ def run_verifier(
 
 def test_verifier_accepts_matching_wheel_and_sdist(tmp_path: Path) -> None:
     write_wheel(tmp_path)
-    write_sdist(tmp_path)
+    sdist = write_sdist(tmp_path)
+    add_sdist_file(
+        sdist,
+        "vexcalibur-0.1.0/src/vexcalibur.egg-info/PKG-INFO",
+        b"Name: vexcalibur\nVersion: 0.1.0\n",
+    )
 
     result = run_verifier(tmp_path)
 
@@ -201,3 +206,31 @@ def test_verifier_rejects_required_file_missing_from_sdist(tmp_path: Path) -> No
 
     assert result.returncode == 1
     assert "Required file is missing or invalid in the sdist" in result.stderr
+
+
+def test_verifier_rejects_compressed_wheel_metadata_bomb(tmp_path: Path) -> None:
+    wheel = tmp_path / "vexcalibur-0.1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "vexcalibur-0.1.0.dist-info/METADATA",
+            b"Name: vexcalibur\nVersion: 0.1.0\n" + (b"A" * (1024 * 1024)),
+        )
+    write_sdist(tmp_path)
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert "Wheel metadata is not a bounded regular member" in result.stderr
+
+
+def test_verifier_rejects_wheel_member_flood(tmp_path: Path) -> None:
+    wheel = write_wheel(tmp_path)
+    with zipfile.ZipFile(wheel, "a") as archive:
+        for index in range(10_000):
+            archive.writestr(f"flood/{index}", b"")
+    write_sdist(tmp_path)
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert "Wheel contains too many archive members" in result.stderr

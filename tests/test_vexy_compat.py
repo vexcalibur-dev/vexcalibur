@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-import vexcalibur.generate as generate_module
+import vexcalibur.render_budget as render_budget_module
 import vexcalibur.sources.osv as osv_module
 from vexcalibur.compat import vexy
 
@@ -201,7 +201,7 @@ def test_vexy_compat_preflights_existing_output_before_osv(monkeypatch, tmp_path
 
 
 def test_vexy_compat_reports_output_limit_without_traceback(monkeypatch) -> None:
-    monkeypatch.setattr(generate_module, "MAX_VEX_OUTPUT_BYTES", 1)
+    monkeypatch.setattr(render_budget_module, "MAX_GENERATED_DOCUMENT_BYTES", 1)
 
     result = runner.invoke(vexy.app, _offline_stdout_args())
 
