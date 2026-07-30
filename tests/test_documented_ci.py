@@ -24,11 +24,13 @@ def test_execution_report_schema_checkout_bytes_are_pinned_to_lf() -> None:
 def test_release_recovery_guide_preflights_before_dispatch() -> None:
     documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    pypi_workflow = (ROOT / ".github/workflows/pypi.yml").read_text(encoding="utf-8")
     section = documentation.split("## Recover an interrupted GitHub Release", maxsplit=1)[1]
     section = section.split("\n## ", maxsplit=1)[0]
 
     assert RECOVERY_TAG_PATTERN in section
     assert RECOVERY_TAG_PATTERN in workflow
+    assert RECOVERY_TAG_PATTERN in pypi_workflow
     contracts = (
         "Release tag must look like v1.2.3 without leading zeros.",
         "git pull --ff-only origin main",
