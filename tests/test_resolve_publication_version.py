@@ -49,7 +49,7 @@ def test_uses_synthetic_version_for_an_untagged_commit(tmp_path: Path) -> None:
     completed = _resolve(repository, release_sha)
 
     assert completed.returncode == 0
-    assert completed.stdout == "tag=v0.0.0\nversion=0.0.0\n"
+    assert completed.stdout == "synthetic=true\ntag=v0.0.0\nversion=0.0.0\n"
     assert _git(repository, "tag", "--list") == ""
 
 
@@ -60,7 +60,7 @@ def test_reuses_the_single_immutable_release_tag(tmp_path: Path) -> None:
     completed = _resolve(repository, release_sha)
 
     assert completed.returncode == 0
-    assert completed.stdout == "tag=v1.2.3\nversion=1.2.3\n"
+    assert completed.stdout == "synthetic=false\ntag=v1.2.3\nversion=1.2.3\n"
     assert _git(repository, "tag", "--list") == "v1.2.3"
 
 
@@ -71,7 +71,7 @@ def test_ignores_nonrelease_tags(tmp_path: Path) -> None:
     completed = _resolve(repository, release_sha)
 
     assert completed.returncode == 0
-    assert completed.stdout == "tag=v0.0.0\nversion=0.0.0\n"
+    assert completed.stdout == "synthetic=true\ntag=v0.0.0\nversion=0.0.0\n"
 
 
 def test_rejects_a_lightweight_release_tag(tmp_path: Path) -> None:

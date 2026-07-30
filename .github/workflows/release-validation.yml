@@ -15,6 +15,12 @@ on:
         description: Package version without the leading v.
         required: true
         type: string
+      release-tag-is-synthetic:
+        description: >-
+          Build from the caller's tag-free snapshot using a local v0.0.0 tag.
+        required: false
+        default: false
+        type: boolean
       publication-only:
         description: Run only the build and immutable-publication contract jobs.
         required: false
@@ -90,6 +96,7 @@ jobs:
         env:
           ALLOW_PUBLIC_EVIDENCE_UPLOAD: ${{ inputs.allow-public-evidence-upload }}
           RELEASE_TAG: ${{ inputs.release-tag }}
+          RELEASE_TAG_IS_SYNTHETIC: ${{ inputs.release-tag-is-synthetic }}
           RELEASE_VERSION: ${{ inputs.release-version }}
           UNPRIVILEGED_CI_CONTRACT: ${{ inputs.unprivileged-ci-contract }}
         run: |
@@ -101,6 +108,20 @@ jobs:
           if [[ "${UNPRIVILEGED_CI_CONTRACT}" = true ]] && \
             [[ "${RELEASE_TAG}" != "v${RELEASE_VERSION}" ]]; then
             echo "The unprivileged CI contract requires matching tag and version inputs." >&2
+            exit 2
+          fi
+          if [[ "${RELEASE_TAG_IS_SYNTHETIC}" = true ]] && {
+            [[ "${UNPRIVILEGED_CI_CONTRACT}" != true ]] ||
+            [[ "${RELEASE_TAG}" != v0.0.0 ]] ||
+            [[ "${RELEASE_VERSION}" != 0.0.0 ]]
+          }; then
+            echo "A synthetic tag requires the unprivileged v0.0.0 CI contract." >&2
+            exit 2
+          fi
+          if [[ "${UNPRIVILEGED_CI_CONTRACT}" = true ]] && \
+            [[ "${RELEASE_TAG}" = v0.0.0 ]] && \
+            [[ "${RELEASE_TAG_IS_SYNTHETIC}" != true ]]; then
+            echo "The local v0.0.0 CI contract requires an isolated tag snapshot." >&2
             exit 2
           fi
 
@@ -377,7 +398,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ inputs.release-tag-is-synthetic && 1 || 0 }}
+          fetch-tags: ${{ !inputs.release-tag-is-synthetic }}
           persist-credentials: false
           ref: ${{ inputs.release-sha }}
 

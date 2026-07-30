@@ -517,11 +517,15 @@ def test_ci_runs_the_unprivileged_publication_contract_with_explicit_consent() -
     assert "scripts/resolve-publication-version.sh" in version
     assert "fetch-depth: 0" in version
     assert "persist-credentials: false" in version
+    assert "synthetic: ${{ steps.version.outputs.synthetic }}" in version
     assert "uses: ./.github/workflows/release-validation.yml" in publication
     assert "needs: publication-version" in publication
     assert "release-sha: ${{ github.sha }}" in publication
     assert "release-tag: ${{ needs.publication-version.outputs.tag }}" in publication
     assert "release-version: ${{ needs.publication-version.outputs.version }}" in publication
+    assert (
+        "release-tag-is-synthetic: ${{ needs.publication-version.outputs.synthetic == 'true' }}"
+    ) in publication
     assert "publication-only: true" in publication
     assert "unprivileged-ci-contract: true" in publication
     assert "allow-public-evidence-upload: true" in publication
@@ -541,6 +545,9 @@ def test_release_requires_explicit_public_evidence_upload_consent() -> None:
     assert "allow-public-evidence-upload: true" in release_validation
     assert "UNPRIVILEGED_CI_CONTRACT" in consent
     assert "matching tag and version inputs" in consent
+    assert "RELEASE_TAG_IS_SYNTHETIC" in consent
+    assert "A synthetic tag requires the unprivileged v0.0.0 CI contract." in consent
+    assert "The local v0.0.0 CI contract requires an isolated tag snapshot." in consent
 
 
 def test_ci_bounds_execution_report_jobs_and_cancels_superseded_runs() -> None:
@@ -548,6 +555,9 @@ def test_ci_bounds_execution_report_jobs_and_cancels_superseded_runs() -> None:
 
     assert "concurrency:" in ci
     assert "cancel-in-progress: true" in ci
+    concurrency = ci.partition("\nconcurrency:\n")[2].partition("\npermissions:\n")[0]
+    assert "inputs.run_scheduled_profile || inputs.run_live_services" in concurrency
+    assert "'live' || 'standard'" in concurrency
     for job_name in (
         "execution-report-windows",
         "execution-report-macos",
@@ -833,6 +843,8 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "id-token: write" not in build
     assert "actions/checkout@" in build
     assert "persist-credentials: false" in build
+    assert "fetch-depth: ${{ inputs.release-tag-is-synthetic && 1 || 0 }}" in build
+    assert "fetch-tags: ${{ !inputs.release-tag-is-synthetic }}" in build
     assert "scripts/prepare-local-release-tag.sh" in build
     assert "RELEASE_SHA: ${{ inputs.release-sha }}" in build
     assert "SETUPTOOLS_SCM_PRETEND_VERSION" not in build

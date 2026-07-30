@@ -30,5 +30,10 @@ if [[ "${#release_tags[@]}" -gt 1 ]]; then
 fi
 
 release_tag="${release_tags[0]:-v0.0.0}"
+if [[ "${#release_tags[@]}" -eq 0 ]]; then
+  printf 'synthetic=true\n'
+else
+  printf 'synthetic=false\n'
+fi
 printf 'tag=%s\n' "${release_tag}"
 printf 'version=%s\n' "${release_tag#v}"

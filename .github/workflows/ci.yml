@@ -21,7 +21,18 @@ on:
     - cron: "17 9 * * *"
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ci-${{ github.workflow }}-${{
+      github.event.pull_request.number || github.ref
+    }}-${{
+      (
+        github.event_name == 'schedule' ||
+        (
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.run_scheduled_profile || inputs.run_live_services)
+        )
+      ) && 'live' || 'standard'
+    }}
   cancel-in-progress: true
 
 permissions:
@@ -548,6 +559,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      synthetic: ${{ steps.version.outputs.synthetic }}
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -575,6 +587,7 @@ jobs:
       release-sha: ${{ github.sha }}
       release-tag: ${{ needs.publication-version.outputs.tag }}
       release-version: ${{ needs.publication-version.outputs.version }}
+      release-tag-is-synthetic: ${{ needs.publication-version.outputs.synthetic == 'true' }}
       publication-only: true
       unprivileged-ci-contract: true
       allow-public-evidence-upload: true

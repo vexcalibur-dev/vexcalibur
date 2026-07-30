@@ -147,7 +147,8 @@ The result helpers differ in how they establish inventory provenance:
        ``ValueError`` for contradictory context.
    * - ``generate_vex_from_sbom_result``
      - ``SBOM_FILE`` after local CycloneDX validation.
-     - ``PUBLIC_OSV`` or ``CUSTOM_OSV`` from the effective guarded endpoint.
+     - ``CUSTOM`` for an injected ``osv_client``. Otherwise ``PUBLIC_OSV`` or
+       ``CUSTOM_OSV`` from the effective guarded endpoint.
      - ``SbomError``, ``OsvConfigurationError``, ``OsvClientError``,
        ``VexRenderError``, ``TypeError``, or ``ValueError``.
    * - ``generate_vex_from_github_source_result``
@@ -161,7 +162,8 @@ The result helpers differ in how they establish inventory provenance:
    * - ``generate_vex_from_github_sbom_result``
      - ``GITHUB_DEPENDENCY_GRAPH`` when Vexcalibur creates or receives an exact
        ``GithubSbomClient``. Another injected loader is ``CUSTOM``.
-     - ``PUBLIC_OSV`` or ``CUSTOM_OSV`` from the effective guarded endpoint.
+     - ``CUSTOM`` for an injected ``osv_client``. Otherwise ``PUBLIC_OSV`` or
+       ``CUSTOM_OSV`` from the effective guarded endpoint.
      - ``GithubSbomError``, ``OsvConfigurationError``, ``OsvClientError``,
        ``VexRenderError``, ``TypeError``, ``ValueError``, or an injected
        loader's documented exception, propagated unchanged.
@@ -238,11 +240,14 @@ Validate the files together before automation accepts either one:
 
 The validator prints ``execution report verified`` on success.
 
-On Windows, use a new directory under ``$env:TEMP`` for both commands:
+On Windows, use PowerShell 7.3 or later and a new directory under
+``$env:TEMP`` for both commands. ``$PSNativeCommandUseErrorActionPreference``
+makes a failed ``uv`` process stop the example.
 
 .. code-block:: powershell
 
    $ErrorActionPreference = "Stop"
+   $PSNativeCommandUseErrorActionPreference = $true
    $work = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
    try {
      uv run --frozen python docs/examples/generate_execution_report.py $work

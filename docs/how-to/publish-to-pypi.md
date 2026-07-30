@@ -62,12 +62,13 @@ The `pypi` environment's tag policy is a deployment restriction, but it has no
 required reviewer. Anyone allowed to dispatch the release workflows should be
 treated as a release operator.
 
-The immutable-policy status endpoint requires Administration-read permission,
-which the ordinary workflow token may not have. A 401 or 403 produces a
-prominent deferred-preflight warning. Any readable false policy, 404, malformed
-response, or other failure stops publication. Regardless of preflight access,
-the publisher requires GitHub to report `immutable: true` and verify the
-release plus every asset after publication.
+After it verifies the downloaded assets and scanned release notes, the
+publisher creates a repository-scoped GitHub App token with Administration-read
+and Contents-write permission. It uses that token to check the immutable-release
+policy before creating a tag or release. A false policy, unreadable endpoint,
+malformed response, or other request failure stops publication. The publisher
+also requires GitHub to report `immutable: true` and verify the release plus
+every asset after publication.
 
 ## Prepare the release commit
 
