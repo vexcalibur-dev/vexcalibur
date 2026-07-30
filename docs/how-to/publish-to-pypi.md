@@ -244,7 +244,14 @@ If the GitHub release event was missed or a PyPI upload stopped after one file,
 dispatch `PyPI` from the exact release tag and supply the same tag as input:
 
 ```bash
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  echo "Set RELEASE_TAG to the exact interrupted release tag." >&2
+  exit 2
+fi
+read -r -p "Type $RELEASE_TAG to confirm the recovery target: " CONFIRMED_TAG
+[[ "$CONFIRMED_TAG" == "$RELEASE_TAG" ]] || exit 2
+
 gh workflow run pypi.yml \
   --repo vexcalibur-dev/vexcalibur \
   --ref "$RELEASE_TAG" \
@@ -266,7 +273,14 @@ stale files cannot satisfy a check:
 ```bash
 set -euo pipefail
 
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  echo "Set RELEASE_TAG to the exact release produced by the workflow." >&2
+  exit 2
+fi
+read -r -p "Type $RELEASE_TAG to confirm the verification target: " CONFIRMED_TAG
+[[ "$CONFIRMED_TAG" == "$RELEASE_TAG" ]] || exit 2
+
 RELEASE_VERSION=${RELEASE_TAG#v}
 REPOSITORY=vexcalibur-dev/vexcalibur
 RELEASE_ASSETS="$(mktemp -d)"
@@ -451,7 +465,15 @@ replaced.
    JSON response to report `yanked: true`:
 
    ```bash
-   RELEASE_VERSION=0.4.0
+   RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+   if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+     echo "Set RELEASE_TAG to the exact release being investigated." >&2
+     exit 2
+   fi
+   read -r -p "Type $RELEASE_TAG to confirm the incident target: " CONFIRMED_TAG
+   [[ "$CONFIRMED_TAG" == "$RELEASE_TAG" ]] || exit 2
+   RELEASE_VERSION=${RELEASE_TAG#v}
+
    python - "$RELEASE_VERSION" <<'PY'
    import json
    import sys

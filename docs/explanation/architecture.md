@@ -217,6 +217,8 @@ GenerationResult
       |
       +--> acquire output and report directory locks in stable order
               |
+              +--> remove any intervening report; stop before output on failure
+              |
               +--> publish VEX
               |
               +--> recheck report aliases and parent identities

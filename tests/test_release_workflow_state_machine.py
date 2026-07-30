@@ -402,15 +402,15 @@ def test_immutable_release_policy_preflight_uses_the_scoped_app_token() -> None:
     assert "permission-contents: write" in token
     assert "GH_TOKEN: ${{ steps.app-token.outputs.token }}" in preflight
     assert "repos/${GITHUB_REPOSITORY}/immutable-releases" in preflight
-    assert "[.enabled, .enforced_by_owner] | @tsv" in preflight
-    assert r"""$'true\ttrue'""" in preflight
+    assert ".enabled == true and .enforced_by_owner == true" in preflight
+    assert '"verified"' in preflight
     assert "immutable-release preflight deferred" not in preflight.lower()
 
     immutable = _step(publish, "Publish immutable GitHub Release")
     patch = immutable.index('--input "${publication_transition}"')
     assert "repos/${GITHUB_REPOSITORY}/immutable-releases" in immutable[:patch]
-    assert "[.enabled, .enforced_by_owner] | @tsv" in immutable[:patch]
-    assert r"""$'true\ttrue'""" in immutable[:patch]
+    assert ".enabled == true and .enforced_by_owner == true" in immutable[:patch]
+    assert '"verified"' in immutable[:patch]
 
 
 def test_checkout_free_publisher_invokes_no_repository_scripts() -> None:

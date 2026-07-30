@@ -151,12 +151,16 @@ After generation, Vexcalibur publishes in this order:
    then flush them.
 3. Keep the staged files open, verify their filesystem identities, and acquire
    destination-directory locks in stable order.
-4. Publish the VEX document and check the destination paths again for aliases.
-5. Publish the report last, then release the locks.
+4. Remove any report created after the initial cleanup. If removal fails,
+   publish nothing.
+5. Publish the VEX document and check the destination paths again for aliases.
+6. Publish the report last, then release the locks.
 
 Standard output follows the same order, but its bytes cannot be rolled back
-after a partial write. Vexcalibur holds the report lock while it writes and
-flushes standard output, then publishes the report before releasing that lock.
+after a partial write. Vexcalibur removes an intervening report before it writes
+the first byte, then holds the report lock while it writes and flushes standard
+output. A cleanup failure leaves standard output unchanged. After a successful
+flush, Vexcalibur publishes the report and releases the lock.
 
 Each atomic replacement is followed by a directory `fsync`. A failed file or
 directory flush makes the command fail. Vexcalibur removes an unpublished

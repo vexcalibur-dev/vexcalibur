@@ -318,7 +318,11 @@ uv run --frozen python scripts/release_evidence.py verify-bundle \
 Verify a schema-2 publication bundle against an exact tag and commit:
 
 ```bash
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  echo "Set RELEASE_TAG to the exact publication bundle tag." >&2
+  exit 2
+fi
 git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
 RELEASE_SHA="$(git rev-parse --verify "$RELEASE_TAG^{commit}")"
 

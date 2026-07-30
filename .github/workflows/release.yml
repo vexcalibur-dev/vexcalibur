@@ -566,14 +566,15 @@ jobs:
               -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/${GITHUB_REPOSITORY}/immutable-releases" \
-              --jq '[.enabled, .enforced_by_owner] | @tsv' \
+              --jq 'if (.enabled == true and .enforced_by_owner == true)
+                    then "verified" else "rejected" end' \
               2> "${policy_error}"
           )"; then
             echo "Could not preflight the repository immutable-release policy." >&2
             sed -n '1,5p' "${policy_error}" >&2
             exit 1
           fi
-          if [[ "${policy_status}" != $'true\ttrue' ]]; then
+          if [[ "${policy_status}" != "verified" ]]; then
             echo "Immutable releases are not enabled and owner-enforced for this repository." >&2
             exit 1
           fi
@@ -1176,14 +1177,15 @@ jobs:
                 -H 'Accept: application/vnd.github+json' \
                 -H 'X-GitHub-Api-Version: 2026-03-10' \
                 "repos/${GITHUB_REPOSITORY}/immutable-releases" \
-                --jq '[.enabled, .enforced_by_owner] | @tsv' \
+                --jq 'if (.enabled == true and .enforced_by_owner == true)
+                      then "verified" else "rejected" end' \
                 2> "${policy_error}"
             )"; then
               echo "Could not revalidate the repository immutable-release policy." >&2
               sed -n '1,5p' "${policy_error}" >&2
               exit 1
             fi
-            if [[ "${policy_status}" != $'true\ttrue' ]]; then
+            if [[ "${policy_status}" != "verified" ]]; then
               echo "Immutable releases are no longer enabled and owner-enforced." >&2
               exit 1
             fi
