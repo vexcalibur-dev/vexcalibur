@@ -33,11 +33,15 @@ class ExampleSource(ExecutionReportFindingSourceDeclaration):
         self,
         components: tuple[ComponentIdentity, ...],
     ) -> tuple[VulnerabilityFinding, ...]:
-        ...
+        return ()
 ```
 
 `findings_for_components` receives the complete normalized component tuple and
 returns zero or more immutable findings.
+
+See the tested [custom generation
+example](../examples/generate_custom_execution_report.py) for a provider that
+returns a finding and writes a report.
 
 `execution_report_finding_source` is optional. Implement it when the provider
 supports generation execution reports but does not match a built-in source

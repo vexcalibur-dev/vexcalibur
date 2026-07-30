@@ -20,6 +20,10 @@ on:
   schedule:
     - cron: "17 9 * * *"
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -168,6 +172,7 @@ jobs:
   execution-report-windows:
     name: Execution report Windows contract (Python ${{ matrix.python-version }})
     runs-on: windows-latest
+    timeout-minutes: 20
     if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     strategy:
       fail-fast: false
@@ -290,6 +295,7 @@ jobs:
   execution-report-macos:
     name: Execution report macOS contract (Python ${{ matrix.python-version }})
     runs-on: macos-latest
+    timeout-minutes: 20
     if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     strategy:
       fail-fast: false
@@ -402,6 +408,7 @@ jobs:
   installed-cli:
     name: Installed CLI
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
     if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     steps:
@@ -645,8 +652,32 @@ jobs:
       - name: Build documentation
         run: make docs
 
+  publication-version:
+    name: Resolve publication contract version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve local publication version
+        id: version
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: scripts/resolve-publication-version.sh "${RELEASE_SHA}" >> "${GITHUB_OUTPUT}"
+
   publication-contract:
     name: Unprivileged publication contract
+    needs: publication-version
     if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     permissions:
       actions: read
@@ -654,8 +685,8 @@ jobs:
     uses: ./.github/workflows/release-validation.yml
     with:
       release-sha: ${{ github.sha }}
-      release-tag: v0.0.0
-      release-version: 0.0.0
+      release-tag: ${{ needs.publication-version.outputs.tag }}
+      release-version: ${{ needs.publication-version.outputs.version }}
       publication-only: true
       unprivileged-ci-contract: true
       allow-public-evidence-upload: true

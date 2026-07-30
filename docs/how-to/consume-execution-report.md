@@ -107,70 +107,16 @@ Schema references cannot trigger network requests.
 
 ## Consume reports in GitHub Actions
 
-The companion Action passes ordinary Vexcalibur arguments through to the
-installed package. This workflow keeps the VEX document and report in
-`${{ runner.temp }}`, validates both against the schema from the matching
-Vexcalibur release, and uploads them only after validation succeeds:
+A workflow recipe must pin a package release that already contains
+`--execution-report`. This default-branch page cannot name that future release,
+so it deliberately omits the Action recipe for now. Use the source-checkout
+procedure above until the release notes and the installed
+`vexcalibur generate --help` output confirm support.
 
-```yaml
-permissions:
-  contents: read
-
-steps:
-  - name: Check out the matching Vexcalibur schema and validator
-    uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-    with:
-      repository: vexcalibur-dev/vexcalibur
-      ref: v0.5.0
-      path: .vexcalibur-source
-      persist-credentials: false
-
-  - name: Generate VEX and its execution report
-    uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
-    with:
-      package-spec: vexcalibur==0.5.0
-      args: |
-        generate
-        ${{ github.workspace }}/.vexcalibur-source/tests/fixtures/sbom/cyclonedx-json-simple.json
-        --offline
-        --findings-file
-        ${{ github.workspace }}/.vexcalibur-source/tests/fixtures/findings/all-analysis-states.json
-        --output
-        ${{ runner.temp }}/vex.json
-        --execution-report
-        ${{ runner.temp }}/execution-report.json
-
-  - name: Set up uv
-    uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-    with:
-      version-file: .vexcalibur-source/.tool-versions
-      enable-cache: true
-
-  - name: Validate the report and apply policy
-    run: |
-      set -euo pipefail
-      cd "${GITHUB_WORKSPACE}/.vexcalibur-source"
-      uv sync --frozen --extra docs
-      uv run --frozen python docs/examples/validate_execution_report.py \
-        "${RUNNER_TEMP}/execution-report.json" \
-        "${RUNNER_TEMP}/vex.json" \
-        docs/execution-report-v1.schema.json \
-        --max-exploitable 1
-
-  - name: Upload validated VEX artifacts
-    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-    with:
-      name: vexcalibur-vex
-      path: |
-        ${{ runner.temp }}/vex.json
-        ${{ runner.temp }}/execution-report.json
-      if-no-files-found: error
-```
-
-Replace the fixture paths and policy limit for your repository. The `v0.5.0`
-tag is immutable and matches `vexcalibur==0.5.0`; the Action itself is pinned
-to the reviewed full commit. Package releases before `0.5.0` reject
-`--execution-report`.
+After publication, use the versioned documentation for that release. Keep the
+schema and package on the same immutable tag, pin the companion Action to a full
+commit, validate the report before reading it, and upload neither file when
+validation fails.
 
 ## Keep the trust boundary explicit
 

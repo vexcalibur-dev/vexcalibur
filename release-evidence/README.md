@@ -2,7 +2,7 @@
 
 This directory contains the public, human-reviewed inputs for Vexcalibur's own
 release evidence. `review.json` binds the review to the exact SHA-256 digest of
-`uv.lock` and `findings.json`. The initial findings snapshot is empty. That
+`uv.lock` and `findings.json`. The current findings snapshot is empty. That
 means it makes no VEX assertions; it does not claim that the locked inventory
 has no vulnerabilities.
 

@@ -19,9 +19,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from packageurl import PackageURL
 
 MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024
+MAX_EXECUTION_REPORT_BYTES = 16 * 1024
+MAX_GENERATED_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_ARCHIVE_METADATA_BYTES = 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
@@ -63,6 +67,14 @@ INVENTORY_LIMITATION = (
 )
 VULNERABILITY_PROVIDER_POLICY = "offline_local_findings_only"
 PRODUCTION_STATE_POLICY = "only_in_triage"
+EXECUTION_REPORT_SCHEMA_PATH = (
+    Path(__file__).parents[1] / "docs" / "execution-report-v1.schema.json"
+)
+EXECUTION_REPORT_FILES = {
+    "cyclonedx": ("vex.cdx.json", "vex.cdx.execution.json"),
+    "openvex": ("vex.openvex.json", "vex.openvex.execution.json"),
+    "csaf": ("vexcalibur-vex.json", "vexcalibur-vex.execution.json"),
+}
 PAYLOAD_DIGEST_ALGORITHM = "sha256_canonical_artifact_records_v1"
 REVIEW_KEYS = {
     "schema_version",
@@ -222,6 +234,78 @@ def _canonical_execution_report_json(document: object) -> str:
         )
         + "\n"
     )
+
+
+def _execution_report_schema_validator() -> Draft202012Validator:
+    schema = load_json(EXECUTION_REPORT_SCHEMA_PATH)
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        raise EvidenceError(f"execution report schema is invalid: {exc.message}") from exc
+    return Draft202012Validator(schema)
+
+
+def _validate_execution_report_document(
+    document: object,
+    *,
+    validator: Draft202012Validator,
+) -> dict[str, Any]:
+    errors = sorted(validator.iter_errors(document), key=lambda error: list(error.absolute_path))
+    if errors:
+        first = errors[0]
+        location = ".".join(str(part) for part in first.absolute_path) or "report"
+        raise EvidenceError(f"execution report schema violation at {location}: {first.message}")
+    report = _require_dict(document, field="execution report")
+    state_counts = _require_dict(
+        report.get("analysis_state_counts"),
+        field="execution report analysis_state_counts",
+    )
+    for field in ("schema_version", "component_count", "finding_count"):
+        if type(report.get(field)) is not int:
+            raise EvidenceError(f"execution report {field} must be an integer")
+    document_metadata = _require_dict(
+        report.get("document"),
+        field="execution report document",
+    )
+    if type(document_metadata.get("bytes")) is not int:
+        raise EvidenceError("execution report document bytes must be an integer")
+    if any(type(count) is not int for count in state_counts.values()):
+        raise EvidenceError("execution report analysis-state counts must be integers")
+    finding_count = report.get("finding_count")
+    if sum(state_counts.values()) != finding_count:
+        raise EvidenceError("execution report analysis-state counts do not sum to finding count")
+    return report
+
+
+def _load_execution_report(
+    path: Path,
+    *,
+    validator: Draft202012Validator,
+) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise EvidenceError(f"expected a regular, non-symlink execution report: {path}")
+    if path.stat().st_size > MAX_EXECUTION_REPORT_BYTES:
+        raise EvidenceError(
+            f"execution report exceeds the {MAX_EXECUTION_REPORT_BYTES} byte limit: {path}"
+        )
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise EvidenceError(f"could not read execution report {path}: {exc}") from exc
+    if len(raw) > MAX_EXECUTION_REPORT_BYTES:
+        raise EvidenceError(
+            f"execution report exceeds the {MAX_EXECUTION_REPORT_BYTES} byte limit: {path}"
+        )
+    try:
+        document = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_object_without_duplicates,
+        )
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise EvidenceError(f"execution report is not valid UTF-8 JSON: {path}: {exc}") from exc
+    if raw != _canonical_execution_report_json(document).encode("ascii"):
+        raise EvidenceError(f"execution report is not canonical JSON: {path}")
+    return _validate_execution_report_document(document, validator=validator)
 
 
 def release_timestamp(source_date_epoch: int) -> str:
@@ -1109,30 +1193,47 @@ def _verify_execution_reports(
     expected_component_count: int,
     release_version: str,
 ) -> None:
-    from vexcalibur.execution_report_validation import (
-        ExecutionReportValidationError,
-        validate_execution_reports,
-    )
-    from vexcalibur.generation_context import ExecutionReportOutputFormat
-
-    formats = [ExecutionReportOutputFormat.CYCLONEDX]
+    formats = ["cyclonedx"]
     if assertion_count > 0:
-        formats.extend(
-            [
-                ExecutionReportOutputFormat.OPENVEX,
-                ExecutionReportOutputFormat.CSAF,
-            ]
+        formats.extend(["openvex", "csaf"])
+    validator = _execution_report_schema_validator()
+    for output_format in formats:
+        document_name, report_name = EXECUTION_REPORT_FILES[output_format]
+        document_path = output_dir / document_name
+        _require_bounded_publication_file(document_path)
+        if document_path.stat().st_size > MAX_GENERATED_DOCUMENT_BYTES:
+            raise EvidenceError(
+                f"{output_format} document exceeds the {MAX_GENERATED_DOCUMENT_BYTES} byte limit"
+            )
+        try:
+            document = document_path.read_bytes()
+        except OSError as exc:
+            raise EvidenceError(f"could not read {output_format} document: {exc}") from exc
+        report = _load_execution_report(
+            output_dir / report_name,
+            validator=validator,
         )
-    try:
-        validate_execution_reports(
-            output_dir,
-            formats=tuple(formats),
-            expected_version=release_version,
-            expected_finding_count=assertion_count,
-            expected_component_count=expected_component_count,
+        if report["vexcalibur_version"] != release_version:
+            raise EvidenceError(f"{output_format} execution report version is invalid")
+        if report["inventory_source"] != "sbom_file":
+            raise EvidenceError(f"{output_format} execution report inventory source is invalid")
+        if report["finding_source"] != "local_file":
+            raise EvidenceError(f"{output_format} execution report finding source is invalid")
+        if report["output_format"] != output_format:
+            raise EvidenceError(f"{output_format} execution report output format is invalid")
+        if report["component_count"] != expected_component_count:
+            raise EvidenceError(f"{output_format} execution report component count is invalid")
+        if report["finding_count"] != assertion_count:
+            raise EvidenceError(f"{output_format} execution report finding count is invalid")
+        document_metadata = _require_dict(
+            report["document"],
+            field=f"{output_format} execution report document",
         )
-    except ExecutionReportValidationError as exc:
-        raise EvidenceError(str(exc)) from exc
+        if (
+            document_metadata["bytes"] != len(document)
+            or document_metadata["sha256"] != hashlib.sha256(document).hexdigest()
+        ):
+            raise EvidenceError(f"{output_format} execution report document binding is invalid")
 
 
 def _expected_publication_validation(assertion_count: int) -> dict[str, str]:

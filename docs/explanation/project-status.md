@@ -44,14 +44,14 @@ checked distribution bytes to a flat immutable GitHub Release and then to PyPI
 through Trusted Publishing.
 
 Pull requests exercise the full schema-2 asset-generation and validation graph
-without publication credentials. That graph creates an ephemeral local
-`v0.0.0` tag in its credentialless checkout so the normal package metadata
-path remains under test. It never pushes the tag or changes an existing tag.
-The graph uploads only artifacts derived from this public repository, and the
-caller must set `allow-public-evidence-upload: true`.
+without publication credentials. An untagged candidate gets an ephemeral local
+`v0.0.0` tag; a rerun on a released commit uses that commit's single immutable
+release tag. The graph never pushes, moves, or deletes a repository tag. It
+uploads only artifacts derived from this public repository, and the caller must
+set `allow-public-evidence-upload: true`.
 
 Pull requests do not create a GitHub Release or perform a PyPI OIDC exchange.
-Those publisher paths are tested statically until a real release. The initial
+Those publisher paths are tested statically until a real release. The current
 production review makes zero assertions; a separate synthetic `in_triage`
 fixture exercises CycloneDX, OpenVEX, and CSAF equivalence.
 

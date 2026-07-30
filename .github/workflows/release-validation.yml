@@ -22,8 +22,8 @@ on:
         type: boolean
       unprivileged-ci-contract:
         description: >-
-          Exercise the publication graph with an ephemeral local v0.0.0 tag
-          and without publication credentials.
+          Exercise the publication graph without publication credentials,
+          using either a local v0.0.0 tag or the commit's immutable release tag.
         required: false
         default: false
         type: boolean
@@ -92,8 +92,8 @@ jobs:
             exit 2
           fi
           if [[ "${UNPRIVILEGED_CI_CONTRACT}" = true ]] && \
-            { [[ "${RELEASE_TAG}" != v0.0.0 ]] || [[ "${RELEASE_VERSION}" != 0.0.0 ]]; }; then
-            echo "The unprivileged CI contract requires synthetic version v0.0.0." >&2
+            [[ "${RELEASE_TAG}" != "v${RELEASE_VERSION}" ]]; then
+            echo "The unprivileged CI contract requires matching tag and version inputs." >&2
             exit 2
           fi
 
@@ -123,10 +123,14 @@ jobs:
         run: uv lock --check
 
       - name: Check formatting
-        run: uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
+        run: >-
+          uv run --frozen ruff format --check
+          src tests scripts/*.py docs/conf.py docs/examples/*.py
 
       - name: Lint
-        run: uv run --frozen ruff check src tests scripts/*.py docs/conf.py
+        run: >-
+          uv run --frozen ruff check
+          src tests scripts/*.py docs/conf.py docs/examples/*.py
 
       - name: Type check
         run: uv run --frozen mypy src
@@ -242,6 +246,7 @@ jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: consent
     permissions:
       contents: read
@@ -300,14 +305,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           printf 'SOURCE_DATE_EPOCH=%s\n' "${source_date_epoch}" >> "$GITHUB_ENV"
 
-      - name: Prepare local release tag
-        env:
-          RELEASE_TAG: ${{ inputs.release-tag }}
-          RELEASE_SHA: ${{ inputs.release-sha }}
-        run: |
-          set -euo pipefail
-          scripts/prepare-local-release-tag.sh "${RELEASE_TAG}" "${RELEASE_SHA}"
-
       - name: Set up uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
@@ -336,6 +333,17 @@ jobs:
             "${build_requirements}"
           printf 'VEXCALIBUR_BUILD_PYTHON=%s\n' \
             "${build_venv}/bin/python" >> "${GITHUB_ENV}"
+
+      - name: Prepare and verify local release tag
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          RELEASE_SHA: ${{ inputs.release-sha }}
+        run: |
+          set -euo pipefail
+          scripts/prepare-local-release-tag.sh \
+            "${RELEASE_TAG}" \
+            "${RELEASE_SHA}" \
+            "${VEXCALIBUR_BUILD_PYTHON}"
 
       - name: Build distributions offline
         run: >-
@@ -426,6 +434,7 @@ jobs:
   installed-cli:
     name: Installed CLI (${{ matrix.distribution }}, Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     needs: build
@@ -763,6 +772,7 @@ jobs:
   direct-vex:
     name: Direct installed-wheel VEX
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions: {}
     needs: [build, publication-inventory]
     if: >-
@@ -996,6 +1006,7 @@ jobs:
   action-vex:
     name: Pinned Action VEX
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions: {}
     needs: [build, publication-inventory]
     if: >-
@@ -1455,6 +1466,7 @@ jobs:
   publication-assets:
     name: Finalize immutable publication assets
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read

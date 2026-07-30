@@ -131,17 +131,19 @@ a report. Once parsing succeeds, Vexcalibur binds the destination and removes
 an existing report before it validates timestamps, source combinations, or
 document metadata. Any later failure therefore leaves no stale success marker.
 
-After generation, Vexcalibur constructs and validates the complete report. It
-then stages the report in a private file and stages file-based VEX output the
-same way. Both temporary files are mode `0600` and are flushed before
-publication. Vexcalibur keeps each staged file open, verifies its filesystem
-identity before and after replacement, and locks each destination directory.
-It acquires multiple directory locks in a stable order. Vexcalibur publishes
-the VEX document first, checks the paths again for aliases, and publishes the
-report last. Standard output follows the same order except that its bytes
-cannot be rolled back after a partial write. Vexcalibur holds the report
-publication lock while it writes and flushes standard output, then publishes
-the report before releasing that lock.
+After generation, Vexcalibur publishes in this order:
+
+1. Construct and validate the complete report.
+2. Stage the report and any file-based VEX output in private mode-`0600` files,
+   then flush them.
+3. Keep the staged files open, verify their filesystem identities, and acquire
+   destination-directory locks in stable order.
+4. Publish the VEX document and check the destination paths again for aliases.
+5. Publish the report last, then release the locks.
+
+Standard output follows the same order, but its bytes cannot be rolled back
+after a partial write. Vexcalibur holds the report lock while it writes and
+flushes standard output, then publishes the report before releasing that lock.
 
 Each atomic replacement is followed by a directory `fsync`. A failed file or
 directory flush makes the command fail. Vexcalibur removes an unpublished
@@ -160,6 +162,10 @@ publication in that parent. Vexcalibur requires the file to be a regular file
 owned by the current user with one link, and sets its mode to `0600`. This
 fixed name gives processes the same coordination point even when they use
 different filesystem encodings.
+
+Do not use a destination parent that another user can write. A different user
+can create the fixed coordination directory first and prevent publication.
+Directly shared multi-user output directories are not supported.
 
 Vexcalibur retries a contended directory lock for up to 10 seconds. If the lock
 remains busy, publication fails without leaving a completed report. The

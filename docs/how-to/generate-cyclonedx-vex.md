@@ -133,37 +133,12 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-The companion Action accepts the same command arguments. This example writes
-the document and execution report to absolute runner-temporary paths:
-
-```yaml
-permissions:
-  contents: read
-
-steps:
-  - uses: vexcalibur-dev/vexcalibur-action@cc570fb0ab80df3f4b1e31c0608b95c0707d5b66
-    with:
-      package-spec: vexcalibur==0.5.0
-      args: |
-        generate
-        --github-repo
-        ${{ github.repository }}
-        --github-token-env
-        GITHUB_TOKEN
-        --osv-url
-        https://osv.internal.example
-        --output
-        ${{ runner.temp }}/vex.json
-        --execution-report
-        ${{ runner.temp }}/execution-report.json
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
-```
-
-Package releases before `0.5.0` reject `--execution-report`. Follow
-[Consume a generation execution report](consume-execution-report.md)
-to validate the pair, apply a count policy, and upload it only after validation
-succeeds.
+The companion Action passes the same generation arguments to an installed
+package. Execution-report support is not yet available in a published package
+release, so this default-branch guide does not provide an Action recipe for it.
+Follow [Consume a generation execution report](consume-execution-report.md) for
+the source-checkout procedure and the checks required before automation accepts
+either file.
 
 ## Read XML input
 

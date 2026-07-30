@@ -13,7 +13,7 @@ The `CI` workflow runs on pull requests and pushes to `main`:
 | --- | --- |
 | Quality | Frozen lock, Ruff formatting and linting, strict MyPy |
 | Tests | Offline suite on Python 3.10 through 3.14 |
-| Native report behavior | Fail-closed installed-wheel checks on Windows; report transactions and installed wheel and source distribution checks on macOS with Python 3.10 and 3.14 |
+| Native report behavior | Fail-closed source checks plus installed wheel and source distribution checks on Windows; report transactions and installed wheel and source distribution checks on macOS with Python 3.10 and 3.14 |
 | Parser properties | Deterministic Hypothesis smoke profile with a five-minute bound |
 | Packaging | Wheel and source distribution, installed `vexcalibur` and `vexy` entry points |
 | OpenVEX | Generated and installed-wheel output through pinned `go-vex` 0.2.8 |
@@ -22,12 +22,15 @@ The `CI` workflow runs on pull requests and pushes to `main`:
 | Documentation | Warning-free Sphinx build, published-schema check, rendered accessibility checks, and executable execution-report examples |
 | Security | `pip-audit`, base-branch-aware secret scanning, and dedicated CodeQL/dependency-review workflows |
 
-Ordinary CI does not run the cross-job publication graph. That graph uploads a
-lock-derived software bill of materials (SBOM), generated VEX, and execution
-reports to GitHub, so the release workflow must pass
-`allow-public-evidence-upload: true` before any publication job can start. Pull
-requests still run the local schema-1 evidence fixtures without uploading that
-inventory.
+Ordinary non-scheduled CI runs the unprivileged publication contract in
+publication-only mode. An untagged candidate gets an ephemeral local `v0.0.0`
+tag; a rerun on a released commit uses that commit's single immutable release
+tag. The contract uploads the lock-derived inventory, generated VEX documents,
+and execution reports as GitHub Actions artifacts retained for 14 days. Its
+caller explicitly sets `allow-public-evidence-upload: true`.
+
+The unprivileged contract has no publication credentials. It does not create a
+GitHub Release or perform a PyPI OIDC exchange.
 
 During a release, the pinned Action runs one synthetic finding through
 CycloneDX, OpenVEX, and CSAF. That check does not depend on the production
@@ -55,12 +58,12 @@ Execution-report changes have three native gates:
 | --- | --- | --- | --- |
 | Linux or macOS source checkout | Python, plus `uv sync --frozen` | `uv run --frozen pytest -q tests/test_execution_report_destination.py tests/test_execution_report_destination_cli.py tests/test_execution_report_destination_locks.py tests/test_execution_report_hardening.py tests/test_generation_output.py tests/test_generation_output_concurrency.py tests/test_cli_execution_report.py` | Pytest exits `0`; Windows-only cases are skipped |
 | Linux or macOS installed wheel | Bash, GNU Make, Python, and `uv` | `make installed-cli-check` | The script exits `0` after importing and running the installed wheel |
-| Windows source checkout | PowerShell, Python, and `uv sync --frozen` | The commands below | Both test and installed-wheel commands exit `0` |
+| Windows source checkout | PowerShell, Python, and `uv sync --frozen` | The commands below | The source checks, installed wheel check, and sdist-derived wheel check exit `0` |
 
-On Windows, run the same fail-closed checks as CI, then install the local wheel
-with dependencies exported from `uv.lock`. The commands use a unique temporary
-directory and remove it in `finally`, including the wheel and virtual
-environment:
+On Windows, run the same fail-closed checks as CI. Then install the local wheel,
+build another wheel from the sdist with the locked backend, and test both
+installed distributions. The commands use a unique temporary directory and
+remove it in `finally`:
 
 ```powershell
 $ErrorActionPreference = "Stop"
@@ -70,8 +73,8 @@ if ($PSVersionTable.PSVersion -lt [Version]"7.3") {
 $PSNativeCommandUseErrorActionPreference = $true
 $work = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
 $dist = Join-Path $work "dist"
-$venv = Join-Path $work "venv"
-$requirements = Join-Path $work "runtime-requirements.txt"
+$buildRequirements = Join-Path $work "sdist-build-requirements.txt"
+$buildVenv = Join-Path $work "sdist-build-venv"
 try {
   New-Item -ItemType Directory -Path $dist | Out-Null
   uv run --frozen pytest -q `
@@ -79,23 +82,79 @@ try {
     tests/test_cli_execution_report.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output
   uv build --out-dir $dist --no-create-gitignore --no-sources
   $wheels = @(Get-ChildItem -Path $dist -Filter *.whl)
+  $sdists = @(Get-ChildItem -Path $dist -Filter *.tar.gz)
   if ($wheels.Count -ne 1) {
     throw "Expected exactly one wheel in $dist, found $($wheels.Count)"
   }
+  if ($sdists.Count -ne 1) {
+    throw "Expected exactly one sdist in $dist, found $($sdists.Count)"
+  }
+  $expectedVersion = (
+    uv run --frozen python -c `
+      "import importlib.metadata; print(importlib.metadata.version('vexcalibur'))"
+  )
   uv export `
     --quiet `
     --frozen `
-    --no-dev `
+    --only-group sdist-build `
     --no-emit-project `
     --no-annotate `
-    --output-file $requirements
-  python scripts/append_locked_wheel_requirement.py `
-    $wheels[0].FullName `
-    $requirements
-  uv venv $venv
-  $python = Join-Path $venv "Scripts/python.exe"
-  uv pip sync --require-hashes --python $python $requirements
-  & $python tests/integration/check_installed_windows.py
+    --output-file $buildRequirements
+  uv venv $buildVenv
+  $buildPython = Join-Path $buildVenv "Scripts/python.exe"
+  uv pip sync `
+    --require-hashes `
+    --only-binary :all: `
+    --python $buildPython `
+    $buildRequirements
+
+  $distributions = @(
+    @{ Name = "wheel"; Path = $wheels[0].FullName },
+    @{ Name = "sdist"; Path = $sdists[0].FullName }
+  )
+  foreach ($distribution in $distributions) {
+    $installDistribution = $distribution.Path
+    if ($distribution.Name -eq "sdist") {
+      $wheelDir = Join-Path $work "sdist-wheel"
+      New-Item -ItemType Directory -Path $wheelDir | Out-Null
+      $env:VIRTUAL_ENV = $buildVenv
+      uv build `
+        --wheel `
+        --no-build-isolation `
+        --offline `
+        --python $buildPython `
+        --out-dir $wheelDir `
+        $distribution.Path
+      Remove-Item Env:VIRTUAL_ENV
+      $builtWheels = @(Get-ChildItem -Path $wheelDir -Filter *.whl)
+      if ($builtWheels.Count -ne 1) {
+        throw "Expected one wheel built from the sdist, found $($builtWheels.Count)"
+      }
+      $installDistribution = $builtWheels[0].FullName
+    }
+
+    $venv = Join-Path $work "installed-$($distribution.Name)"
+    $requirements = Join-Path $work "runtime-$($distribution.Name).txt"
+    uv export `
+      --quiet `
+      --frozen `
+      --no-dev `
+      --no-emit-project `
+      --no-annotate `
+      --output-file $requirements
+    python scripts/append_locked_distribution_requirement.py `
+      $installDistribution `
+      $requirements
+    uv venv $venv
+    $python = Join-Path $venv "Scripts/python.exe"
+    uv pip sync `
+      --require-hashes `
+      --only-binary :all: `
+      --python $python `
+      $requirements
+    $env:VEXCALIBUR_EXPECTED_VERSION = $expectedVersion
+    & $python tests/integration/check_installed_windows.py
+  }
 } finally {
   Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
@@ -103,8 +162,8 @@ try {
 
 The native-command preference turns every nonzero `uv`, Python, and pytest exit
 into a terminating error. The Windows contract rejects report requests without
-changing either output, then proves that ordinary installed-wheel generation
-still works.
+changing either output. It then proves that ordinary generation works from the
+wheel and from a wheel rebuilt offline from the sdist.
 
 Run CSAF conformance:
 
@@ -128,10 +187,10 @@ See [Build and review local release
 evidence](../how-to/build-release-evidence.md) for input review, expected files,
 and failure recovery. The full schema-2 graph is intentionally exercised on
 hosted pull-request runners because it verifies GitHub artifact IDs and
-transport digests. That unprivileged run creates an ephemeral local `v0.0.0`
-tag in a credentialless checkout and has no publication credentials. It never
-pushes the tag or changes an existing tag. Its caller explicitly permits
-uploads derived from this public repository.
+transport digests. An untagged candidate gets an ephemeral local `v0.0.0` tag;
+a rerun on a released commit uses the existing immutable release tag. The
+credentialless checkout never pushes or changes a tag, and its caller
+explicitly permits uploads derived from this public repository.
 
 ## Scheduled and live checks
 

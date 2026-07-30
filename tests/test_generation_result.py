@@ -38,6 +38,7 @@ from vexcalibur.generation_result import (
     ExecutionReportFindingSourceDeclaration,
     ExecutionReportOutputFormatDeclaration,
 )
+from vexcalibur.github_sbom import GithubSbomClient
 from vexcalibur.openvex import OpenVexJsonRenderer
 from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
 from vexcalibur.sources.local import LocalFindingsSource
@@ -198,6 +199,56 @@ def test_legacy_generation_preserves_extension_objects() -> None:
     )
 
     assert result is rendered
+
+
+def test_legacy_generation_does_not_read_extensions_after_rendering() -> None:
+    rendered = '{"extended":true}\n'
+
+    class StatefulFinding(VulnerabilityFinding):
+        def __getattribute__(self, name: str) -> object:
+            if name in VulnerabilityFinding.__dataclass_fields__ and object.__getattribute__(
+                self, "_render_complete"
+            ):
+                raise AssertionError("finding was read after rendering")
+            return super().__getattribute__(name)
+
+    component = _component()
+    finding = StatefulFinding(
+        id="PRIVATE-2026-0001",
+        source_name="Private source",
+        source_url="https://security.example.test/PRIVATE-2026-0001",
+        component_ref=component.ref,
+        purl=component.purl.to_string(),
+    )
+    object.__setattr__(finding, "_render_complete", False)
+
+    class Source:
+        def findings_for_components(
+            self,
+            components: tuple[ComponentIdentity, ...],
+        ) -> tuple[VulnerabilityFinding, ...]:
+            return (finding,)
+
+    class Renderer:
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            object.__setattr__(findings[0], "_render_complete", True)
+            return rendered
+
+    assert (
+        generate_vex_from_components(
+            components=(component,),
+            source=Source(),
+            timestamp=None,
+            renderer=Renderer(),
+        )
+        is rendered
+    )
 
 
 def test_result_generation_preserves_source_exception_identity() -> None:
@@ -859,6 +910,71 @@ def test_generation_snapshots_stateful_findings_before_rendering() -> None:
     assert result.execution_report().analysis_state_counts == ((VexAnalysisState.EXPLOITABLE, 1),)
 
 
+def test_renderer_mutation_cannot_change_retained_findings() -> None:
+    component = _component()
+    finding = VulnerabilityFinding(
+        id="PRIVATE-2026-0001",
+        source_name="Private source",
+        source_url="https://security.example.test/PRIVATE-2026-0001",
+        component_ref=component.ref,
+        purl=component.purl.to_string(),
+        analysis_state=VexAnalysisState.EXPLOITABLE,
+    )
+
+    class MutatingRenderer(CustomRenderer):
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            object.__setattr__(findings[0], "analysis_state", VexAnalysisState.RESOLVED)
+            return super().render(
+                components=components,
+                findings=findings,
+                timestamp=timestamp,
+            )
+
+    result = generate_vex_from_components_result(
+        components=(component,),
+        source=FakeVulnerabilitySource((finding,)),
+        timestamp=None,
+        renderer=MutatingRenderer(),
+        execution_context=GenerationExecutionContext(
+            inventory_source=InventorySourceCategory.CUSTOM,
+            finding_source=FindingSourceCategory.CUSTOM,
+            output_format=ExecutionReportOutputFormat.CUSTOM,
+        ),
+    )
+    object.__setattr__(result, "_vexcalibur_version", "0.5.0")
+
+    assert result.findings[0].analysis_state is VexAnalysisState.EXPLOITABLE
+    assert result.execution_report().analysis_state_counts == ((VexAnalysisState.EXPLOITABLE, 1),)
+
+
+def test_generation_result_materializes_independent_finding_snapshots() -> None:
+    component = _component()
+    original = VulnerabilityFinding(
+        id="PRIVATE-2026-0001",
+        source_name="Private source",
+        source_url="https://security.example.test/PRIVATE-2026-0001",
+        component_ref=component.ref,
+        purl=component.purl.to_string(),
+        analysis_state=VexAnalysisState.EXPLOITABLE,
+    )
+    result = GenerationResult("{}\n", (component,), (original,))
+
+    object.__setattr__(original, "analysis_state", VexAnalysisState.RESOLVED)
+    first = result.findings
+    object.__setattr__(first[0], "analysis_state", VexAnalysisState.FALSE_POSITIVE)
+    second = result.findings
+
+    assert first is not second
+    assert first[0] is not second[0]
+    assert second[0].analysis_state is VexAnalysisState.EXPLOITABLE
+
+
 def test_convenience_result_helpers_accept_custom_execution_context() -> None:
     sbom_context = GenerationExecutionContext(
         inventory_source=InventorySourceCategory.SBOM_FILE,
@@ -871,7 +987,7 @@ def test_convenience_result_helpers_accept_custom_execution_context() -> None:
         output_format=ExecutionReportOutputFormat.CUSTOM,
     )
     github_context = GenerationExecutionContext(
-        inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+        inventory_source=InventorySourceCategory.CUSTOM,
         finding_source=FindingSourceCategory.CUSTOM_OSV,
         output_format=ExecutionReportOutputFormat.CUSTOM,
     )
@@ -1187,7 +1303,7 @@ def test_github_generation_result_retains_actual_source_categories(
     )
 
     assert result.execution_context == GenerationExecutionContext(
-        inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+        inventory_source=InventorySourceCategory.CUSTOM,
         finding_source=expected_finding_source,
         output_format=ExecutionReportOutputFormat.CYCLONEDX,
     )
@@ -1241,7 +1357,7 @@ def test_github_source_does_not_apply_builtin_osv_policy_to_subclass() -> None:
     )
 
     assert result.execution_context == GenerationExecutionContext(
-        inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+        inventory_source=InventorySourceCategory.CUSTOM,
         finding_source=FindingSourceCategory.CUSTOM,
         output_format=ExecutionReportOutputFormat.CYCLONEDX,
     )
@@ -1318,7 +1434,40 @@ def test_github_source_result_retains_github_and_local_source_categories(
     )
 
     assert result.execution_context == GenerationExecutionContext(
-        inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+        inventory_source=InventorySourceCategory.CUSTOM,
         finding_source=FindingSourceCategory.LOCAL_FILE,
         output_format=ExecutionReportOutputFormat.CYCLONEDX,
+    )
+
+
+def test_builtin_github_client_retains_github_inventory_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class EmptySource:
+        def execution_report_finding_source(
+            self,
+        ) -> Literal[FindingSourceCategory.CUSTOM]:
+            return FindingSourceCategory.CUSTOM
+
+        def findings_for_components(
+            self,
+            components: tuple[ComponentIdentity, ...],
+        ) -> tuple[VulnerabilityFinding, ...]:
+            return ()
+
+    expected_components = FakeGithubSbomClient().component_identities("vexcalibur-dev/vexcalibur")
+    monkeypatch.setattr(
+        GithubSbomClient,
+        "component_identities",
+        lambda self, repository: expected_components,
+    )
+
+    result = generate_vex_from_github_source_result(
+        repository="vexcalibur-dev/vexcalibur",
+        source=EmptySource(),
+    )
+
+    assert result.execution_context is not None
+    assert (
+        result.execution_context.inventory_source is InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH
     )

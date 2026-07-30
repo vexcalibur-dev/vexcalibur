@@ -429,11 +429,13 @@ def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> 
     build = _job(_validation_text(), "build")
     export = build.index("--only-group sdist-build")
     sync = build.index("uv pip sync", export)
+    prepare = build.index("scripts/prepare-local-release-tag.sh", sync)
     package_build = build.index("uv build", sync)
 
-    assert export < sync < package_build
+    assert export < sync < prepare < package_build
     assert "--require-hashes" in build[sync:package_build]
     assert "--only-binary :all:" in build[sync:package_build]
+    assert '"${VEXCALIBUR_BUILD_PYTHON}"' in build[prepare:package_build]
     assert "--no-build-isolation" in build[package_build:]
     assert "--offline" in build[package_build:]
     assert "--no-create-gitignore" in build[package_build:]
@@ -449,12 +451,17 @@ def test_canonical_release_build_hash_locks_the_backend_and_builds_offline() -> 
 def test_ci_runs_the_unprivileged_publication_contract_with_explicit_consent() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
     result = _job(ci, "ci")
+    version = _job(ci, "publication-version")
     publication = _job(ci, "publication-contract")
 
+    assert "scripts/resolve-publication-version.sh" in version
+    assert "fetch-depth: 0" in version
+    assert "persist-credentials: false" in version
     assert "uses: ./.github/workflows/release-validation.yml" in publication
+    assert "needs: publication-version" in publication
     assert "release-sha: ${{ github.sha }}" in publication
-    assert "release-tag: v0.0.0" in publication
-    assert "release-version: 0.0.0" in publication
+    assert "release-tag: ${{ needs.publication-version.outputs.tag }}" in publication
+    assert "release-version: ${{ needs.publication-version.outputs.version }}" in publication
     assert "publication-only: true" in publication
     assert "unprivileged-ci-contract: true" in publication
     assert "allow-public-evidence-upload: true" in publication
@@ -473,7 +480,25 @@ def test_release_requires_explicit_public_evidence_upload_consent() -> None:
     assert "needs: consent" in _job(validation, "build")
     assert "allow-public-evidence-upload: true" in release_validation
     assert "UNPRIVILEGED_CI_CONTRACT" in consent
-    assert "synthetic version v0.0.0" in consent
+    assert "matching tag and version inputs" in consent
+
+
+def test_ci_bounds_execution_report_jobs_and_cancels_superseded_runs() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "concurrency:" in ci
+    assert "cancel-in-progress: true" in ci
+    for job_name in (
+        "execution-report-windows",
+        "execution-report-macos",
+        "installed-cli",
+        "publication-version",
+    ):
+        assert "timeout-minutes:" in _job(ci, job_name)
+
+    validation = _validation_text()
+    for job_name in ("build", "installed-cli", "direct-vex", "action-vex", "publication-assets"):
+        assert "timeout-minutes:" in _job(validation, job_name)
 
 
 def test_every_reusable_workflow_uploader_descends_from_explicit_consent() -> None:
@@ -670,6 +695,11 @@ def test_publication_jobs_keep_oracle_and_candidate_execution_isolated() -> None
     assert "scripts/normalize-sdist.py" in build
     assert "normalized-sdist-second-pass.tar.gz" in build
     assert 'cmp -- "${normalized_once}" "${normalized_twice}"' in build
+    release_evidence = RELEASE_EVIDENCE.read_text(encoding="utf-8")
+    assert "Draft202012Validator" in release_evidence
+    assert 'docs" / "execution-report-v1.schema.json' in release_evidence
+    assert "vexcalibur.execution_report_validation" not in release_evidence
+    assert "parse_generation_execution_report" not in release_evidence
 
     assert "needs: build" in inventory
     assert "contents: read" in inventory

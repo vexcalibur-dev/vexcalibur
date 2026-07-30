@@ -10,7 +10,6 @@ authors = [
 ]
 keywords = ["vex", "sbom", "cyclonedx", "openvex", "osv", "vulnerability"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",

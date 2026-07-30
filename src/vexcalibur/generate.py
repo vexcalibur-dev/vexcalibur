@@ -77,8 +77,15 @@ class _ExtensionBoundaryPolicy(Enum):
 
 @dataclass(frozen=True)
 class _GenerationRun:
-    result: GenerationResult
+    result: GenerationResult | None
     legacy_document: str
+
+
+def _require_generation_result(run: _GenerationRun) -> GenerationResult:
+    """Return the result produced by an isolated generation path."""
+    if run.result is None:
+        raise AssertionError("isolated generation did not produce a result")
+    return run.result
 
 
 def generate_vex_from_source(
@@ -108,14 +115,16 @@ def generate_vex_from_source_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from a CycloneDX SBOM and provider."""
-    return _run_cyclonedx_generation(
-        input_file=input_file,
-        source=source,
-        timestamp=timestamp,
-        renderer=renderer,
-        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
-        execution_context=execution_context,
-    ).result
+    return _require_generation_result(
+        _run_cyclonedx_generation(
+            input_file=input_file,
+            source=source,
+            timestamp=timestamp,
+            renderer=renderer,
+            boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
+            execution_context=execution_context,
+        )
+    )
 
 
 def generate_vex_from_components(
@@ -176,14 +185,16 @@ def _generate_vex_from_components_result(
         renderer=renderer,
         execution_context=execution_context,
     )
-    return _run_generation(
-        components=components,
-        source=source,
-        timestamp=timestamp,
-        renderer=renderer,
-        execution_context=retained_context,
-        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
-    ).result
+    return _require_generation_result(
+        _run_generation(
+            components=components,
+            source=source,
+            timestamp=timestamp,
+            renderer=renderer,
+            execution_context=retained_context,
+            boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
+        )
+    )
 
 
 def _run_cyclonedx_generation(
@@ -244,14 +255,26 @@ def _run_generation(
     except VulnerabilitySourceInputError as exc:
         raise SbomError(str(exc)) from exc
 
-    retained_findings = (
-        tuple(_snapshot_finding(finding) for finding in source_findings) if isolated else None
-    )
     selected_renderer = CycloneDxJsonRenderer() if renderer is None else renderer
-    renderer_components = (
-        _copy_components(retained_components) if retained_components is not None else components
-    )
-    renderer_findings = retained_findings if retained_findings is not None else source_findings
+    if not isolated:
+        _validate_builtin_render_input(
+            components=components,
+            findings=source_findings,
+            renderer=selected_renderer,
+        )
+        rendered = selected_renderer.render(
+            components=components,
+            findings=source_findings,
+            timestamp=timestamp,
+        )
+        _canonical_rendered_text(rendered)
+        return _GenerationRun(result=None, legacy_document=rendered)
+
+    if retained_components is None:
+        raise AssertionError("isolated generation did not retain components")
+    retained_findings = _copy_findings(source_findings)
+    renderer_components = _copy_components(retained_components)
+    renderer_findings = _copy_findings(retained_findings)
     _validate_builtin_render_input(
         components=renderer_components,
         findings=renderer_findings,
@@ -263,10 +286,6 @@ def _run_generation(
         timestamp=timestamp,
     )
     canonical_document = _canonical_rendered_text(rendered)
-    if retained_components is None:
-        retained_components = _copy_components(components)
-    if retained_findings is None:
-        retained_findings = tuple(_snapshot_finding(finding) for finding in source_findings)
     return _GenerationRun(
         result=GenerationResult(
             rendered_document=canonical_document,
@@ -322,6 +341,12 @@ def _snapshot_finding(finding: VulnerabilityFinding) -> VulnerabilityFinding:
         fixed_version=finding.fixed_version,
         remediation_category=finding.remediation_category,
     )
+
+
+def _copy_findings(
+    findings: tuple[VulnerabilityFinding, ...],
+) -> tuple[VulnerabilityFinding, ...]:
+    return tuple(_snapshot_finding(finding) for finding in findings)
 
 
 def _validate_builtin_render_input(
@@ -552,14 +577,16 @@ def generate_vex_from_sbom_result(
         source_name=osv_source_name,
         source_url=osv_source_url,
     )
-    return _run_cyclonedx_generation(
-        input_file=input_file,
-        source=source,
-        timestamp=timestamp,
-        renderer=renderer,
-        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
-        execution_context=execution_context,
-    ).result
+    return _require_generation_result(
+        _run_cyclonedx_generation(
+            input_file=input_file,
+            source=source,
+            timestamp=timestamp,
+            renderer=renderer,
+            boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
+            execution_context=execution_context,
+        )
+    )
 
 
 def generate_vex_from_github_sbom(
@@ -603,15 +630,17 @@ def generate_vex_from_github_source_result(
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from GitHub inventory and one source."""
-    return _run_github_generation(
-        repository=repository,
-        source=source,
-        timestamp=timestamp,
-        github_client=github_client,
-        renderer=renderer,
-        boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
-        execution_context=execution_context,
-    ).result
+    return _require_generation_result(
+        _run_github_generation(
+            repository=repository,
+            source=source,
+            timestamp=timestamp,
+            github_client=github_client,
+            renderer=renderer,
+            boundary_policy=_ExtensionBoundaryPolicy.ISOLATED_COPIES,
+            execution_context=execution_context,
+        )
+    )
 
 
 def generate_vex_from_github_sbom_result(
@@ -656,9 +685,14 @@ def _run_github_generation(
     execution_context: GenerationExecutionContext | None,
 ) -> _GenerationRun:
     validate_source_before_inventory_load(source)
+    inventory_source = (
+        InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH
+        if github_client is None or type(github_client) is GithubSbomClient
+        else InventorySourceCategory.CUSTOM
+    )
     retained_context = (
         _execution_context_for_generation(
-            inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+            inventory_source=inventory_source,
             source=source,
             renderer=renderer,
             execution_context=execution_context,

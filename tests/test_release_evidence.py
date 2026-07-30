@@ -7,11 +7,17 @@ import stat
 import subprocess
 import tarfile
 import zipfile
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 
 import pytest
 import scripts.release_evidence as release_evidence
+
+from vexcalibur.generation_result import (
+    GenerationExecutionReportParseError,
+    parse_generation_execution_report,
+)
 
 ROOT = Path(__file__).parents[1]
 LOCK = ROOT / "uv.lock"
@@ -166,6 +172,90 @@ def _write_zero_vex_output(path: Path) -> None:
             }
         )
     )
+
+
+def _valid_execution_report_document() -> dict[str, object]:
+    document = b'{"ok":true}\n'
+    return {
+        "analysis_state_counts": {"in_triage": 1},
+        "command": "generate",
+        "component_count": 1,
+        "document": {
+            "bytes": len(document),
+            "sha256": hashlib.sha256(document).hexdigest(),
+        },
+        "finding_count": 1,
+        "finding_source": "local_file",
+        "inventory_source": "sbom_file",
+        "output_format": "cyclonedx",
+        "schema_version": 1,
+        "vexcalibur_version": "0.5.0",
+    }
+
+
+def test_release_oracle_and_public_parser_agree_on_report_mutations() -> None:
+    valid = _valid_execution_report_document()
+    mutations: list[tuple[str, dict[str, object], bool]] = [("valid", valid, True)]
+
+    def changed(
+        name: str,
+        mutation: Callable[[dict[str, object]], None],
+        expected: bool = False,
+    ) -> None:
+        document = copy.deepcopy(valid)
+        mutation(document)
+        mutations.append((name, document, expected))
+
+    changed("boolean count", lambda document: document.__setitem__("component_count", True))
+    changed("float count", lambda document: document.__setitem__("finding_count", 1.0))
+    changed(
+        "invalid digest",
+        lambda document: document["document"].__setitem__("sha256", "0" * 63),
+    )
+    changed(
+        "nested extra",
+        lambda document: document["document"].__setitem__("extra", "rejected"),
+    )
+    changed("missing command", lambda document: document.pop("command"))
+    changed("root extra", lambda document: document.__setitem__("extra", "rejected"))
+    changed(
+        "unknown state",
+        lambda document: document["analysis_state_counts"].__setitem__("unknown", 1),
+    )
+    changed(
+        "state sum",
+        lambda document: document["analysis_state_counts"].__setitem__("in_triage", 2),
+    )
+    changed(
+        "maximum document size",
+        lambda document: document["document"].__setitem__(
+            "bytes",
+            release_evidence.MAX_GENERATED_DOCUMENT_BYTES,
+        ),
+        True,
+    )
+
+    validator = release_evidence._execution_report_schema_validator()
+    for name, document, expected in mutations:
+        serialized = release_evidence._canonical_execution_report_json(document)
+        try:
+            parse_generation_execution_report(serialized)
+        except GenerationExecutionReportParseError:
+            parser_accepted = False
+        else:
+            parser_accepted = True
+        try:
+            release_evidence._validate_execution_report_document(
+                document,
+                validator=validator,
+            )
+        except release_evidence.EvidenceError:
+            oracle_accepted = False
+        else:
+            oracle_accepted = True
+
+        assert parser_accepted is expected, name
+        assert oracle_accepted is expected, name
 
 
 def test_checked_production_review_is_bound_to_the_lock_and_has_zero_findings() -> None:

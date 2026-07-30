@@ -8,6 +8,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
 from functools import cached_property
 from typing import Literal, TypedDict, cast
 
@@ -17,6 +18,7 @@ from vexcalibur.domain import (
     ComponentIdentity,
     ExecutionReportFindingSourceDeclaration,
     VexAnalysisState,
+    VexRemediationCategory,
     VulnerabilityFinding,
 )
 from vexcalibur.generation_context import (
@@ -139,14 +141,65 @@ class _ComponentSnapshot:
         )
 
 
+@dataclass(frozen=True)
+class _FindingSnapshot:
+    """Primitive retained representation of one normalized finding."""
+
+    id: str
+    source_name: str
+    source_url: str
+    component_ref: str
+    purl: str
+    modified: datetime | None
+    analysis_state: VexAnalysisState
+    analysis_detail: str
+    action_statement: str | None
+    impact_statement: str | None
+    fixed_version: str | None
+    remediation_category: VexRemediationCategory | None
+
+    @classmethod
+    def from_finding(cls, finding: VulnerabilityFinding) -> _FindingSnapshot:
+        return cls(
+            id=finding.id,
+            source_name=finding.source_name,
+            source_url=finding.source_url,
+            component_ref=finding.component_ref,
+            purl=finding.purl,
+            modified=finding.modified,
+            analysis_state=finding.analysis_state,
+            analysis_detail=finding.analysis_detail,
+            action_statement=finding.action_statement,
+            impact_statement=finding.impact_statement,
+            fixed_version=finding.fixed_version,
+            remediation_category=finding.remediation_category,
+        )
+
+    def materialize(self) -> VulnerabilityFinding:
+        return VulnerabilityFinding(
+            id=self.id,
+            source_name=self.source_name,
+            source_url=self.source_url,
+            component_ref=self.component_ref,
+            purl=self.purl,
+            modified=self.modified,
+            analysis_state=self.analysis_state,
+            analysis_detail=self.analysis_detail,
+            action_statement=self.action_statement,
+            impact_statement=self.impact_statement,
+            fixed_version=self.fixed_version,
+            remediation_category=self.remediation_category,
+        )
+
+
 @dataclass(frozen=True, init=False)
 class GenerationResult:
     """Rendered VEX and an immutable snapshot of the normalized render inputs."""
 
     rendered_document: str
-    findings: tuple[VulnerabilityFinding, ...]
     execution_context: GenerationExecutionContext | None
     _component_snapshots: tuple[_ComponentSnapshot, ...] = field(repr=False)
+    _finding_snapshots: tuple[_FindingSnapshot, ...] = field(repr=False)
     _vexcalibur_version: str | None = field(
         default=None,
         repr=False,
@@ -177,12 +230,16 @@ class GenerationResult:
         ):
             raise TypeError("execution_context must be a GenerationExecutionContext")
         object.__setattr__(self, "rendered_document", rendered_document)
-        object.__setattr__(self, "findings", findings)
         object.__setattr__(self, "execution_context", execution_context)
         object.__setattr__(
             self,
             "_component_snapshots",
             tuple(_ComponentSnapshot.from_component(component) for component in components),
+        )
+        object.__setattr__(
+            self,
+            "_finding_snapshots",
+            tuple(_FindingSnapshot.from_finding(finding) for finding in findings),
         )
         object.__setattr__(self, "_vexcalibur_version", None)
 
@@ -190,6 +247,11 @@ class GenerationResult:
     def components(self) -> tuple[ComponentIdentity, ...]:
         """Return independent ordinary package objects from the retained snapshot."""
         return tuple(snapshot.materialize() for snapshot in self._component_snapshots)
+
+    @property
+    def findings(self) -> tuple[VulnerabilityFinding, ...]:
+        """Return independent ordinary findings from the retained snapshot."""
+        return tuple(snapshot.materialize() for snapshot in self._finding_snapshots)
 
     @cached_property
     def rendered_bytes(self) -> bytes:

@@ -151,14 +151,16 @@ The result helpers differ in how they establish inventory provenance:
      - ``SbomError``, ``OsvConfigurationError``, ``OsvClientError``,
        ``VexRenderError``, ``TypeError``, or ``ValueError``.
    * - ``generate_vex_from_github_source_result``
-     - ``GITHUB_DEPENDENCY_GRAPH`` after GitHub response validation.
+     - ``GITHUB_DEPENDENCY_GRAPH`` when Vexcalibur creates or receives an exact
+       ``GithubSbomClient``. Another injected loader is ``CUSTOM``.
      - Inferred from the exact source type or its ``CUSTOM`` declaration.
      - ``GithubSbomError``; ``OsvConfigurationError``, ``OsvClientError``, or
        ``LocalFindingsError`` for those built-in sources; ``VexRenderError``;
        ``TypeError``; ``ValueError``; or an injected loader's documented
        exception, propagated unchanged.
    * - ``generate_vex_from_github_sbom_result``
-     - ``GITHUB_DEPENDENCY_GRAPH`` after GitHub response validation.
+     - ``GITHUB_DEPENDENCY_GRAPH`` when Vexcalibur creates or receives an exact
+       ``GithubSbomClient``. Another injected loader is ``CUSTOM``.
      - ``PUBLIC_OSV`` or ``CUSTOM_OSV`` from the effective guarded endpoint.
      - ``GithubSbomError``, ``OsvConfigurationError``, ``OsvClientError``,
        ``VexRenderError``, ``TypeError``, ``ValueError``, or an injected
@@ -176,10 +178,14 @@ classes above.
 
 Every helper passes plain ``tuple`` objects to the source and renderer. Sources
 return ``VulnerabilityFinding`` values in a tuple. Renderers return UTF-8
-encodable text. Before it calls the next extension boundary, Vexcalibur
-snapshots each tuple and copies component and finding subclasses into exact
-``ComponentIdentity`` and ``VulnerabilityFinding`` values. Subclass-only state
-is not retained.
+encodable text.
+
+The compatibility helpers preserve extension object identities. The
+``*_result`` helpers isolate each extension boundary instead. They copy
+component and finding subclasses into exact ``ComponentIdentity`` and
+``VulnerabilityFinding`` values, give the renderer separate copies, and retain
+private primitive snapshots for the result. Subclass-only state is not
+retained.
 
 .. automodule:: vexcalibur.generate
    :members: generate_vex_from_components, generate_vex_from_components_result, generate_vex_from_source, generate_vex_from_source_result, generate_vex_from_sbom, generate_vex_from_sbom_result, generate_vex_from_github_source_result, generate_vex_from_github_sbom, generate_vex_from_github_sbom_result, generate_vex_from_local_findings, generate_vex_from_local_findings_result
@@ -225,6 +231,25 @@ Validate the files together before automation accepts either one:
 
 The validator prints ``execution report verified`` on success.
 
+On Windows, use a new directory under ``$env:TEMP`` for both commands:
+
+.. code-block:: powershell
+
+   $ErrorActionPreference = "Stop"
+   $work = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
+   try {
+     uv run --frozen python docs/examples/generate_execution_report.py $work
+     uv run --frozen python docs/examples/validate_execution_report.py `
+       (Join-Path $work "execution-report.json") `
+       (Join-Path $work "vex.json") `
+       docs/execution-report-v1.schema.json
+   } finally {
+     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+   }
+
+The second command prints ``execution report verified`` on success. Windows
+permissions inherit the access control list of ``$env:TEMP``.
+
 The two file writes are independent and non-atomic. They do not provide the
 CLI's Linux and macOS staging, alias checks, or report-last success marker. An
 embedding that needs those guarantees must provide its own transaction.
@@ -259,7 +284,8 @@ embedding can use ``ExecutionReportOutputFormat.CUSTOM`` for its own renderer.
      - A GitHub Dependency Graph SBOM loaded by Vexcalibur.
    * - ``InventorySourceCategory.CUSTOM``
      - ``custom``
-     - Components supplied by an embedding.
+     - Components supplied by an embedding or another injected inventory
+       loader.
    * - ``FindingSourceCategory.LOCAL_FILE``
      - ``local_file``
      - A local findings file loaded by Vexcalibur.

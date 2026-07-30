@@ -4,6 +4,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from setuptools_scm import get_version
+
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts" / "prepare-local-release-tag.sh"
 GIT = "/usr/bin/git"
@@ -37,21 +40,10 @@ def _repository(tmp_path: Path) -> Path:
 
 
 def _setuptools_scm_version(repository: Path) -> str:
-    completed = subprocess.run(  # noqa: S603 - fixed interpreter and test-owned repository
-        [
-            sys.executable,
-            "-c",
-            (
-                "from setuptools_scm import get_version; "
-                "print(get_version(root='.', local_scheme='no-local-version'))"
-            ),
-        ],
-        cwd=repository,
-        check=True,
-        capture_output=True,
-        text=True,
+    return get_version(
+        root=repository,
+        local_scheme="no-local-version",
     )
-    return completed.stdout.strip()
 
 
 def test_rejects_competing_version_tags_without_mutating_tags(tmp_path: Path) -> None:
@@ -62,7 +54,7 @@ def test_rejects_competing_version_tags_without_mutating_tags(tmp_path: Path) ->
     _git(repository, "tag", "--annotate", "v9.9.9", "--message", "real release", release_sha)
 
     completed = subprocess.run(  # noqa: S603 - reviewed repository script and test-owned inputs
-        [str(SCRIPT), "v1.2.3", release_sha],
+        [str(SCRIPT), "v1.2.3", release_sha, sys.executable],
         cwd=repository,
         check=False,
         capture_output=True,
@@ -82,7 +74,7 @@ def test_created_release_tag_is_the_setuptools_scm_version(tmp_path: Path) -> No
     _git(repository, "tag", "documentation", release_sha)
 
     subprocess.run(  # noqa: S603 - reviewed repository script and test-owned inputs
-        [str(SCRIPT), "v1.2.3", release_sha],
+        [str(SCRIPT), "v1.2.3", release_sha, sys.executable],
         cwd=repository,
         check=True,
     )
@@ -98,7 +90,7 @@ def test_rejects_an_existing_tag_on_another_commit(tmp_path: Path) -> None:
     release_sha = _commit(repository, "release\n")
 
     completed = subprocess.run(  # noqa: S603 - reviewed repository script and test-owned inputs
-        [str(SCRIPT), "v1.2.3", release_sha],
+        [str(SCRIPT), "v1.2.3", release_sha, sys.executable],
         cwd=repository,
         check=False,
         capture_output=True,
@@ -108,3 +100,25 @@ def test_rejects_an_existing_tag_on_another_commit(tmp_path: Path) -> None:
     assert completed.returncode == 1
     assert "already exists" in completed.stderr
     assert _git(repository, "rev-parse", "v1.2.3^{commit}") == first_sha
+
+
+@pytest.mark.parametrize("competing_tag", ("9.9.9", "release-9.9.9"))
+def test_rejects_other_setuptools_scm_version_tags(
+    tmp_path: Path,
+    competing_tag: str,
+) -> None:
+    repository = _repository(tmp_path)
+    release_sha = _commit(repository, "release\n")
+    _git(repository, "tag", competing_tag, release_sha)
+
+    completed = subprocess.run(  # noqa: S603 - reviewed script and test-owned inputs
+        [str(SCRIPT), "v1.2.3", release_sha, sys.executable],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "setuptools-scm resolved 9.9.9, expected 1.2.3" in completed.stderr
+    assert _git(repository, "tag", "--list") == competing_tag

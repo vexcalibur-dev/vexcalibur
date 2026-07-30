@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from vexcalibur.domain import ComponentIdentity, VulnerabilitySource
+from vexcalibur.domain import VulnerabilitySource, validate_source_before_inventory_load
 from vexcalibur.generate import (
     generate_vex_from_github_source_result,
     generate_vex_from_local_findings_result,
@@ -29,32 +29,6 @@ from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
     OsvSource,
 )
-
-
-class _DeferredGithubSbomLoader:
-    """Resolve GitHub authentication only after source policy validation."""
-
-    def __init__(
-        self,
-        *,
-        api_url: str,
-        token_env: str | None,
-        use_gh_auth: bool,
-    ) -> None:
-        self._deferred_api_url = api_url
-        self._deferred_token_env = token_env
-        self._deferred_use_gh_auth = use_gh_auth
-
-    def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
-        client = GithubSbomClient(
-            api_url=self._deferred_api_url,
-            token=resolve_github_token(
-                api_url=self._deferred_api_url,
-                token_env=self._deferred_token_env,
-                allow_gh_cli=self._deferred_use_gh_auth,
-            ),
-        )
-        return client.component_identities(repository)
 
 
 @dataclass(frozen=True)
@@ -132,10 +106,14 @@ class GenerateCommandRequest:
         if repository is None:
             raise AssertionError("generate request repository validation failed")
         source = self._source
-        client = _DeferredGithubSbomLoader(
+        validate_source_before_inventory_load(source)
+        client = GithubSbomClient(
             api_url=self.github_api_url,
-            token_env=self.github_token_env,
-            use_gh_auth=self.use_gh_auth,
+            token=resolve_github_token(
+                api_url=self.github_api_url,
+                token_env=self.github_token_env,
+                allow_gh_cli=self.use_gh_auth,
+            ),
         )
         return generate_vex_from_github_source_result(
             repository=repository,

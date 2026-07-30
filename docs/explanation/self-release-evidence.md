@@ -68,12 +68,13 @@ installs the wheel with a SHA-256-bound local URI and runs the installed
 the full-commit-pinned companion Action in a separate environment. Each job
 emits a VEX document and execution report for every applicable format.
 
-A fresh finalizer downloads all producer artifacts, verifies their GitHub
-artifact identity and transport digests, revalidates every input, and requires
-the direct and Action documents and reports to be byte-for-byte equal. It also
-checks each report's provenance categories, counts, size, and document digest.
-The finalizer writes into a fresh directory and removes the incomplete
-directory after any late failure. It never merges into or overwrites an
+A fresh finalizer downloads all producer artifacts and verifies their GitHub
+artifact identity and transport digests. It revalidates every input, checks each
+report's provenance, counts, size, and document digest, and requires direct and
+Action output to be byte-for-byte equal.
+
+The finalizer writes into a fresh directory. A late failure removes that
+incomplete directory, and finalization never merges into or overwrites an
 existing output.
 
 GitHub artifact archive digests protect transport within one workflow run, but

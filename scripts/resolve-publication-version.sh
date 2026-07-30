@@ -1,0 +1,30 @@
+#!/bin/bash -p
+set -euo pipefail
+
+if [[ "$#" -ne 1 ]]; then
+  echo "usage: resolve-publication-version.sh SHA" >&2
+  exit 2
+fi
+
+release_sha="$1"
+if [[ ! "${release_sha}" =~ ^[0-9a-f]{40}$ ]] || \
+  ! git cat-file -e "${release_sha}^{commit}" 2>/dev/null; then
+  echo "release SHA must identify a local Git commit" >&2
+  exit 2
+fi
+
+release_tags=()
+while IFS= read -r existing_tag; do
+  if [[ "${existing_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+    release_tags+=("${existing_tag}")
+  fi
+done < <(git tag --points-at "${release_sha}")
+
+if [[ "${#release_tags[@]}" -gt 1 ]]; then
+  printf 'release SHA has multiple version tags: %s\n' "${release_tags[*]}" >&2
+  exit 1
+fi
+
+release_tag="${release_tags[0]:-v0.0.0}"
+printf 'tag=%s\n' "${release_tag}"
+printf 'version=%s\n' "${release_tag#v}"
