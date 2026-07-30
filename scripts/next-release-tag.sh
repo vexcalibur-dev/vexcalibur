@@ -91,7 +91,7 @@ while IFS= read -r head_tag; do
     require_version "$(normalize_version "${head_tag}")"
   fi
 done < <(
-  git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' |
+  git tag --list 'v[0-9]*.[0-9]*.[0-9]*' |
     grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true
 )
 

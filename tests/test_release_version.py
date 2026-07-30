@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "next-release-tag.sh"
 GIT = shutil.which("git")
@@ -278,6 +280,32 @@ def test_unbounded_nested_annotated_head_tag_is_rejected(tmp_path: Path) -> None
 def test_lightweight_head_tag_is_rejected(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "v1.2.3")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v1.2.3 must be annotated" in result.stderr
+
+
+@pytest.mark.parametrize("object_spec", ["HEAD:README.md", "HEAD^{tree}"])
+def test_annotated_noncommit_release_tag_is_rejected(
+    tmp_path: Path,
+    object_spec: str,
+) -> None:
+    repo = init_repo(tmp_path)
+    object_id = run_git(repo, "rev-parse", object_spec)
+    run_git(repo, "tag", "-a", "v1.2.3", object_id, "-m", "Invalid release tag")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v1.2.3 must directly annotate a commit" in result.stderr
+
+
+def test_lightweight_noncommit_release_tag_is_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    blob_id = run_git(repo, "rev-parse", "HEAD:README.md")
+    run_git(repo, "tag", "v1.2.3", blob_id)
 
     result = run_release_script_failure(repo, "")
 
