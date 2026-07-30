@@ -18,6 +18,10 @@ from vexcalibur.domain import (
 )
 from vexcalibur.generate import MAX_VEX_OUTPUT_BYTES
 from vexcalibur.generation_result import (
+    _V1_ANALYSIS_STATES,
+    _V1_FINDING_SOURCES,
+    _V1_INVENTORY_SOURCES,
+    _V1_OUTPUT_FORMATS,
     MAX_EXECUTION_REPORT_BYTES,
     MAX_EXECUTION_REPORT_COUNT,
     ExecutionReportOutputFormat,
@@ -28,10 +32,12 @@ from vexcalibur.generation_result import (
     GenerationExecutionReport,
     GenerationExecutionReportDict,
     GenerationExecutionReportParseError,
+    GenerationReportMetadataError,
     GenerationResult,
     InventorySourceCategory,
     parse_generation_execution_report,
 )
+from vexcalibur.version_identity import SourceVersionIdentityError
 
 EXECUTION_REPORT_SCHEMA_PATH = (
     Path(__file__).parents[1] / "docs" / "execution-report-v1.schema.json"
@@ -157,18 +163,18 @@ def test_execution_report_schema_and_parser_contracts_are_exhaustively_aligned()
         "pattern": "^[0-9A-Za-z][0-9A-Za-z.!+_-]*$",
         "not": {"pattern": "[^0-9A-Za-z.!+_-]"},
     }
-    assert set(properties["inventory_source"]["enum"]) == {
-        value.value for value in InventorySourceCategory
-    }
-    assert set(properties["finding_source"]["enum"]) == {
-        value.value for value in FindingSourceCategory
-    }
-    assert set(properties["output_format"]["enum"]) == {
-        value.value for value in ExecutionReportOutputFormat
-    }
-    assert set(properties["analysis_state_counts"]["properties"]) == {
-        state.value for state in VexAnalysisState
-    }
+    assert tuple(properties["inventory_source"]["enum"]) == tuple(
+        value.value for value in _V1_INVENTORY_SOURCES
+    )
+    assert tuple(properties["finding_source"]["enum"]) == tuple(
+        value.value for value in _V1_FINDING_SOURCES
+    )
+    assert tuple(properties["output_format"]["enum"]) == tuple(
+        value.value for value in _V1_OUTPUT_FORMATS
+    )
+    assert tuple(properties["analysis_state_counts"]["properties"]) == tuple(
+        state.value for state in _V1_ANALYSIS_STATES
+    )
     assert set(properties["document"]["required"]) == set(
         GeneratedDocumentMetadataDict.__required_keys__
     )
@@ -257,25 +263,52 @@ def test_execution_report_matches_the_published_json_schema(
     Draft202012Validator(schema).validate(json.loads(report.to_json()))
 
 
-def test_execution_report_schema_enums_exactly_match_python_categories(
+def test_execution_report_schema_enums_exactly_match_schema_v1_categories(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     schema = json.loads(EXECUTION_REPORT_SCHEMA_PATH.read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema)
     base_document = _report(monkeypatch).to_dict()
     categories = {
-        "inventory_source": InventorySourceCategory,
-        "finding_source": FindingSourceCategory,
-        "output_format": ExecutionReportOutputFormat,
+        "inventory_source": _V1_INVENTORY_SOURCES,
+        "finding_source": _V1_FINDING_SOURCES,
+        "output_format": _V1_OUTPUT_FORMATS,
     }
 
-    for field, category_type in categories.items():
-        expected_values = {category.value for category in category_type}
-        assert set(schema["properties"][field]["enum"]) == expected_values
-        for category in category_type:
+    for field, categories_for_v1 in categories.items():
+        expected_values = tuple(category.value for category in categories_for_v1)
+        assert tuple(schema["properties"][field]["enum"]) == expected_values
+        for category in categories_for_v1:
             document = dict(base_document)
             document[field] = category.value
             validator.validate(document)
+
+
+def test_schema_v1_categories_are_frozen_independently_of_domain_enums() -> None:
+    assert _V1_INVENTORY_SOURCES == (
+        InventorySourceCategory.SBOM_FILE,
+        InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+        InventorySourceCategory.CUSTOM,
+    )
+    assert _V1_FINDING_SOURCES == (
+        FindingSourceCategory.LOCAL_FILE,
+        FindingSourceCategory.PUBLIC_OSV,
+        FindingSourceCategory.CUSTOM_OSV,
+        FindingSourceCategory.CUSTOM,
+    )
+    assert _V1_OUTPUT_FORMATS == (
+        ExecutionReportOutputFormat.CYCLONEDX,
+        ExecutionReportOutputFormat.OPENVEX,
+        ExecutionReportOutputFormat.CSAF,
+        ExecutionReportOutputFormat.CUSTOM,
+    )
+    assert _V1_ANALYSIS_STATES == (
+        VexAnalysisState.RESOLVED,
+        VexAnalysisState.EXPLOITABLE,
+        VexAnalysisState.IN_TRIAGE,
+        VexAnalysisState.FALSE_POSITIVE,
+        VexAnalysisState.NOT_AFFECTED,
+    )
 
 
 def test_execution_report_schema_bounds_generated_document_bytes(
@@ -493,6 +526,31 @@ def test_generation_result_captures_loaded_code_and_validates_package_version(
     )
 
     with pytest.raises(ValueError, match="does not match installed package metadata"):
+        result.execution_report()
+
+
+def test_generation_result_defers_source_identity_check_until_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable_source_identity(version: str) -> None:
+        raise SourceVersionIdentityError(f"Git is unavailable for {version}")
+
+    monkeypatch.setattr(
+        "vexcalibur.generation_result.verify_source_checkout_version",
+        unavailable_source_identity,
+    )
+    result = GenerationResult(
+        rendered_document="{}\n",
+        components=(),
+        findings=(),
+        execution_context=GenerationExecutionContext(
+            inventory_source=InventorySourceCategory.SBOM_FILE,
+            finding_source=FindingSourceCategory.LOCAL_FILE,
+            output_format=ExecutionReportOutputFormat.CYCLONEDX,
+        ),
+    )
+
+    with pytest.raises(GenerationReportMetadataError, match="Git is unavailable"):
         result.execution_report()
 
 

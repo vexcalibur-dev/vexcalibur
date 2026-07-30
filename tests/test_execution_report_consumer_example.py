@@ -124,6 +124,63 @@ def test_consumer_example_applies_an_exploitable_count_policy(
     assert rejected.stderr == ("execution report rejected: exploitable count 1 exceeds maximum 0\n")
 
 
+def test_consumer_example_reports_validation_failure_without_a_traceback(
+    tmp_path: Path,
+) -> None:
+    report_path, document_path, _ = _write_pair(tmp_path)
+    report_path.write_text('{"schema_version":', encoding="utf-8")
+
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(EXAMPLE),
+            str(report_path),
+            str(document_path),
+            str(SCHEMA),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == (
+        "execution report validation failed: an input file is not valid JSON\n"
+    )
+    assert "Traceback" not in result.stderr
+    assert str(tmp_path) not in result.stderr
+
+
+def test_consumer_example_hides_schema_validation_details(
+    tmp_path: Path,
+) -> None:
+    report_path, document_path, report = _write_pair(tmp_path)
+    report["inventory_source"] = "private-inventory-name"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(EXAMPLE),
+            str(report_path),
+            str(document_path),
+            str(SCHEMA),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == (
+        "execution report validation failed: execution report does not match the reviewed schema\n"
+    )
+    assert "private-inventory-name" not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_consumer_example_rejects_a_negative_policy_limit(tmp_path: Path) -> None:
     report_path, document_path, _ = _write_pair(tmp_path)
 

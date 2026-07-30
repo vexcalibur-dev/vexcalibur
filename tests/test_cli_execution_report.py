@@ -717,6 +717,36 @@ def test_missing_package_metadata_does_not_affect_generation_without_report(
     assert "package metadata" not in result.output
 
 
+def test_source_checkout_identity_is_not_required_without_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def unexpected_source_identity_check(version: str) -> None:
+        raise AssertionError(f"ordinary generation inspected source identity for {version}")
+
+    monkeypatch.setattr(
+        "vexcalibur.generation_result.verify_source_checkout_version",
+        unexpected_source_identity_check,
+    )
+    output_path = tmp_path / "vex.json"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert output_path.read_text(encoding="utf-8").startswith("{")
+
+
 def test_report_commit_failure_occurs_after_vex_output(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

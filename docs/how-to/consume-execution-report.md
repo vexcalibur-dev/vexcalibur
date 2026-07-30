@@ -78,6 +78,14 @@ The command prints `execution report verified` and exits with status `0`. The
 `--max-exploitable 1` policy accepts the one exploitable finding in the example
 fixture.
 
+The validator uses three exit statuses:
+
+- `0`: the report, document binding, and policy passed.
+- `1`: validation passed, but the exploitable-count policy rejected the report.
+- `2`: command usage, file integrity, JSON, schema, or document validation
+  failed. Expected failures print one concise error to standard error without a
+  traceback.
+
 Set the limit to zero when your workflow must reject every exploitable finding:
 
 ```bash
@@ -113,10 +121,12 @@ so it deliberately omits the Action recipe for now. Use the source-checkout
 procedure above until the release notes and the installed
 `vexcalibur generate --help` output confirm support.
 
-After publication, use the versioned documentation for that release. Keep the
-schema and package on the same immutable tag, pin the companion Action to a full
-commit, validate the report before reading it, and upload neither file when
-validation fails.
+After publication, open the release's immutable tag on GitHub and use the
+`docs/` tree and schema from that tag. GitHub Pages and Read the Docs describe
+the default branch; they are not immutable release documentation. Keep the
+schema and package on the same tag, pin the companion Action to a full commit,
+validate the report before reading it, and upload neither file when validation
+fails.
 
 ## Keep the trust boundary explicit
 

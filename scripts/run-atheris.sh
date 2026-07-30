@@ -52,7 +52,9 @@ for target in "${targets[@]}"; do
   corpus_dir="${generated_corpus}/${target}"
   artifact_dir="${artifact_root}/${target}"
   mkdir -p "${corpus_dir}" "${artifact_dir}"
-  cp -R "${tracked_corpus}/${target}/." "${corpus_dir}/"
+  if [[ -d "${tracked_corpus}/${target}" ]]; then
+    cp -R "${tracked_corpus}/${target}/." "${corpus_dir}/"
+  fi
   if [[ "${target}" == report ]]; then
     printf '\377' >"${corpus_dir}/malformed-utf8.bin"
   fi

@@ -119,6 +119,30 @@ def _component() -> ComponentIdentity:
     )
 
 
+def test_generation_snapshot_contract_covers_every_domain_field() -> None:
+    assert tuple(ComponentIdentity.__dataclass_fields__) == (
+        "ref",
+        "name",
+        "version",
+        "purl",
+        "type",
+    )
+    assert tuple(VulnerabilityFinding.__dataclass_fields__) == (
+        "id",
+        "source_name",
+        "source_url",
+        "component_ref",
+        "purl",
+        "modified",
+        "analysis_state",
+        "analysis_detail",
+        "action_statement",
+        "impact_statement",
+        "fixed_version",
+        "remediation_category",
+    )
+
+
 def test_legacy_generation_preserves_extension_objects() -> None:
     class ExtendedComponent(ComponentIdentity):
         pass

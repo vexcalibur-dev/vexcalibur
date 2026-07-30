@@ -11,3 +11,9 @@ def test_windows_documentation_uses_the_canonical_platform_contract() -> None:
 
     assert "scripts/check-execution-report-windows.ps1" in documentation
     assert assignment < installed_check
+
+
+def test_execution_report_schema_checkout_bytes_are_pinned_to_lf() -> None:
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+
+    assert "docs/execution-report-v1.schema.json text eol=lf" in attributes

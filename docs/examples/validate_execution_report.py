@@ -8,12 +8,14 @@ import hashlib
 import json
 import os
 import stat
+import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, NoReturn
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
 from referencing import Registry
 from referencing.exceptions import NoSuchResource
 
@@ -209,15 +211,40 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    report = validate_execution_report(args.report, args.document, args.schema)
+    try:
+        report = validate_execution_report(args.report, args.document, args.schema)
+    except (OSError, UnicodeError, ValueError, SchemaError, ValidationError) as exc:
+        print(
+            f"execution report validation failed: {_validation_error_message(exc)}",
+            file=sys.stderr,
+        )
+        return 2
     exploitable = report["analysis_state_counts"].get("exploitable", 0)
     if args.max_exploitable is not None and exploitable > args.max_exploitable:
-        raise SystemExit(
+        print(
             f"execution report rejected: exploitable count {exploitable} "
-            f"exceeds maximum {args.max_exploitable}"
+            f"exceeds maximum {args.max_exploitable}",
+            file=sys.stderr,
         )
+        return 1
     print("execution report verified")
     return 0
+
+
+def _validation_error_message(
+    error: OSError | UnicodeError | ValueError | SchemaError | ValidationError,
+) -> str:
+    if isinstance(error, ValidationError):
+        return "execution report does not match the reviewed schema"
+    if isinstance(error, SchemaError):
+        return "reviewed execution report schema is invalid"
+    if isinstance(error, OSError):
+        return "could not read an input file"
+    if isinstance(error, UnicodeError):
+        return "an input file is not valid UTF-8"
+    if isinstance(error, json.JSONDecodeError):
+        return "an input file is not valid JSON"
+    return str(error)
 
 
 if __name__ == "__main__":

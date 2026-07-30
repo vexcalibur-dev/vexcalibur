@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
-from vexcalibur.generation_result import MAX_GENERATED_DOCUMENT_BYTES
+from vexcalibur.limits import MAX_GENERATED_DOCUMENT_BYTES
 from vexcalibur.render import VexRenderError
 
 _BASE_BYTES = 4 * 1024

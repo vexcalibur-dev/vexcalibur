@@ -10,6 +10,10 @@ capability: v0.4.2 and earlier do not include them. Check the documentation for
 your release and its `vexcalibur generate --help` output before you update
 automation.
 
+GitHub Pages and Read the Docs both describe the default branch. For an
+immutable contract, open the selected release tag on GitHub and use the
+documentation and schemas from that tag.
+
 ## Capabilities on this branch
 
 - CycloneDX JSON and XML SBOM input for versions 1.4, 1.5, and 1.6

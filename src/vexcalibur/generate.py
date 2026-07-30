@@ -13,13 +13,11 @@ from vexcalibur.domain import (
     validate_source_before_inventory_load,
 )
 from vexcalibur.generation_result import (
-    MAX_GENERATED_DOCUMENT_BYTES,
     ExecutionReportOutputFormat,
     FindingSourceCategory,
     GenerationExecutionContext,
     GenerationResult,
     InventorySourceCategory,
-    _GenerationInputSnapshot,
 )
 from vexcalibur.generation_selection import (
     SelectedFindingSource,
@@ -27,7 +25,9 @@ from vexcalibur.generation_selection import (
     select_finding_source,
     select_renderer,
 )
+from vexcalibur.generation_snapshot import GenerationInputSnapshot
 from vexcalibur.github_sbom import GithubSbomClient, GithubSbomComponentLoader
+from vexcalibur.limits import MAX_GENERATED_DOCUMENT_BYTES
 from vexcalibur.render import (
     VexRenderer,
     VexRenderError,
@@ -171,13 +171,13 @@ def _render_legacy_generation(
     _require_components(components)
     findings = _findings_for_components(source, components)
     selected_renderer = CycloneDxJsonRenderer() if renderer is None else renderer
-    rendered = selected_renderer.render(
+    return _render_generation_document(
         components=components,
         findings=findings,
         timestamp=timestamp,
+        renderer=selected_renderer,
+        preserve_extension_value=True,
     )
-    _canonical_rendered_text(rendered)
-    return rendered
 
 
 def _generate_result(
@@ -190,22 +190,42 @@ def _generate_result(
 ) -> GenerationResult:
     """Render from isolated snapshots and retain only independently owned values."""
     _require_components(components)
-    input_snapshot = _GenerationInputSnapshot.capture_components(components)
+    input_snapshot = GenerationInputSnapshot.capture_components(components)
     source_findings = _findings_for_components(
         source.source,
         input_snapshot.materialize_components(),
     )
     input_snapshot = input_snapshot.capture_findings(source_findings)
-    rendered = renderer.renderer.render(
+    rendered = _render_generation_document(
         components=input_snapshot.materialize_components(),
         findings=input_snapshot.materialize_findings(),
         timestamp=timestamp,
+        renderer=renderer.renderer,
+        preserve_extension_value=False,
     )
     return GenerationResult._from_input_snapshot(
-        rendered_document=_canonical_rendered_text(rendered),
+        rendered_document=rendered,
         input_snapshot=input_snapshot,
         execution_context=execution_context,
     )
+
+
+def _render_generation_document(
+    *,
+    components: tuple[ComponentIdentity, ...],
+    findings: tuple[VulnerabilityFinding, ...],
+    timestamp: datetime | None,
+    renderer: VexRenderer,
+    preserve_extension_value: bool,
+) -> str:
+    """Render and validate a document for either public generation path."""
+    rendered = renderer.render(
+        components=components,
+        findings=findings,
+        timestamp=timestamp,
+    )
+    canonical = _canonical_rendered_text(rendered)
+    return rendered if preserve_extension_value else canonical
 
 
 def _findings_for_components(

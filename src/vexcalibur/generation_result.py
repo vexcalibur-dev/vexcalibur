@@ -7,19 +7,16 @@ import importlib.metadata
 import json
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from functools import cached_property
-from typing import Literal, TypedDict, cast
-
-from packageurl import PackageURL
+from typing import Literal, TypedDict, TypeVar, cast
 
 import vexcalibur
 from vexcalibur.domain import (
     ComponentIdentity,
     ExecutionReportFindingSourceDeclaration,
     VexAnalysisState,
-    VexRemediationCategory,
     VulnerabilityFinding,
 )
 from vexcalibur.generation_context import (
@@ -28,7 +25,9 @@ from vexcalibur.generation_context import (
     GenerationExecutionContext,
     InventorySourceCategory,
 )
+from vexcalibur.generation_snapshot import GenerationInputSnapshot
 from vexcalibur.json_boundary import StrictJsonError, strict_json_loads
+from vexcalibur.limits import MAX_GENERATED_DOCUMENT_BYTES
 from vexcalibur.render import (
     ExecutionReportOutputFormatDeclaration,
     VexRenderError,
@@ -61,10 +60,34 @@ __all__ = [
 
 EXECUTION_REPORT_SCHEMA_VERSION = 1
 MAX_EXECUTION_REPORT_BYTES = 16 * 1024
-MAX_GENERATED_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_EXECUTION_REPORT_COUNT = 10_000_000
 _VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z.!+_-]{0,127}", re.ASCII)
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}", re.ASCII)
+_EnumValue = TypeVar("_EnumValue")
+_V1_INVENTORY_SOURCES = (
+    InventorySourceCategory.SBOM_FILE,
+    InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+    InventorySourceCategory.CUSTOM,
+)
+_V1_FINDING_SOURCES = (
+    FindingSourceCategory.LOCAL_FILE,
+    FindingSourceCategory.PUBLIC_OSV,
+    FindingSourceCategory.CUSTOM_OSV,
+    FindingSourceCategory.CUSTOM,
+)
+_V1_OUTPUT_FORMATS = (
+    ExecutionReportOutputFormat.CYCLONEDX,
+    ExecutionReportOutputFormat.OPENVEX,
+    ExecutionReportOutputFormat.CSAF,
+    ExecutionReportOutputFormat.CUSTOM,
+)
+_V1_ANALYSIS_STATES = (
+    VexAnalysisState.RESOLVED,
+    VexAnalysisState.EXPLOITABLE,
+    VexAnalysisState.IN_TRIAGE,
+    VexAnalysisState.FALSE_POSITIVE,
+    VexAnalysisState.NOT_AFFECTED,
+)
 
 
 class GenerationReportMetadataError(ValueError):
@@ -101,177 +124,13 @@ _EXECUTION_REPORT_KEYS = frozenset(GenerationExecutionReportDict.__required_keys
 _DOCUMENT_METADATA_KEYS = frozenset(GeneratedDocumentMetadataDict.__required_keys__)
 
 
-@dataclass(frozen=True)
-class _ComponentSnapshot:
-    """Primitive retained representation of one normalized component."""
-
-    ref: str
-    name: str
-    version: str | None
-    purl_type: str
-    purl_namespace: str | None
-    purl_name: str
-    purl_version: str | None
-    purl_qualifiers: tuple[tuple[str, str], ...]
-    purl_subpath: str | None
-    component_type: str
-
-    @classmethod
-    def from_component(cls, component: ComponentIdentity) -> _ComponentSnapshot:
-        if not isinstance(component, ComponentIdentity):
-            raise TypeError("components must contain ComponentIdentity values")
-        return cls(
-            ref=_snapshot_text(component.ref, field="component ref"),
-            name=_snapshot_text(component.name, field="component name"),
-            version=_snapshot_optional_text(component.version, field="component version"),
-            purl_type=_snapshot_text(component.purl.type, field="PURL type"),
-            purl_namespace=_snapshot_optional_text(
-                component.purl.namespace,
-                field="PURL namespace",
-            ),
-            purl_name=_snapshot_text(component.purl.name, field="PURL name"),
-            purl_version=_snapshot_optional_text(component.purl.version, field="PURL version"),
-            purl_qualifiers=tuple(
-                sorted(
-                    (
-                        _snapshot_text(key, field="PURL qualifier key"),
-                        _snapshot_text(value, field="PURL qualifier value"),
-                    )
-                    for key, value in component.purl.qualifiers.items()
-                )
-            ),
-            purl_subpath=_snapshot_optional_text(component.purl.subpath, field="PURL subpath"),
-            component_type=_snapshot_text(component.type, field="component type"),
-        )
-
-    def materialize(self) -> ComponentIdentity:
-        return ComponentIdentity(
-            ref=self.ref,
-            name=self.name,
-            version=self.version,
-            purl=PackageURL(
-                type=self.purl_type,
-                namespace=self.purl_namespace,
-                name=self.purl_name,
-                version=self.purl_version,
-                qualifiers=dict(self.purl_qualifiers),
-                subpath=self.purl_subpath,
-            ),
-            type=self.component_type,
-        )
-
-
-@dataclass(frozen=True)
-class _FindingSnapshot:
-    """Primitive retained representation of one normalized finding."""
-
-    id: str
-    source_name: str
-    source_url: str
-    component_ref: str
-    purl: str
-    modified: datetime | None
-    analysis_state: VexAnalysisState
-    analysis_detail: str
-    action_statement: str | None
-    impact_statement: str | None
-    fixed_version: str | None
-    remediation_category: VexRemediationCategory | None
-
-    @classmethod
-    def from_finding(cls, finding: VulnerabilityFinding) -> _FindingSnapshot:
-        if not isinstance(finding, VulnerabilityFinding):
-            raise TypeError("findings must contain VulnerabilityFinding values")
-        return cls(
-            id=_snapshot_text(finding.id, field="finding id"),
-            source_name=_snapshot_text(finding.source_name, field="finding source name"),
-            source_url=_snapshot_text(finding.source_url, field="finding source URL"),
-            component_ref=_snapshot_text(finding.component_ref, field="finding component ref"),
-            purl=_snapshot_text(finding.purl, field="finding PURL"),
-            modified=_snapshot_datetime(finding.modified),
-            analysis_state=VexAnalysisState(finding.analysis_state),
-            analysis_detail=_snapshot_text(
-                finding.analysis_detail,
-                field="finding analysis detail",
-            ),
-            action_statement=_snapshot_optional_text(
-                finding.action_statement,
-                field="finding action statement",
-            ),
-            impact_statement=_snapshot_optional_text(
-                finding.impact_statement,
-                field="finding impact statement",
-            ),
-            fixed_version=_snapshot_optional_text(
-                finding.fixed_version,
-                field="finding fixed version",
-            ),
-            remediation_category=(
-                None
-                if finding.remediation_category is None
-                else VexRemediationCategory(finding.remediation_category)
-            ),
-        )
-
-    def materialize(self) -> VulnerabilityFinding:
-        return VulnerabilityFinding(
-            id=self.id,
-            source_name=self.source_name,
-            source_url=self.source_url,
-            component_ref=self.component_ref,
-            purl=self.purl,
-            modified=self.modified,
-            analysis_state=self.analysis_state,
-            analysis_detail=self.analysis_detail,
-            action_statement=self.action_statement,
-            impact_statement=self.impact_statement,
-            fixed_version=self.fixed_version,
-            remediation_category=self.remediation_category,
-        )
-
-
-@dataclass(frozen=True)
-class _GenerationInputSnapshot:
-    """Canonical primitive snapshot shared by generation and its result."""
-
-    components: tuple[_ComponentSnapshot, ...]
-    findings: tuple[_FindingSnapshot, ...]
-
-    @classmethod
-    def capture_components(
-        cls,
-        components: tuple[ComponentIdentity, ...],
-    ) -> _GenerationInputSnapshot:
-        return cls(
-            components=tuple(
-                _ComponentSnapshot.from_component(component) for component in components
-            ),
-            findings=(),
-        )
-
-    def capture_findings(
-        self,
-        findings: tuple[VulnerabilityFinding, ...],
-    ) -> _GenerationInputSnapshot:
-        return type(self)(
-            components=self.components,
-            findings=tuple(_FindingSnapshot.from_finding(finding) for finding in findings),
-        )
-
-    def materialize_components(self) -> tuple[ComponentIdentity, ...]:
-        return tuple(snapshot.materialize() for snapshot in self.components)
-
-    def materialize_findings(self) -> tuple[VulnerabilityFinding, ...]:
-        return tuple(snapshot.materialize() for snapshot in self.findings)
-
-
 @dataclass(frozen=True, init=False)
 class GenerationResult:
     """Rendered VEX and an immutable snapshot of the normalized render inputs."""
 
     rendered_document: str
     execution_context: GenerationExecutionContext | None
-    _input_snapshot: _GenerationInputSnapshot = field(repr=False)
+    _input_snapshot: GenerationInputSnapshot = field(repr=False)
     _vexcalibur_version: str | None = field(
         default=None,
         repr=False,
@@ -301,7 +160,7 @@ class GenerationResult:
             and type(execution_context) is not GenerationExecutionContext
         ):
             raise TypeError("execution_context must be a GenerationExecutionContext")
-        input_snapshot = _GenerationInputSnapshot.capture_components(components).capture_findings(
+        input_snapshot = GenerationInputSnapshot.capture_components(components).capture_findings(
             findings
         )
         self._initialize(
@@ -315,7 +174,7 @@ class GenerationResult:
         cls,
         *,
         rendered_document: str,
-        input_snapshot: _GenerationInputSnapshot,
+        input_snapshot: GenerationInputSnapshot,
         execution_context: GenerationExecutionContext | None,
     ) -> GenerationResult:
         result = object.__new__(cls)
@@ -330,13 +189,13 @@ class GenerationResult:
         self,
         *,
         rendered_document: str,
-        input_snapshot: _GenerationInputSnapshot,
+        input_snapshot: GenerationInputSnapshot,
         execution_context: GenerationExecutionContext | None,
     ) -> None:
         if type(rendered_document) is not str:
             raise TypeError("rendered_document must be exact built-in text")
-        if type(input_snapshot) is not _GenerationInputSnapshot:
-            raise TypeError("input_snapshot must be a _GenerationInputSnapshot")
+        if type(input_snapshot) is not GenerationInputSnapshot:
+            raise TypeError("input_snapshot must be a GenerationInputSnapshot")
         if (
             execution_context is not None
             and type(execution_context) is not GenerationExecutionContext
@@ -379,6 +238,10 @@ class GenerationResult:
         version = self._vexcalibur_version
         if version is None:
             raise GenerationReportMetadataError("loaded Vexcalibur version is unavailable")
+        try:
+            verify_source_checkout_version(version)
+        except SourceVersionIdentityError as exc:
+            raise GenerationReportMetadataError(str(exc)) from exc
         installed_version = _installed_vexcalibur_version()
         if installed_version != version:
             raise GenerationReportMetadataError(
@@ -453,10 +316,16 @@ class GenerationExecutionReport:
             raise ValueError("Vexcalibur package version is not report-safe")
         if not isinstance(self.inventory_source, InventorySourceCategory):
             raise TypeError("inventory_source must be an InventorySourceCategory")
+        if self.inventory_source not in _V1_INVENTORY_SOURCES:
+            raise ValueError("inventory_source is not supported by schema version 1")
         if not isinstance(self.finding_source, FindingSourceCategory):
             raise TypeError("finding_source must be a FindingSourceCategory")
+        if self.finding_source not in _V1_FINDING_SOURCES:
+            raise ValueError("finding_source is not supported by schema version 1")
         if not isinstance(self.output_format, ExecutionReportOutputFormat):
             raise TypeError("output_format must be an ExecutionReportOutputFormat")
+        if self.output_format not in _V1_OUTPUT_FORMATS:
+            raise ValueError("output_format is not supported by schema version 1")
         if (
             type(self.component_count) is not int
             or self.component_count < 0
@@ -483,7 +352,11 @@ class GenerationExecutionReport:
                 f"{MAX_EXECUTION_REPORT_COUNT}"
             )
         counts = dict(self.analysis_state_counts)
-        expected_states = [state for state in VexAnalysisState if counts.get(state, 0) > 0]
+        if set(counts).difference(_V1_ANALYSIS_STATES):
+            raise ValueError(
+                "analysis_state_counts contains a state unsupported by schema version 1"
+            )
+        expected_states = [state for state in _V1_ANALYSIS_STATES if counts.get(state, 0) > 0]
         actual_states = [state for state, _ in self.analysis_state_counts]
         if actual_states != expected_states:
             raise ValueError("analysis_state_counts must use unique analysis-state order")
@@ -513,7 +386,7 @@ class GenerationExecutionReport:
             component_count=len(result.components),
             finding_count=len(result.findings),
             analysis_state_counts=tuple(
-                (state, counts[state]) for state in VexAnalysisState if counts[state] > 0
+                (state, counts[state]) for state in _V1_ANALYSIS_STATES if counts[state] > 0
             ),
             document=GeneratedDocumentMetadata(
                 sha256=hashlib.sha256(rendered_bytes).hexdigest(),
@@ -610,25 +483,25 @@ def parse_generation_execution_report(
         command = _require_report_string(report["command"], field="command")
         if command != "generate":
             raise GenerationExecutionReportParseError("execution report command must be generate")
-        inventory_source = InventorySourceCategory(
-            _require_report_string(
-                report["inventory_source"],
-                field="inventory_source",
-            )
+        inventory_source = _v1_enum_value(
+            InventorySourceCategory,
+            _V1_INVENTORY_SOURCES,
+            _require_report_string(report["inventory_source"], field="inventory_source"),
+            field="inventory_source",
         )
-        finding_source = FindingSourceCategory(
-            _require_report_string(
-                report["finding_source"],
-                field="finding_source",
-            )
+        finding_source = _v1_enum_value(
+            FindingSourceCategory,
+            _V1_FINDING_SOURCES,
+            _require_report_string(report["finding_source"], field="finding_source"),
+            field="finding_source",
         )
-        output_format = ExecutionReportOutputFormat(
-            _require_report_string(
-                report["output_format"],
-                field="output_format",
-            )
+        output_format = _v1_enum_value(
+            ExecutionReportOutputFormat,
+            _V1_OUTPUT_FORMATS,
+            _require_report_string(report["output_format"], field="output_format"),
+            field="output_format",
         )
-        invalid_states = set(state_counts).difference(state.value for state in VexAnalysisState)
+        invalid_states = set(state_counts).difference(state.value for state in _V1_ANALYSIS_STATES)
         if invalid_states:
             raise GenerationExecutionReportParseError(
                 "analysis_state_counts contains an unsupported analysis state"
@@ -662,7 +535,7 @@ def parse_generation_execution_report(
                         field=f"analysis_state_counts.{state.value}",
                     ),
                 )
-                for state in VexAnalysisState
+                for state in _V1_ANALYSIS_STATES
                 if state.value in state_counts
             ),
             document=GeneratedDocumentMetadata(
@@ -736,40 +609,17 @@ def _loaded_vexcalibur_version() -> str:
     version = vexcalibur.__version__
     if type(version) is not str or _VERSION_PATTERN.fullmatch(version) is None:
         raise GenerationReportMetadataError("loaded Vexcalibur version is not report-safe")
-    try:
-        verify_source_checkout_version(version)
-    except SourceVersionIdentityError as exc:
-        raise GenerationReportMetadataError(str(exc)) from exc
     return version
 
 
-def _snapshot_text(value: object, *, field: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field} must be text")
-    return value if type(value) is str else str.__str__(value)
-
-
-def _snapshot_optional_text(value: object, *, field: str) -> str | None:
-    if value is None:
-        return None
-    return _snapshot_text(value, field=field)
-
-
-def _snapshot_datetime(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, datetime):
-        raise TypeError("finding modified timestamp must be a datetime")
-    offset = value.utcoffset()
-    fixed_timezone = None if offset is None else timezone(offset)
-    return datetime(
-        value.year,
-        value.month,
-        value.day,
-        value.hour,
-        value.minute,
-        value.second,
-        value.microsecond,
-        tzinfo=fixed_timezone,
-        fold=value.fold,
-    )
+def _v1_enum_value(
+    enum_type: Callable[[str], _EnumValue],
+    supported_values: tuple[_EnumValue, ...],
+    value: str,
+    *,
+    field: str,
+) -> _EnumValue:
+    parsed = enum_type(value)
+    if parsed not in supported_values:
+        raise GenerationExecutionReportParseError(f"{field} is not supported by schema version 1")
+    return parsed
