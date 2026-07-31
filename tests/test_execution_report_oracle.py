@@ -173,6 +173,23 @@ def test_component_oracle_rejects_beyond_production_depth_boundary() -> None:
         _component_identity_count({"components": [component]})
 
 
+def test_component_oracle_rejects_duplicate_component_references() -> None:
+    component = {
+        "bom-ref": "shared-reference",
+        "purl": "pkg:pypi/example@1",
+    }
+
+    with pytest.raises(ExecutionReportOracleError, match="duplicate component reference"):
+        _component_identity_count(
+            {
+                "components": [
+                    component,
+                    {**component, "purl": "pkg:pypi/other@1"},
+                ]
+            }
+        )
+
+
 def test_publication_manifest_oracle_rejects_boolean_schema_version(
     tmp_path: Path,
 ) -> None:

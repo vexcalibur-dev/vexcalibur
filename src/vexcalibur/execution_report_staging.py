@@ -44,6 +44,30 @@ class _StagingDestination(Protocol):
 _STAGED_FILE_WRITE_TOKEN = object()
 
 
+def _close_owned_descriptor(owner: object, attribute: str) -> None:
+    descriptor = getattr(owner, attribute)
+    backup_descriptor = -1
+    if attribute == "parent_fd" and descriptor >= 0:
+        backup_descriptor = os.dup(descriptor)
+    object.__setattr__(owner, attribute, -1)
+    try:
+        outcome = _close_descriptor_retryable(descriptor)
+    except BaseException:
+        if backup_descriptor >= 0:
+            object.__setattr__(owner, attribute, backup_descriptor)
+        raise
+    if outcome.unchanged:
+        object.__setattr__(owner, attribute, descriptor)
+        _close_descriptor(backup_descriptor)
+    if outcome.failure is not None:
+        if not outcome.unchanged and backup_descriptor >= 0:
+            object.__setattr__(owner, attribute, backup_descriptor)
+        raise outcome.failure
+    if not outcome.released:
+        raise RuntimeError("descriptor release returned no final state")
+    _close_descriptor(backup_descriptor)
+
+
 class StagedFileWrite:
     """Flushed bytes with one-shot publication state."""
 
@@ -244,32 +268,9 @@ class StagedFileWrite:
                     expected=expected,
                 ):
                     raise BoundFileDestinationError("could not remove the unpublished staged file")
-        self._close_owned_descriptor("temporary_fd")
-        self._close_owned_descriptor("parent_fd")
+        _close_owned_descriptor(self, "temporary_fd")
+        _close_owned_descriptor(self, "parent_fd")
         object.__setattr__(self, "_closed", True)
-
-    def _close_owned_descriptor(self, attribute: str) -> None:
-        descriptor = getattr(self, attribute)
-        backup_descriptor = -1
-        if attribute == "parent_fd" and descriptor >= 0:
-            backup_descriptor = os.dup(descriptor)
-        object.__setattr__(self, attribute, -1)
-        try:
-            outcome = _close_descriptor_retryable(descriptor)
-        except BaseException:
-            if backup_descriptor >= 0:
-                object.__setattr__(self, attribute, backup_descriptor)
-            raise
-        if outcome.unchanged:
-            object.__setattr__(self, attribute, descriptor)
-            _close_descriptor(backup_descriptor)
-        if outcome.failure is not None:
-            if not outcome.unchanged and backup_descriptor >= 0:
-                object.__setattr__(self, attribute, backup_descriptor)
-            raise outcome.failure
-        if not outcome.released:
-            raise RuntimeError("descriptor release returned no final state")
-        _close_descriptor(backup_descriptor)
 
     def __copy__(self) -> StagedFileWrite:
         raise TypeError("staged file writes cannot be copied")
@@ -387,38 +388,15 @@ class PublishedFileRollback:
         """Release the retained file and directory descriptors."""
         if self._closed:
             return
-        self._close_owned_descriptor("published_fd")
-        self._close_owned_descriptor("parent_fd")
-        self._close_owned_descriptor("lock_fd")
+        _close_owned_descriptor(self, "published_fd")
+        _close_owned_descriptor(self, "parent_fd")
+        _close_owned_descriptor(self, "lock_fd")
         object.__setattr__(self, "_closed", True)
 
     @property
     def closed(self) -> bool:
         """Return whether both retained descriptors were released."""
         return self._closed
-
-    def _close_owned_descriptor(self, attribute: str) -> None:
-        descriptor = getattr(self, attribute)
-        backup_descriptor = -1
-        if attribute == "parent_fd" and descriptor >= 0:
-            backup_descriptor = os.dup(descriptor)
-        object.__setattr__(self, attribute, -1)
-        try:
-            outcome = _close_descriptor_retryable(descriptor)
-        except BaseException:
-            if backup_descriptor >= 0:
-                object.__setattr__(self, attribute, backup_descriptor)
-            raise
-        if outcome.unchanged:
-            object.__setattr__(self, attribute, descriptor)
-            _close_descriptor(backup_descriptor)
-        if outcome.failure is not None:
-            if not outcome.unchanged and backup_descriptor >= 0:
-                object.__setattr__(self, attribute, backup_descriptor)
-            raise outcome.failure
-        if not outcome.released:
-            raise RuntimeError("descriptor release returned no final state")
-        _close_descriptor(backup_descriptor)
 
     def __copy__(self) -> PublishedFileRollback:
         raise TypeError("published rollback handles cannot be copied")

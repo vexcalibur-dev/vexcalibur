@@ -419,6 +419,12 @@ def _decode_json(raw: bytes, *, field: str) -> object:
 
 
 def _component_identity_count(document: object) -> int:
+    """Count a release inventory already normalized by ``release_evidence``.
+
+    The publication-inventory job canonicalizes PURLs before it hashes this
+    SBOM. This verifier doesn't import Vexcalibur or ``packageurl``, so a system
+    interpreter can independently check the structure and reference uniqueness.
+    """
     sbom = _require_dict(document, field="SBOM input")
     roots = _require_list(sbom.get("components", []), field="SBOM components")
     metadata = _require_dict(sbom.get("metadata", {}), field="SBOM metadata")
@@ -426,6 +432,7 @@ def _component_identity_count(document: object) -> int:
     stack = [(component, 0) for component in roots]
     if metadata_component is not None:
         stack.append((metadata_component, 0))
+    component_refs: set[str] = set()
     identities: set[tuple[str, str]] = set()
     processed = 0
     while stack:
@@ -449,6 +456,11 @@ def _component_identity_count(document: object) -> int:
         reference = component.get("bom-ref", purl)
         if type(reference) is not str or not reference:
             raise ExecutionReportOracleError("SBOM component bom-ref must be a string")
+        if reference in component_refs:
+            raise ExecutionReportOracleError(
+                f"SBOM contains duplicate component reference {reference!r}"
+            )
+        component_refs.add(reference)
         identities.add((reference, purl))
     if not identities:
         raise ExecutionReportOracleError("SBOM contains no reportable component identities")

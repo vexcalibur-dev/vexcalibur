@@ -224,140 +224,162 @@ class GenerationOutputTransaction:
         *,
         binary_stdout: BinaryIO | None,
     ) -> None:
-        try:
-            report_bytes = result.execution_report().to_json().encode("utf-8")
-        except (UnicodeError, ValueError) as exc:
-            raise GenerationReportConstructionError(str(exc)) from exc
-
-        staged_report: StagedFileWrite | None = None
-        report_rollback: PublishedFileRollback | None = None
-        pending_failure: BaseException | None = None
-        pending_traceback: TracebackType | None = None
-        pending_cause: BaseException | None = None
+        report_bytes = self._serialize_report(result)
+        pending_failure: (
+            tuple[
+                BaseException,
+                TracebackType | None,
+                BaseException | None,
+            ]
+            | None
+        ) = None
         try:
             with ExitStack() as stack:
-                try:
-                    staged_report = stack.enter_context(
-                        self.report_destination.stage_bytes(report_bytes)
-                    )
-                    self.report_destination.verify_parent_path()
-                except BoundFileDestinationError as exc:
-                    raise GenerationReportWriteError(
-                        self.report_destination.requested_path,
-                        exc,
-                    ) from exc
-
-                try:
-                    staged_output = (
-                        stack.enter_context(
-                            self.output_destination.stage_bytes(result.rendered_bytes)
-                        )
-                        if self.output_destination is not None
-                        else None
-                    )
-                    if self.output_destination is not None:
-                        self.output_destination.verify_parent_path()
-                except BoundFileDestinationError as exc:
-                    raise GenerationDocumentWriteError(self.output_path, exc) from exc
-
-                try:
-                    stdout_sequence = (
-                        acquire_stdout_sequence_lock(self.report_destination)
-                        if staged_output is None
-                        else nullcontext()
-                    )
-                    with stdout_sequence:
-                        if staged_output is None:
-                            with acquire_destination_locks((self.report_destination,)):
-                                self._remove_existing_report()
-                            try:
-                                if binary_stdout is None:
-                                    raise OSError("binary standard output is unavailable")
-                                _write_all(binary_stdout, result.rendered_bytes)
-                                binary_stdout.flush()
-                            except (OSError, TypeError, ValueError) as exc:
-                                with acquire_destination_locks((self.report_destination,)):
-                                    self._remove_existing_report()
-                                raise GenerationDocumentWriteError(None, exc) from exc
-
-                        with acquire_destination_locks(
-                            (self.output_destination, self.report_destination)
-                        ):
-                            self._remove_existing_report()
-
-                            if staged_output is not None:
-                                try:
-                                    staged_output.commit(destination_lock_held=True)
-                                except BoundFileDestinationError as exc:
-                                    raise GenerationDocumentWriteError(
-                                        self.output_path,
-                                        exc,
-                                    ) from exc
-
-                            try:
-                                self._verify_report_still_distinct()
-                            except BoundFileDestinationError as exc:
-                                raise GenerationReportWriteError(
-                                    self.report_destination.requested_path,
-                                    exc,
-                                ) from exc
-
-                            try:
-                                report_rollback = staged_report._prepare_rollback()
-                                self._report_rollback = report_rollback
-                                object.__setattr__(self, "_discard_report_on_close", True)
-                                staged_report.commit(destination_lock_held=True)
-                                object.__setattr__(self, "_discard_report_on_close", False)
-                            except BoundFileDestinationError as exc:
-                                raise GenerationReportWriteError(
-                                    self.report_destination.requested_path,
-                                    exc,
-                                ) from exc
-                except DestinationLockError as exc:
-                    if exc.destination is self.output_destination:
-                        raise GenerationDocumentWriteError(self.output_path, exc) from exc
-                    raise GenerationReportWriteError(
-                        self.report_destination.requested_path,
-                        exc,
-                    ) from exc
-        except BaseException as failure:
-            cleanup_failure: BaseException | None = None
-            retained_rollback = self._report_rollback
-            if retained_rollback is not None:
-                object.__setattr__(self, "_discard_report_on_close", True)
-                try:
-                    self._discard_published_report()
-                except BaseException as exc:
-                    cleanup_failure = exc
-            elif report_rollback is not None:
-                try:
-                    report_rollback.close()
-                except BaseException as exc:
-                    cleanup_failure = exc
-
-            primary_failure = _generation_primary_failure(failure)
-            if primary_failure is not None:
-                secondary_failures = _generation_cleanup_failures(
-                    failure,
-                    primary=primary_failure,
-                    final_cleanup_failure=cleanup_failure,
+                staged_report = self._stage_report(stack, report_bytes)
+                staged_output = self._stage_document(stack, result.rendered_bytes)
+                self._publish_staged_outputs(
+                    staged_report,
+                    staged_output,
+                    rendered_bytes=result.rendered_bytes,
+                    binary_stdout=binary_stdout,
                 )
-                if secondary_failures:
-                    _retain_cleanup_failures(primary_failure, secondary_failures)
-                pending_failure = primary_failure
-                pending_traceback = primary_failure.__traceback__
-            elif isinstance(failure, Exception):
-                pending_failure = GenerationOutputCleanupError(str(failure))
-                pending_cause = cleanup_failure if cleanup_failure is not None else failure
-            else:  # pragma: no cover - every non-Exception is a primary failure
-                pending_failure = failure
-                pending_traceback = failure.__traceback__
+        except BaseException as failure:
+            pending_failure = self._finalize_failed_commit(failure)
 
         if pending_failure is None:
             return
-        if pending_cause is not None:
-            raise pending_failure.with_traceback(pending_traceback) from pending_cause
-        raise pending_failure.with_traceback(pending_traceback)
+        pending_exception, traceback, cause = pending_failure
+        if cause is not None:
+            raise pending_exception.with_traceback(traceback) from cause
+        raise pending_exception.with_traceback(traceback)
+
+    @staticmethod
+    def _serialize_report(result: GenerationResult) -> bytes:
+        try:
+            return result.execution_report().to_json().encode("utf-8")
+        except (UnicodeError, ValueError) as exc:
+            raise GenerationReportConstructionError(str(exc)) from exc
+
+    def _stage_report(self, stack: ExitStack, report_bytes: bytes) -> StagedFileWrite:
+        try:
+            staged_report = stack.enter_context(self.report_destination.stage_bytes(report_bytes))
+            self.report_destination.verify_parent_path()
+            return staged_report
+        except BoundFileDestinationError as exc:
+            raise GenerationReportWriteError(
+                self.report_destination.requested_path,
+                exc,
+            ) from exc
+
+    def _stage_document(
+        self,
+        stack: ExitStack,
+        rendered_bytes: bytes,
+    ) -> StagedFileWrite | None:
+        if self.output_destination is None:
+            return None
+        try:
+            staged_output = stack.enter_context(self.output_destination.stage_bytes(rendered_bytes))
+            self.output_destination.verify_parent_path()
+            return staged_output
+        except BoundFileDestinationError as exc:
+            raise GenerationDocumentWriteError(self.output_path, exc) from exc
+
+    def _publish_staged_outputs(
+        self,
+        staged_report: StagedFileWrite,
+        staged_output: StagedFileWrite | None,
+        *,
+        rendered_bytes: bytes,
+        binary_stdout: BinaryIO | None,
+    ) -> None:
+        try:
+            stdout_sequence = (
+                acquire_stdout_sequence_lock(self.report_destination)
+                if staged_output is None
+                else nullcontext()
+            )
+            with stdout_sequence:
+                if staged_output is None:
+                    self._publish_standard_output(rendered_bytes, binary_stdout)
+                with acquire_destination_locks((self.output_destination, self.report_destination)):
+                    self._publish_under_destination_locks(staged_report, staged_output)
+        except DestinationLockError as exc:
+            if exc.destination is self.output_destination:
+                raise GenerationDocumentWriteError(self.output_path, exc) from exc
+            raise GenerationReportWriteError(
+                self.report_destination.requested_path,
+                exc,
+            ) from exc
+
+    def _publish_standard_output(
+        self,
+        rendered_bytes: bytes,
+        binary_stdout: BinaryIO | None,
+    ) -> None:
+        with acquire_destination_locks((self.report_destination,)):
+            self._remove_existing_report()
+        try:
+            if binary_stdout is None:
+                raise OSError("binary standard output is unavailable")
+            _write_all(binary_stdout, rendered_bytes)
+            binary_stdout.flush()
+        except (OSError, TypeError, ValueError) as exc:
+            with acquire_destination_locks((self.report_destination,)):
+                self._remove_existing_report()
+            raise GenerationDocumentWriteError(None, exc) from exc
+
+    def _publish_under_destination_locks(
+        self,
+        staged_report: StagedFileWrite,
+        staged_output: StagedFileWrite | None,
+    ) -> None:
+        self._remove_existing_report()
+        if staged_output is not None:
+            try:
+                staged_output.commit(destination_lock_held=True)
+            except BoundFileDestinationError as exc:
+                raise GenerationDocumentWriteError(self.output_path, exc) from exc
+
+        try:
+            self._verify_report_still_distinct()
+            rollback = staged_report._prepare_rollback()
+            self._report_rollback = rollback
+            object.__setattr__(self, "_discard_report_on_close", True)
+            staged_report.commit(destination_lock_held=True)
+            object.__setattr__(self, "_discard_report_on_close", False)
+        except BoundFileDestinationError as exc:
+            raise GenerationReportWriteError(
+                self.report_destination.requested_path,
+                exc,
+            ) from exc
+
+    def _finalize_failed_commit(
+        self,
+        failure: BaseException,
+    ) -> tuple[BaseException, TracebackType | None, BaseException | None]:
+        cleanup_failure: BaseException | None = None
+        if self._report_rollback is not None:
+            object.__setattr__(self, "_discard_report_on_close", True)
+            try:
+                self._discard_published_report()
+            except BaseException as exc:
+                cleanup_failure = exc
+
+        primary_failure = _generation_primary_failure(failure)
+        if primary_failure is not None:
+            secondary_failures = _generation_cleanup_failures(
+                failure,
+                primary=primary_failure,
+                final_cleanup_failure=cleanup_failure,
+            )
+            if secondary_failures:
+                _retain_cleanup_failures(primary_failure, secondary_failures)
+            return primary_failure, primary_failure.__traceback__, None
+        if isinstance(failure, Exception):
+            cause = cleanup_failure if cleanup_failure is not None else failure
+            return GenerationOutputCleanupError(str(failure)), None, cause
+        return failure, failure.__traceback__, None
 
     def _remove_existing_report(self) -> None:
         try:
