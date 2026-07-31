@@ -221,6 +221,52 @@ def test_outputs_can_be_written_to_github_output_file(tmp_path: Path) -> None:
     }
 
 
+@pytest.mark.parametrize("failure_phase", ("all", "merged"))
+def test_failed_tag_enumeration_writes_no_release_outputs(
+    failure_phase: str,
+    tmp_path: Path,
+) -> None:
+    repo = init_repo(tmp_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "tag" ]] &&
+   {{ [[ "${{FAILURE_PHASE}}" == "all" ]] || [[ "${{2:-}}" == "--merged" ]]; }}; then
+  printf 'synthetic tag enumeration failure\\n' >&2
+  exit 73
+fi
+exec {GIT} "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    output_path = repo / "github-output.txt"
+    env = {
+        **os.environ,
+        "FAILURE_PHASE": failure_phase,
+        "GITHUB_OUTPUT": str(output_path),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(  # noqa: S603 - test-owned Git wrapper
+        [BASH, "next-release-tag.sh"],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "synthetic tag enumeration failure" in result.stderr
+    assert "could not enumerate release tags" in result.stderr
+    assert not output_path.exists()
+
+
 def test_existing_head_tag_can_create_missing_release(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")

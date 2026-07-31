@@ -65,7 +65,7 @@ class CycloneDxJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return CycloneDX 1.6 VEX JSON."""
-        if type(self) is CycloneDxJsonRenderer:
+        if type(self).render_document is CycloneDxJsonRenderer.render_document:
             enforce_builtin_render_input_budget(
                 components=components,
                 findings=findings,

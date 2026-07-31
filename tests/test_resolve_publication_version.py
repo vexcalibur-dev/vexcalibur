@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -121,6 +122,42 @@ def test_rejects_multiple_release_tags_without_mutation(tmp_path: Path) -> None:
     assert completed.returncode == 1
     assert "multiple version tags: v1.2.3 v2.0.0" in completed.stderr
     assert _git(repository, "tag", "--list") == "v1.2.3\nv2.0.0"
+
+
+def test_rejects_failed_tag_enumeration_without_outputs(tmp_path: Path) -> None:
+    repository, release_sha = _repository(tmp_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "for-each-ref" ]]; then
+  printf 'synthetic tag enumeration failure\n' >&2
+  exit 73
+fi
+exec /usr/bin/git "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+
+    completed = subprocess.run(  # noqa: S603 - test-owned Git wrapper
+        [str(SCRIPT), release_sha],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert "synthetic tag enumeration failure" in completed.stderr
+    assert "could not enumerate release tags" in completed.stderr
 
 
 @pytest.mark.parametrize("release_sha", ("not-a-sha", "a" * 40))

@@ -76,7 +76,7 @@ class OpenVexJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return OpenVEX 0.2.0 JSON."""
-        if type(self) is OpenVexJsonRenderer:
+        if type(self).render_document is OpenVexJsonRenderer.render_document:
             enforce_builtin_render_input_budget(
                 components=components,
                 findings=findings,

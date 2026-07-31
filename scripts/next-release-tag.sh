@@ -85,21 +85,38 @@ classify_bump() {
 }
 
 head_sha="$(git rev-parse HEAD)"
-while IFS= read -r head_tag; do
-  require_direct_annotated_commit_tag "${head_tag}"
-  if [[ "$(tag_commit "${head_tag}")" == "${head_sha}" ]]; then
-    require_version "$(normalize_version "${head_tag}")"
+if ! release_like_tags="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*')"; then
+  printf 'could not enumerate release tags\n' >&2
+  exit 1
+fi
+while IFS= read -r release_like_tag; do
+  if [[ "${release_like_tag}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    require_direct_annotated_commit_tag "${release_like_tag}"
+    if [[ "$(tag_commit "${release_like_tag}")" == "${head_sha}" ]]; then
+      require_version "$(normalize_version "${release_like_tag}")"
+    fi
   fi
-done < <(
-  git tag --list 'v[0-9]*.[0-9]*.[0-9]*' |
-    grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true
-)
+done <<< "${release_like_tags}"
 
-mapfile -t release_tags < <(
-  git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' |
-    grep -E '^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$' |
-    sort -V || true
-)
+if ! merged_release_like_tags="$(
+  git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*'
+)"; then
+  printf 'could not enumerate release tags merged into HEAD\n' >&2
+  exit 1
+fi
+release_tags=()
+while IFS= read -r merged_tag; do
+  if [[ "${merged_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+    release_tags+=("${merged_tag}")
+  fi
+done <<< "${merged_release_like_tags}"
+if ((${#release_tags[@]} > 0)); then
+  if ! sorted_release_tags="$(printf '%s\n' "${release_tags[@]}" | sort -V)"; then
+    printf 'could not sort release tags\n' >&2
+    exit 1
+  fi
+  mapfile -t release_tags <<< "${sorted_release_tags}"
+fi
 
 latest_tag=""
 previous_tag=""

@@ -17,6 +17,7 @@ from vexcalibur.execution_report_filesystem import (
     _remove_matching_destination,
     _require_path_identity,
     _require_private_regular_file,
+    _same_identity,
 )
 
 
@@ -279,6 +280,7 @@ class PublishedFileRollback:
         "_discarded",
         "expected",
         "name",
+        "parent_expected",
         "parent_fd",
         "published_fd",
     )
@@ -295,6 +297,7 @@ class PublishedFileRollback:
         if construction_token is not _PUBLISHED_FILE_ROLLBACK_TOKEN:
             raise TypeError("published rollback handles require a staged file")
         self.expected = expected
+        self.parent_expected = os.fstat(parent_fd)
         self.parent_fd = parent_fd
         self.published_fd = published_fd
         self.name = name
@@ -350,7 +353,18 @@ class PublishedFileRollback:
     def _close_owned_descriptor(self, attribute: str) -> None:
         descriptor = getattr(self, attribute)
         object.__setattr__(self, attribute, -1)
-        _close_descriptor_retryable(descriptor)
+        try:
+            _close_descriptor_retryable(descriptor)
+        except BaseException:
+            expected = self.expected if attribute == "published_fd" else self.parent_expected
+            try:
+                actual = os.fstat(descriptor)
+            except OSError:
+                pass
+            else:
+                if _same_identity(actual, expected):
+                    object.__setattr__(self, attribute, descriptor)
+            raise
 
     def __copy__(self) -> PublishedFileRollback:
         raise TypeError("published rollback handles cannot be copied")

@@ -233,7 +233,9 @@ def test_rollback_release_cancellation_removes_the_published_success_report(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+@pytest.mark.parametrize("descriptor_role", ("published_fd", "parent_fd"))
 def test_interrupted_rollback_descriptor_release_removes_success_report(
+    descriptor_role: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -250,7 +252,7 @@ def test_interrupted_rollback_descriptor_release_removes_success_report(
     )
     rollback = transaction._report_rollback
     assert rollback is not None
-    published_descriptor = rollback.published_fd
+    interrupted_descriptor = getattr(rollback, descriptor_role)
     real_dup2 = filesystem_module.os.dup2
     interrupted = False
 
@@ -261,9 +263,9 @@ def test_interrupted_rollback_descriptor_release_removes_success_report(
         inheritable: bool = True,
     ) -> int:
         nonlocal interrupted
-        if candidate == published_descriptor and not interrupted:
+        if candidate == interrupted_descriptor and not interrupted:
             interrupted = True
-            raise KeyboardInterrupt("published descriptor close interrupted")
+            raise KeyboardInterrupt(f"{descriptor_role} close interrupted")
         return real_dup2(source, candidate, inheritable=inheritable)
 
     monkeypatch.setattr(
@@ -274,7 +276,7 @@ def test_interrupted_rollback_descriptor_release_removes_success_report(
 
     with pytest.raises(
         KeyboardInterrupt,
-        match="published descriptor close interrupted",
+        match=rf"{descriptor_role} close interrupted",
     ):
         transaction.close()
 
@@ -282,7 +284,8 @@ def test_interrupted_rollback_descriptor_release_removes_success_report(
     assert output_path.exists()
     assert not report_path.exists()
     assert transaction._report_rollback is None
-    os.close(published_descriptor)
+    with pytest.raises(OSError):
+        os.fstat(interrupted_descriptor)
     transaction.close()
 
     assert transaction.closed

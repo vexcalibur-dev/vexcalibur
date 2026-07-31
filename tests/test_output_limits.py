@@ -53,11 +53,10 @@ def _renderers() -> tuple[VexRenderer | None, ...]:
     )
 
 
-@pytest.mark.parametrize("renderer", _renderers(), ids=("cyclonedx", "openvex", "csaf"))
-def test_builtin_renderers_reject_oversized_fields_before_rendering(
-    monkeypatch: pytest.MonkeyPatch,
-    renderer: VexRenderer | None,
-) -> None:
+def _oversized_render_input() -> tuple[
+    ComponentIdentity,
+    tuple[VulnerabilityFinding, ...],
+]:
     component = ComponentIdentity(
         ref="component:demo",
         name="demo",
@@ -76,6 +75,15 @@ def test_builtin_renderers_reject_oversized_fields_before_rendering(
         )
         for index in range(32)
     )
+    return component, findings
+
+
+@pytest.mark.parametrize("renderer", _renderers(), ids=("cyclonedx", "openvex", "csaf"))
+def test_builtin_renderers_reject_oversized_fields_before_rendering(
+    monkeypatch: pytest.MonkeyPatch,
+    renderer: VexRenderer | None,
+) -> None:
+    component, findings = _oversized_render_input()
     document_was_built = False
 
     def unexpected_document_build(**kwargs: object) -> object:
@@ -261,6 +269,55 @@ def test_builtin_renderer_subclass_uses_exact_post_render_limit(
     assert render_was_called is True
 
 
+def _empty_render_subclasses() -> tuple[VexRenderer, ...]:
+    class EmptyCycloneDxRenderer(CycloneDxJsonRenderer):
+        pass
+
+    class EmptyOpenVexRenderer(OpenVexJsonRenderer):
+        pass
+
+    class EmptyCsafRenderer(Csaf20VexJsonRenderer):
+        pass
+
+    return (
+        EmptyCycloneDxRenderer(),
+        EmptyOpenVexRenderer(author="https://security.example.test"),
+        EmptyCsafRenderer(
+            metadata=Csaf20DocumentMetadata(
+                document_id="VEX-2026-0001",
+                title="Security advisory",
+                publisher_name="Example Security",
+                publisher_namespace="https://security.example.test",
+                publisher_category=CsafPublisherCategory.VENDOR,
+            )
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "renderer",
+    _empty_render_subclasses(),
+    ids=("cyclonedx", "openvex", "csaf"),
+)
+def test_empty_builtin_renderer_subclass_keeps_preflight_budget(
+    renderer: VexRenderer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component, findings = _oversized_render_input()
+    monkeypatch.setattr(
+        "vexcalibur.render_budget.MAX_GENERATED_DOCUMENT_BYTES",
+        64 * 1024,
+    )
+
+    with pytest.raises(VexRenderError, match="65536 byte output limit"):
+        generate_vex_from_components(
+            components=(component,),
+            source=_StaticSource(findings),
+            timestamp=None,
+            renderer=renderer,
+        )
+
+
 def _inherited_render_subclasses() -> tuple[VexRenderer, ...]:
     class CustomCycloneDxRenderer(CycloneDxJsonRenderer):
         def render_document(
@@ -316,24 +373,7 @@ def test_inherited_builtin_render_skips_builtin_preflight_budget(
     renderer: VexRenderer,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    component = ComponentIdentity(
-        ref="component:demo",
-        name="demo",
-        version="1.0.0",
-        purl=PackageURL.from_string("pkg:pypi/demo@1.0.0"),
-    )
-    repeated_detail = "A" * 4_096
-    findings = tuple(
-        VulnerabilityFinding(
-            id=f"CVE-2026-{index:04d}",
-            source_name="Unit Test",
-            source_url="https://security.example.test/vulnerabilities",
-            component_ref=component.ref,
-            purl=component.purl.to_string(),
-            analysis_detail=repeated_detail,
-        )
-        for index in range(32)
-    )
+    component, findings = _oversized_render_input()
     monkeypatch.setattr(
         "vexcalibur.render_budget.MAX_GENERATED_DOCUMENT_BYTES",
         64 * 1024,

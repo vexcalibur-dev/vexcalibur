@@ -146,7 +146,7 @@ class Csaf20VexJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return CSAF 2.0 VEX JSON."""
-        if type(self) is Csaf20VexJsonRenderer:
+        if type(self).render_document is Csaf20VexJsonRenderer.render_document:
             enforce_builtin_render_input_budget(
                 components=components,
                 findings=findings,

@@ -113,7 +113,7 @@ def test_discarded_rollback_remains_idempotent_after_partial_close(
         rollback.close()
 
     assert rollback.published_fd == -1
-    assert rollback.parent_fd == -1
+    assert rollback.parent_fd == parent_descriptor
     assert rollback.discard()
     with pytest.raises(OSError):
         os.fstat(published_descriptor)
@@ -121,8 +121,8 @@ def test_discarded_rollback_remains_idempotent_after_partial_close(
 
     rollback.close()
     assert rollback.closed
-    os.fstat(parent_descriptor)
-    os.close(parent_descriptor)
+    with pytest.raises(OSError):
+        os.fstat(parent_descriptor)
     destination.close()
 
 

@@ -141,15 +141,17 @@ Fetching a GitHub SBOM is a separate choice. `--github-repo` permits that input 
 `VexRenderer` separates generation from a serialization format. Its component-and-finding signature remains available to custom renderers. The `generate_vex_from_*` helpers use `CycloneDxJsonRenderer` unless a caller supplies another renderer.
 
 Generation measures every renderer result as UTF-8 and rejects output over the
-shared limit before the CLI writes it. Before invoking an exact built-in
-renderer class, generation also applies an allocation-free conservative upper
-bound for repeated, JSON-escaped, and derived package-URL text. It considers
-only products referenced by findings and scales OpenVEX versioned package URLs
-per finding. Grouping can make the eventual document smaller than this bound,
-so preflight may reject before the exact limit. Renderer subclasses and other
-custom renderers use the post-render check because their expansion rules are
-not known. Built-in OSV relation expansion is bounded before findings are
-materialized.
+shared limit before the CLI writes it. A renderer that uses one of
+Vexcalibur's built-in `render_document` methods also gets an allocation-free
+preflight bound for repeated, JSON-escaped, and derived package-URL text. An
+empty subclass still uses the built-in method, so it keeps that protection.
+The estimate considers only products referenced by findings and scales
+OpenVEX versioned package URLs per finding. Grouping can make the eventual
+document smaller than this bound, so preflight may reject before the exact
+limit. A subclass that overrides serialization, like any other custom
+renderer, uses the post-render check because Vexcalibur doesn't know its
+expansion rules. Built-in OSV relation expansion is bounded before findings
+are materialized.
 
 The built-in renderers also implement `VexDocumentRenderer`. Their compatibility method creates the atomic document, then delegates to the document renderer.
 

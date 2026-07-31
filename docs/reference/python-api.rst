@@ -466,11 +466,13 @@ provenance from an arbitrary result list. Callers must provide ``source_name``,
 ``source_url``, and ``analysis_detail`` explicitly. Prefer ``OsvSource`` when
 the effective endpoint should determine guarded official-or-mirror provenance.
 
-Generation helpers apply a conservative allocation-free pre-render estimate to
-the exact built-in renderer classes. It accounts for JSON escaping, repeated
-fields, and synthesized versioned package URLs, so it may reject an input whose
-grouped output would fall below the nominal limit. Custom renderers and
-subclasses retain the exact post-render UTF-8 check.
+Generation helpers apply a conservative allocation-free pre-render estimate
+when a renderer uses a built-in ``render_document`` implementation. An empty
+subclass still uses that implementation, so it retains the preflight check. The
+estimate accounts for JSON escaping, repeated fields, and synthesized versioned
+package URLs. It may reject an input whose grouped output would fall below the
+nominal limit. Custom renderers and subclasses that override serialization use
+the exact post-render UTF-8 check.
 
 .. warning::
 

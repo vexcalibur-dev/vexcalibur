@@ -14,6 +14,14 @@ if [[ ! "${release_sha}" =~ ^[0-9a-f]{40}$ ]] || \
 fi
 
 release_tags=()
+if ! tag_references="$(
+  git for-each-ref \
+    --format='%(refname:strip=2)|%(objecttype)|%(object)|%(type)' \
+    refs/tags
+)"; then
+  printf 'could not enumerate release tags\n' >&2
+  exit 1
+fi
 while IFS='|' read -r existing_tag reference_type target_object target_type; do
   if [[ "${existing_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
     if ! tag_commit="$(
@@ -32,11 +40,7 @@ while IFS='|' read -r existing_tag reference_type target_object target_type; do
     fi
     release_tags+=("${existing_tag}")
   fi
-done < <(
-  git for-each-ref \
-    --format='%(refname:strip=2)|%(objecttype)|%(object)|%(type)' \
-    refs/tags
-)
+done <<< "${tag_references}"
 
 if [[ "${#release_tags[@]}" -gt 1 ]]; then
   printf 'release SHA has multiple version tags: %s\n' "${release_tags[*]}" >&2
