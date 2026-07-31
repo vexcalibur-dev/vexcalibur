@@ -28,6 +28,10 @@ if [[ ! "${RELEASE_TAG}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9]
   exit 2
 fi
 
+if [[ -e vexcalibur || -L vexcalibur ]]; then
+  printf 'Refusing to reuse existing path: vexcalibur\n' >&2
+  exit 2
+fi
 git init vexcalibur
 cd vexcalibur
 git remote add origin https://github.com/vexcalibur-dev/vexcalibur.git
@@ -61,6 +65,10 @@ REVIEWED_SHA="${REVIEWED_SHA:?set REVIEWED_SHA to its reviewed full commit SHA}"
 [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
 [[ "${REVIEWED_SHA}" =~ ^[0-9a-f]{40}$ ]]
 
+if [[ -e vexcalibur || -L vexcalibur ]]; then
+  printf 'Refusing to reuse existing path: vexcalibur\n' >&2
+  exit 2
+fi
 git init vexcalibur
 cd vexcalibur
 git remote add origin https://github.com/vexcalibur-dev/vexcalibur.git

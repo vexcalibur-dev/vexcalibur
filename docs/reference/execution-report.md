@@ -184,9 +184,12 @@ temporary file when it can, but callers must not treat leftover private
 temporary files as completed reports.
 
 If Python handles an interruption, including `SIGINT`, after report publication
-but before successful finalization, Vexcalibur removes the report when the path
-still names the file it published. The document may remain. A concurrent
-replacement at the report path is left alone.
+but before successful finalization, Vexcalibur attempts to remove the report
+when the path still names the file it published. The document may remain. A
+concurrent replacement at the report path is left alone. If descriptor cleanup
+is interrupted after Vexcalibur can no longer prove that identity, it leaves the
+report in place instead of risking removal of another file. Treat both paths as
+indeterminate after every nonzero exit.
 
 Abrupt termination does not run that cleanup. `SIGKILL` always stops the
 process immediately, and the default `SIGTERM` handler also bypasses Python

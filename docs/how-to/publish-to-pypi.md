@@ -126,6 +126,10 @@ highest applicable change:
 
 An explicit version must be `MAJOR.MINOR.PATCH`, with no leading zeros and no
 component above `999999`. It must be higher than the latest release.
+If `HEAD` already has a release tag, don't provide a new version. An automatic
+rerun can recreate a missing release from that tag, while recovery handles an
+interrupted release. The resolver rejects a second release tag on the same
+commit.
 
 ## Start a normal release
 
@@ -181,10 +185,16 @@ fi
 
 gh auth status --active --hostname github.com
 
+if [[ -n "$(git status --porcelain)" ]]; then
+  printf 'Recovery requires a clean worktree.\n' >&2
+  exit 1
+fi
 git switch main
 git pull --ff-only origin main
-git diff --quiet
-git diff --cached --quiet
+if [[ -n "$(git status --porcelain)" ]]; then
+  printf 'Recovery requires a clean worktree after updating main.\n' >&2
+  exit 1
+fi
 
 RECOVERY_REF="refs/vexcalibur-recovery/${RELEASE_TAG}"
 cleanup_recovery_ref() {

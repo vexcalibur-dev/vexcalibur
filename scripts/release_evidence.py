@@ -15,6 +15,7 @@ import tarfile
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -179,10 +180,10 @@ def validate_wheel_source(wheel_path: Path, *, release_sha: str) -> str:
         raise EvidenceError("release SHA must be a lowercase 40-character Git commit")
     if not wheel_path.is_file() or wheel_path.is_symlink():
         raise EvidenceError(f"expected a regular, non-symlink wheel: {wheel_path}")
-    _preflight_wheel(wheel_path)
+    snapshot = _preflight_wheel(wheel_path)
 
     try:
-        with zipfile.ZipFile(wheel_path) as wheel:
+        with zipfile.ZipFile(BytesIO(snapshot)) as wheel:
             _validate_zip_members(wheel.infolist())
             distribution_metadata = [
                 member
@@ -1884,9 +1885,9 @@ def _validate_archive_member_name(name: str, *, artifact: str) -> None:
 
 def _read_wheel_distribution_metadata(path: Path) -> dict[str, str]:
     _require_bounded_publication_file(path)
-    _preflight_wheel(path)
+    snapshot = _preflight_wheel(path)
     try:
-        with zipfile.ZipFile(path) as wheel:
+        with zipfile.ZipFile(BytesIO(snapshot)) as wheel:
             _validate_zip_members(wheel.infolist())
             members = [
                 member
@@ -1911,7 +1912,7 @@ def _read_wheel_distribution_metadata(path: Path) -> dict[str, str]:
 
 def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[str, str], str]:
     _require_bounded_publication_file(path)
-    _preflight_sdist(path)
+    snapshot = _preflight_sdist(path)
     expected_member = f"vexcalibur-{version}/PKG-INFO"
     expected_version_member = f"vexcalibur-{version}/src/vexcalibur/_version.py"
     metadata: bytes | None = None
@@ -1919,7 +1920,7 @@ def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[st
     member_names: set[str] = set()
     uncompressed_bytes = 0
     try:
-        with tarfile.open(path, "r:gz") as sdist:
+        with tarfile.open(fileobj=BytesIO(snapshot), mode="r:gz") as sdist:
             for index, member in enumerate(sdist):
                 if index >= MAX_ARCHIVE_MEMBERS:
                     raise EvidenceError("sdist contains too many archive members")
@@ -1970,25 +1971,27 @@ def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[st
     return _parse_distribution_metadata(metadata, artifact="sdist"), commit_match.group(1)
 
 
-def _preflight_wheel(path: Path) -> None:
+def _preflight_wheel(path: Path) -> bytes:
     try:
-        preflight_zip_member_count(
+        return preflight_zip_member_count(
             path,
             artifact="wheel",
             maximum_members=MAX_ARCHIVE_MEMBERS,
             maximum_directory_bytes=MAX_EVIDENCE_FILE_BYTES,
+            maximum_archive_bytes=MAX_EVIDENCE_FILE_BYTES,
         )
     except (ArchivePreflightError, OSError) as exc:
         raise EvidenceError(str(exc)) from exc
 
 
-def _preflight_sdist(path: Path) -> None:
+def _preflight_sdist(path: Path) -> bytes:
     try:
-        preflight_tar_gzip_stream(
+        return preflight_tar_gzip_stream(
             path,
             artifact="sdist",
             maximum_members=MAX_ARCHIVE_MEMBERS,
             maximum_file_bytes=MAX_ARCHIVE_UNCOMPRESSED_BYTES,
+            maximum_archive_bytes=MAX_EVIDENCE_FILE_BYTES,
         )
     except ArchivePreflightError as exc:
         raise EvidenceError(str(exc)) from exc

@@ -677,6 +677,53 @@ def test_late_output_alias_is_removed_before_report_publication(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_staging_cleanup_preserves_a_typed_primary_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    real_close = destination_module.StagedFileWrite.close
+    close_failed = False
+
+    def fail_distinctness(_transaction: GenerationOutputTransaction) -> None:
+        raise BoundFileDestinationError("synthetic distinctness failure")
+
+    def fail_first_output_cleanup(staged: destination_module.StagedFileWrite) -> None:
+        nonlocal close_failed
+        real_close(staged)
+        if staged.destination.requested_path == output_path and not close_failed:
+            close_failed = True
+            raise BoundFileDestinationError("synthetic cleanup failure")
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "_verify_report_still_distinct",
+        fail_distinctness,
+    )
+    monkeypatch.setattr(
+        destination_module.StagedFileWrite,
+        "close",
+        fail_first_output_cleanup,
+    )
+
+    with pytest.raises(GenerationReportWriteError, match="synthetic distinctness failure"):
+        transaction.commit(
+            _generation_result(monkeypatch),
+            binary_stdout=None,
+        )
+
+    assert close_failed
+    assert not report_path.exists()
+    transaction.abort()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
 @pytest.mark.parametrize("description", ["standard output", "standard error"])
 def test_late_stream_alias_is_removed_before_report_publication(
     description: str,

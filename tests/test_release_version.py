@@ -153,17 +153,27 @@ def test_only_malformed_release_like_tags_do_not_block_initial_release(tmp_path:
     }
 
 
-def test_manual_release_can_exceed_tag_on_current_head(tmp_path: Path) -> None:
+def test_manual_release_rejects_a_second_tag_on_current_head(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")
 
-    assert run_release_script(repo, "0.2.0") == {
-        "skip": "false",
-        "tag": "v0.2.0",
-        "version": "0.2.0",
-        "previous_tag": "v0.1.0",
-        "bump": "manual",
-    }
+    result = run_release_script_failure(repo, "0.2.0")
+
+    assert result.returncode == 1
+    assert "manual version cannot add a second release tag to HEAD" in result.stderr
+    assert "v0.1.0" in result.stderr
+
+
+def test_multiple_release_tags_on_current_head_are_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")
+    run_git(repo, "tag", "-a", "v0.2.0", "-m", "Release v0.2.0")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release SHA already has competing version tags" in result.stderr
+    assert "v0.1.0 v0.2.0" in result.stderr
 
 
 def test_manual_release_rejects_lower_version(tmp_path: Path) -> None:

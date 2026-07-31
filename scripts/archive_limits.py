@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import gzip
 import math
+import os
+import stat
 import struct
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 
 _ZIP_EOCD_SIGNATURE = b"PK\x05\x06"
 _ZIP_EOCD_SIZE = 22
@@ -18,6 +22,7 @@ _TAR_REJECTED_EXTENSION_TYPES = frozenset({b"K", b"L", b"S"})
 _TAR_MAX_PAX_BYTES = 1024 * 1024
 _TAR_MAX_PAX_RECORDS = 10_000
 _TAR_ALLOWED_PAX_KEYS = frozenset({b"mtime"})
+_DEFAULT_MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 
 
 class ArchivePreflightError(ValueError):
@@ -30,13 +35,19 @@ def preflight_zip_member_count(
     artifact: str,
     maximum_members: int,
     maximum_directory_bytes: int,
-) -> None:
-    """Reject ZIP metadata floods before ``zipfile`` constructs ``ZipInfo`` objects."""
-    size = path.stat().st_size
+    maximum_archive_bytes: int = _DEFAULT_MAX_ARCHIVE_BYTES,
+) -> bytes:
+    """Return a preflighted snapshot before ``zipfile`` constructs members."""
+    snapshot = _read_archive_snapshot(
+        path,
+        artifact=artifact,
+        maximum_bytes=maximum_archive_bytes,
+    )
+    size = len(snapshot)
     tail_size = min(size, _ZIP_EOCD_SIZE + _ZIP_MAX_COMMENT_BYTES)
-    with path.open("rb") as stream:
-        stream.seek(size - tail_size)
-        tail = stream.read(tail_size)
+    stream = BytesIO(snapshot)
+    stream.seek(size - tail_size)
+    tail = stream.read(tail_size)
 
     search_end = len(tail)
     while True:
@@ -71,17 +82,18 @@ def preflight_zip_member_count(
     if directory_end != eocd_offset:
         raise ArchivePreflightError(f"{artifact} has an invalid ZIP directory boundary")
     _preflight_zip_central_directory(
-        path,
+        stream,
         artifact=artifact,
         directory_offset=directory_offset,
         directory_size=directory_size,
         expected_members=total_members,
         maximum_members=maximum_members,
     )
+    return snapshot
 
 
 def _preflight_zip_central_directory(
-    path: Path,
+    stream: BinaryIO,
     *,
     artifact: str,
     directory_offset: int,
@@ -91,29 +103,26 @@ def _preflight_zip_central_directory(
 ) -> None:
     consumed = 0
     members = 0
-    with path.open("rb") as stream:
-        stream.seek(directory_offset)
-        while consumed < directory_size:
-            header = stream.read(_ZIP_CENTRAL_DIRECTORY_HEADER_SIZE)
-            if len(header) != _ZIP_CENTRAL_DIRECTORY_HEADER_SIZE:
-                raise ArchivePreflightError(f"{artifact} has a truncated ZIP central directory")
-            if header[:4] != _ZIP_CENTRAL_DIRECTORY_SIGNATURE:
-                raise ArchivePreflightError(f"{artifact} has an invalid ZIP central directory")
-            filename_size, extra_size, comment_size = struct.unpack_from(
-                "<3H",
-                header,
-                28,
-            )
-            variable_size = filename_size + extra_size + comment_size
-            consumed += _ZIP_CENTRAL_DIRECTORY_HEADER_SIZE + variable_size
-            if consumed > directory_size:
-                raise ArchivePreflightError(
-                    f"{artifact} has an invalid ZIP central directory boundary"
-                )
-            members += 1
-            if members > maximum_members:
-                raise ArchivePreflightError(f"{artifact} contains too many archive members")
-            stream.seek(variable_size, 1)
+    stream.seek(directory_offset)
+    while consumed < directory_size:
+        header = stream.read(_ZIP_CENTRAL_DIRECTORY_HEADER_SIZE)
+        if len(header) != _ZIP_CENTRAL_DIRECTORY_HEADER_SIZE:
+            raise ArchivePreflightError(f"{artifact} has a truncated ZIP central directory")
+        if header[:4] != _ZIP_CENTRAL_DIRECTORY_SIGNATURE:
+            raise ArchivePreflightError(f"{artifact} has an invalid ZIP central directory")
+        filename_size, extra_size, comment_size = struct.unpack_from(
+            "<3H",
+            header,
+            28,
+        )
+        variable_size = filename_size + extra_size + comment_size
+        consumed += _ZIP_CENTRAL_DIRECTORY_HEADER_SIZE + variable_size
+        if consumed > directory_size:
+            raise ArchivePreflightError(f"{artifact} has an invalid ZIP central directory boundary")
+        members += 1
+        if members > maximum_members:
+            raise ArchivePreflightError(f"{artifact} contains too many archive members")
+        stream.seek(variable_size, 1)
     if consumed != directory_size or members != expected_members:
         raise ArchivePreflightError(f"{artifact} has inconsistent ZIP central directory metadata")
 
@@ -124,14 +133,20 @@ def preflight_tar_gzip_stream(
     artifact: str,
     maximum_members: int,
     maximum_file_bytes: int,
-) -> None:
-    """Bound a gzip-compressed tar stream before ``tarfile`` reads it.
+    maximum_archive_bytes: int = _DEFAULT_MAX_ARCHIVE_BYTES,
+) -> bytes:
+    """Return a bounded gzip-compressed tar snapshot for ``tarfile``.
 
     Setuptools emits one PAX ``mtime`` record for each sdist member. This
     preflight accepts that bounded timestamp metadata but rejects PAX keys that
     can replace paths, sizes, or link targets. GNU long-name, long-link, and
     sparse extensions are rejected for the same reason.
     """
+    snapshot = _read_archive_snapshot(
+        path,
+        artifact=artifact,
+        maximum_bytes=maximum_archive_bytes,
+    )
     maximum_stream_bytes = (
         maximum_file_bytes
         + (maximum_members * ((_TAR_BLOCK_BYTES - 1) + _TAR_BLOCK_BYTES))
@@ -145,7 +160,7 @@ def preflight_tar_gzip_stream(
     pax_bytes = 0
     pax_headers = 0
     try:
-        with path.open("rb") as raw, gzip.GzipFile(fileobj=raw, mode="rb") as stream:
+        with BytesIO(snapshot) as raw, gzip.GzipFile(fileobj=raw, mode="rb") as stream:
             while True:
                 header, consumed = _read_bounded(
                     stream,
@@ -155,7 +170,7 @@ def preflight_tar_gzip_stream(
                     artifact=artifact,
                 )
                 if not header:
-                    return
+                    return snapshot
                 if len(header) != _TAR_BLOCK_BYTES:
                     raise ArchivePreflightError(f"{artifact} has a truncated tar header")
                 if not any(header):
@@ -216,6 +231,76 @@ def preflight_tar_gzip_stream(
                     raise ArchivePreflightError(f"{artifact} has a truncated tar member")
     except (gzip.BadGzipFile, OSError, EOFError) as exc:
         raise ArchivePreflightError(f"{artifact} compressed tar stream is invalid") from exc
+
+
+def _read_archive_snapshot(
+    path: Path,
+    *,
+    artifact: str,
+    maximum_bytes: int,
+) -> bytes:
+    """Return bounded bytes from one unchanged regular-file identity."""
+    descriptor = -1
+    try:
+        before_open = path.lstat()
+        if not stat.S_ISREG(before_open.st_mode):
+            raise ArchivePreflightError(f"{artifact} must be a regular, non-symlink file")
+        flags = os.O_RDONLY
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(before_open, opened):
+            raise ArchivePreflightError(f"{artifact} changed while it was opened")
+        if opened.st_size > maximum_bytes:
+            raise ArchivePreflightError(f"{artifact} exceeds the compressed byte limit")
+
+        content = bytearray()
+        while len(content) <= maximum_bytes:
+            chunk = os.read(
+                descriptor,
+                min(1024 * 1024, maximum_bytes + 1 - len(content)),
+            )
+            if not chunk:
+                break
+            content.extend(chunk)
+        after_read = os.fstat(descriptor)
+        current_path = path.lstat()
+    except ArchivePreflightError:
+        raise
+    except OSError as exc:
+        raise ArchivePreflightError(f"{artifact} could not be read safely") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    if len(content) > maximum_bytes:
+        raise ArchivePreflightError(f"{artifact} exceeds the compressed byte limit")
+    snapshots = (after_read, current_path)
+    if any(not stat.S_ISREG(snapshot.st_mode) for snapshot in snapshots):
+        raise ArchivePreflightError(f"{artifact} changed while it was read")
+    if any(not os.path.samestat(opened, snapshot) for snapshot in snapshots):
+        raise ArchivePreflightError(f"{artifact} changed while it was read")
+    expected_state = (
+        opened.st_size,
+        opened.st_mtime_ns,
+        opened.st_ctime_ns,
+    )
+    if (
+        any(
+            (
+                snapshot.st_size,
+                snapshot.st_mtime_ns,
+                snapshot.st_ctime_ns,
+            )
+            != expected_state
+            for snapshot in snapshots
+        )
+        or len(content) != opened.st_size
+    ):
+        raise ArchivePreflightError(f"{artifact} changed while it was read")
+    return bytes(content)
 
 
 def _padded_tar_size(size: int) -> int:

@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+import scripts.archive_limits as archive_limits
 from scripts.archive_limits import (
     ArchivePreflightError,
     preflight_tar_gzip_stream,
@@ -142,6 +143,40 @@ def test_zip_preflight_rejects_oversized_central_directory_metadata(
             maximum_members=10,
             maximum_directory_bytes=1,
         )
+
+
+def test_archive_snapshot_rejects_an_inode_swap_while_reading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path = tmp_path / "original.zip"
+    replacement = tmp_path / "replacement.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("original", b"original")
+    with zipfile.ZipFile(replacement, "w") as archive:
+        archive.writestr("replacement", b"replacement")
+    real_read = archive_limits.os.read
+    replaced = False
+
+    def replace_after_first_read(descriptor: int, size: int) -> bytes:
+        nonlocal replaced
+        value = real_read(descriptor, size)
+        if value and not replaced:
+            replaced = True
+            replacement.replace(archive_path)
+        return value
+
+    monkeypatch.setattr(archive_limits.os, "read", replace_after_first_read)
+
+    with pytest.raises(ArchivePreflightError, match="changed while it was read"):
+        preflight_zip_member_count(
+            archive_path,
+            artifact="test ZIP",
+            maximum_members=10,
+            maximum_directory_bytes=1024,
+        )
+
+    assert replaced
 
 
 def test_tar_preflight_accepts_bounded_setuptools_pax_mtime(

@@ -316,15 +316,38 @@ class GenerationOutputTransaction:
                         self.report_destination.requested_path,
                         exc,
                     ) from exc
-        except BaseException:
+        except BaseException as failure:
+            cleanup_failure: BaseException | None = None
             retained_rollback = self._report_rollback
             if retained_rollback is not None:
                 object.__setattr__(self, "_discard_report_on_close", True)
-                with suppress(BaseException):
+                try:
                     self._discard_published_report()
+                except BaseException as exc:
+                    cleanup_failure = exc
             elif report_rollback is not None:
-                report_rollback.close()
-            raise
+                try:
+                    report_rollback.close()
+                except BaseException as exc:
+                    cleanup_failure = exc
+
+            typed_failure = (
+                _generation_output_failure(failure) if isinstance(failure, Exception) else None
+            )
+            if typed_failure is not None:
+                if typed_failure is failure and cleanup_failure is None:
+                    raise
+                cause = cleanup_failure if cleanup_failure is not None else failure
+                _detach_context_reference(cause, typed_failure)
+                raise typed_failure.with_traceback(typed_failure.__traceback__) from cause
+            if not isinstance(failure, Exception):
+                if cleanup_failure is not None:
+                    raise failure.with_traceback(failure.__traceback__) from cleanup_failure
+                raise
+            error = GenerationOutputCleanupError(str(failure))
+            if cleanup_failure is not None:
+                raise error from cleanup_failure
+            raise error from failure
 
     def _remove_existing_report(self) -> None:
         try:
@@ -480,6 +503,30 @@ def _label_destination_error(
     if message.startswith("destination "):
         return f"{role} {message.removeprefix('destination ')}"
     return message
+
+
+def _generation_output_failure(error: Exception) -> GenerationOutputError | None:
+    """Return the typed primary failure hidden by context-manager cleanup."""
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, GenerationOutputError):
+            return current
+        current = current.__context__
+    return None
+
+
+def _detach_context_reference(error: BaseException, target: BaseException) -> None:
+    """Remove a back-reference before chaining the primary error to cleanup."""
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if current.__context__ is target:
+            current.__context__ = target.__context__
+            return
+        current = current.__context__
 
 
 def _register_destination_close(

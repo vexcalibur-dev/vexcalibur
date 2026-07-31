@@ -71,6 +71,28 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
             descriptor = -1
             yield stream, metadata
+            after_read = os.fstat(stream.fileno())
+            current_path = os.lstat(path)
+            snapshots = (after_read, current_path)
+            if any(not stat.S_ISREG(snapshot.st_mode) for snapshot in snapshots):
+                raise ValueError(f"{role} changed while it was read")
+            if any(not os.path.samestat(metadata, snapshot) for snapshot in snapshots):
+                raise ValueError(f"{role} changed while it was read")
+            expected_state = (
+                metadata.st_size,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+            )
+            if any(
+                (
+                    snapshot.st_size,
+                    snapshot.st_mtime_ns,
+                    snapshot.st_ctime_ns,
+                )
+                != expected_state
+                for snapshot in snapshots
+            ):
+                raise ValueError(f"{role} changed while it was read")
     finally:
         if descriptor >= 0:
             os.close(descriptor)
@@ -89,6 +111,8 @@ def _read_bounded_file(
         value = stream.read(maximum + 1)
     if len(value) > maximum:
         raise ValueError(too_large)
+    if len(value) != metadata.st_size:
+        raise ValueError(f"{role} changed while it was read")
     return value
 
 

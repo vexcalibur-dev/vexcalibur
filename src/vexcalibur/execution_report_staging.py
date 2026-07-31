@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
 from collections.abc import Iterator
@@ -371,8 +372,12 @@ class PublishedFileRollback:
             return False
         try:
             retained = os.fstat(self.published_fd)
-        except OSError:
-            return False
+        except OSError as exc:
+            if exc.errno == errno.EBADF:
+                return False
+            raise BoundFileDestinationError(
+                "could not inspect the published execution report"
+            ) from exc
         return _same_identity(retained, self.expected)
 
     def close(self) -> None:

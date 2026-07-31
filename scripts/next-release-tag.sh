@@ -85,6 +85,7 @@ classify_bump() {
 }
 
 head_sha="$(git rev-parse HEAD)"
+head_release_tags=()
 if ! release_like_tags="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*')"; then
   printf 'could not enumerate release tags\n' >&2
   exit 1
@@ -94,9 +95,15 @@ while IFS= read -r release_like_tag; do
     require_direct_annotated_commit_tag "${release_like_tag}"
     if [[ "$(tag_commit "${release_like_tag}")" == "${head_sha}" ]]; then
       require_version "$(normalize_version "${release_like_tag}")"
+      head_release_tags+=("${release_like_tag}")
     fi
   fi
 done <<< "${release_like_tags}"
+if ((${#head_release_tags[@]} > 1)); then
+  printf 'release SHA already has competing version tags: %s\n' \
+    "${head_release_tags[*]}" >&2
+  exit 1
+fi
 
 if ! merged_release_like_tags="$(
   git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*'
@@ -158,6 +165,11 @@ if [[ -z "${manual_version}" ]]; then
 fi
 
 if [[ -n "${manual_version}" ]]; then
+  if ((${#head_release_tags[@]} > 0)); then
+    printf 'manual version cannot add a second release tag to HEAD; existing tag: %s\n' \
+      "${head_release_tags[0]}" >&2
+    exit 1
+  fi
   next_version="$(normalize_version "${manual_version}")"
   require_version "${next_version}"
 

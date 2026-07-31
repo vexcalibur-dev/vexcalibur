@@ -245,9 +245,18 @@ class BoundFileDestination:
                 self._name_bytes,
                 dir_fd=self._require_parent_descriptor(),
             )
-            descriptor_stat = os.fstat(descriptor)
-        except OSError:
+        except FileNotFoundError:
             return False
+        except OSError as exc:
+            raise BoundFileDestinationError(
+                "could not inspect the execution report destination"
+            ) from exc
+        try:
+            descriptor_stat = os.fstat(descriptor)
+        except OSError as exc:
+            raise BoundFileDestinationError(
+                "could not inspect a protected output descriptor"
+            ) from exc
         return (
             destination_stat.st_dev == descriptor_stat.st_dev
             and destination_stat.st_ino == descriptor_stat.st_ino

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import socket
 import stat
@@ -363,6 +364,43 @@ def test_open_regular_file_descriptor_alias_is_rejected(tmp_path: Path) -> None:
         os.close(descriptor)
 
     assert path.read_bytes() == b"stdout"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_descriptor_inspection_failure_preserves_the_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "redirected-stderr.json"
+    original = b"stderr"
+    path.write_bytes(original)
+    descriptor = os.open(path, os.O_WRONLY)
+    real_fstat = destination_module.os.fstat
+    failed = False
+
+    def fail_protected_descriptor(candidate: int) -> os.stat_result:
+        nonlocal failed
+        if candidate == descriptor and not failed:
+            failed = True
+            raise OSError(errno.EIO, "synthetic descriptor inspection failure")
+        return real_fstat(candidate)
+
+    monkeypatch.setattr(destination_module.os, "fstat", fail_protected_descriptor)
+    try:
+        with pytest.raises(
+            BoundFileDestinationError,
+            match="protected output descriptor",
+        ):
+            BoundFileDestination.prepare(
+                path,
+                protected_descriptors=((descriptor, "standard error"),),
+                remove_existing=True,
+            )
+    finally:
+        os.close(descriptor)
+
+    assert failed
+    assert path.read_bytes() == original
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

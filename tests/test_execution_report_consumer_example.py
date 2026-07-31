@@ -301,6 +301,32 @@ def test_consumer_example_rejects_an_oversized_report(tmp_path: Path) -> None:
         consumer.validate_execution_report(report_path, document_path, SCHEMA)
 
 
+def test_consumer_example_rejects_a_report_replaced_after_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_path, document_path, _ = _write_pair(tmp_path)
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text("{}", encoding="utf-8")
+    report_identity = report_path.stat()
+    real_fstat = consumer.os.fstat
+    matching_calls = 0
+
+    def replace_before_path_recheck(descriptor: int) -> os.stat_result:
+        nonlocal matching_calls
+        metadata = real_fstat(descriptor)
+        if os.path.samestat(metadata, report_identity):
+            matching_calls += 1
+            if matching_calls == 2:
+                replacement.replace(report_path)
+        return metadata
+
+    monkeypatch.setattr(consumer.os, "fstat", replace_before_path_recheck)
+
+    with pytest.raises(ValueError, match="execution report changed while it was read"):
+        consumer.validate_execution_report(report_path, document_path, SCHEMA)
+
+
 @pytest.mark.parametrize(
     "role",
     ("execution report", "execution report schema"),

@@ -66,11 +66,12 @@ def _read_members(path: Path) -> list[Member]:
     if path.stat().st_size > MAX_INPUT_BYTES:
         raise NormalizationError(f"input exceeds the {MAX_INPUT_BYTES}-byte limit: {path}")
     try:
-        preflight_tar_gzip_stream(
+        snapshot = preflight_tar_gzip_stream(
             path,
             artifact="sdist",
             maximum_members=MAX_MEMBERS,
             maximum_file_bytes=MAX_UNCOMPRESSED_BYTES,
+            maximum_archive_bytes=MAX_INPUT_BYTES,
         )
     except ArchivePreflightError as exc:
         raise NormalizationError(str(exc)) from exc
@@ -79,7 +80,7 @@ def _read_members(path: Path) -> list[Member]:
     names: set[str] = set()
     uncompressed_bytes = 0
     try:
-        with tarfile.open(path, "r:gz") as archive:
+        with tarfile.open(fileobj=BytesIO(snapshot), mode="r:gz") as archive:
             for index, member in enumerate(archive):
                 if index >= MAX_MEMBERS:
                     raise NormalizationError("sdist contains too many members")

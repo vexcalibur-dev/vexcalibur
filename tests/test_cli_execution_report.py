@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import vexcalibur.execution_report_destination as destination_module
 import vexcalibur.generate_command as generate_command
 from vexcalibur import cli
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+from vexcalibur.execution_report_destination import BoundFileDestinationError
 from vexcalibur.generation_output import (
     GenerationOutputTransaction,
 )
@@ -152,6 +154,47 @@ def test_cli_reports_finalization_failure_without_a_traceback(
 
     assert result.exit_code == 1
     assert "Could not finalize generate outputs: synthetic release failure" in result.output
+    assert "Traceback" not in result.output
+    assert output_path.exists()
+    assert not report_path.exists()
+
+
+def test_cli_normalizes_staged_cleanup_failure_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    real_close = destination_module.StagedFileWrite.close
+    failed = False
+
+    def close_then_fail(staged: destination_module.StagedFileWrite) -> None:
+        nonlocal failed
+        real_close(staged)
+        if staged.destination.requested_path == output_path and staged.committed and not failed:
+            failed = True
+            raise BoundFileDestinationError("synthetic staged cleanup failure")
+
+    monkeypatch.setattr(destination_module.StagedFileWrite, "close", close_then_fail)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert failed
+    assert result.exit_code == 1
+    assert "Could not finalize generate outputs: synthetic staged cleanup failure" in result.output
     assert "Traceback" not in result.output
     assert output_path.exists()
     assert not report_path.exists()

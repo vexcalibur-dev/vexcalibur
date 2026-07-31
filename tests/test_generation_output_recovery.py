@@ -14,6 +14,7 @@ from vexcalibur.execution_report_destination import (
     BoundFileDestination,
 )
 from vexcalibur.generation_output import (
+    GenerationOutputCleanupError,
     GenerationOutputError,
     GenerationOutputTransaction,
 )
@@ -132,7 +133,7 @@ def test_descriptor_exhaustion_after_publication_uses_retained_rollback_lock(
         return real_pipe()
 
     monkeypatch.setattr(filesystem_module.os, "pipe", exhaust_after_publication)
-    with pytest.raises(OSError, match="descriptor exhaustion"):
+    with pytest.raises(GenerationOutputCleanupError, match="descriptor exhaustion"):
         transaction.commit(
             _generation_result(monkeypatch),
             binary_stdout=None,
@@ -429,6 +430,56 @@ def test_cleanup_retries_a_transient_report_rollback_failure(
     assert rollback_failed
     assert output_path.exists()
     assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_abort_preserves_rollback_ownership_after_a_transient_probe_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(
+        _generation_result(monkeypatch),
+        binary_stdout=None,
+    )
+    rollback = transaction._report_rollback
+    assert rollback is not None
+    real_fstat = staging_module.os.fstat
+    failed = False
+
+    def fail_rollback_probe(descriptor: int) -> os.stat_result:
+        nonlocal failed
+        if descriptor == rollback.published_fd and not failed:
+            failed = True
+            raise OSError(errno.EIO, "synthetic rollback probe failure")
+        return real_fstat(descriptor)
+
+    monkeypatch.setattr(staging_module.os, "fstat", fail_rollback_probe)
+
+    with pytest.raises(
+        GenerationOutputCleanupError,
+        match="could not inspect the published execution report",
+    ):
+        transaction.abort()
+
+    assert failed
+    assert report_path.exists()
+    assert transaction._report_rollback is rollback
+    assert transaction._discard_report_on_close
+    assert not transaction.closed
+
+    monkeypatch.setattr(staging_module.os, "fstat", real_fstat)
+    transaction.abort()
+
+    assert not report_path.exists()
+    assert transaction._report_rollback is None
+    assert transaction.closed
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
