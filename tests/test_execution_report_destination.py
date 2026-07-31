@@ -528,11 +528,12 @@ def test_cancellation_during_rollback_handoff_closes_the_retained_descriptor(
     def cancel_handoff(
         cls: type[staging_module.PublishedFileRollback],
         *,
+        expected: os.stat_result,
         parent_fd: int,
         published_fd: int,
         name: str | bytes,
     ) -> staging_module.PublishedFileRollback:
-        del cls, name
+        del cls, expected, name
         observed_descriptors.extend((parent_fd, published_fd))
         raise KeyboardInterrupt("rollback handoff interrupted")
 

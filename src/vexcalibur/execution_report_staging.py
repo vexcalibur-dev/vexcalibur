@@ -192,6 +192,7 @@ class StagedFileWrite:
             parent_fd = os.dup(self.parent_fd)
             published_fd = os.dup(self.temporary_fd)
             return PublishedFileRollback._create(
+                expected=self.temporary_stat,
                 parent_fd=parent_fd,
                 published_fd=published_fd,
                 name=self.destination._name_bytes,
@@ -273,18 +274,27 @@ _PUBLISHED_FILE_ROLLBACK_TOKEN = object()
 class PublishedFileRollback:
     """Independent identity-bound handle for removing one published file."""
 
-    __slots__ = ("_closed", "_discarded", "name", "parent_fd", "published_fd")
+    __slots__ = (
+        "_closed",
+        "_discarded",
+        "expected",
+        "name",
+        "parent_fd",
+        "published_fd",
+    )
 
     def __init__(
         self,
         construction_token: object,
         *,
+        expected: os.stat_result,
         parent_fd: int,
         published_fd: int,
         name: str | bytes,
     ) -> None:
         if construction_token is not _PUBLISHED_FILE_ROLLBACK_TOKEN:
             raise TypeError("published rollback handles require a staged file")
+        self.expected = expected
         self.parent_fd = parent_fd
         self.published_fd = published_fd
         self.name = name
@@ -295,12 +305,14 @@ class PublishedFileRollback:
     def _create(
         cls,
         *,
+        expected: os.stat_result,
         parent_fd: int,
         published_fd: int,
         name: str | bytes,
     ) -> PublishedFileRollback:
         return cls(
             _PUBLISHED_FILE_ROLLBACK_TOKEN,
+            expected=expected,
             parent_fd=parent_fd,
             published_fd=published_fd,
             name=name,
@@ -313,11 +325,10 @@ class PublishedFileRollback:
         if self._closed:
             return False
         with lock_module._exclusive_destination_lock(self.parent_fd):
-            expected = os.fstat(self.published_fd)
             removed = _remove_matching_destination(
                 parent_fd=self.parent_fd,
                 name=self.name,
-                expected=expected,
+                expected=self.expected,
             )
         if removed:
             object.__setattr__(self, "_discarded", True)

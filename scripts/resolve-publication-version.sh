@@ -14,15 +14,29 @@ if [[ ! "${release_sha}" =~ ^[0-9a-f]{40}$ ]] || \
 fi
 
 release_tags=()
-while IFS= read -r existing_tag; do
+while IFS='|' read -r existing_tag reference_type target_object target_type; do
   if [[ "${existing_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
-    if [[ "$(git cat-file -t "refs/tags/${existing_tag}")" != "tag" ]]; then
+    if ! tag_commit="$(
+      git rev-parse --verify "refs/tags/${existing_tag}^{commit}" 2>/dev/null
+    )" || [[ "${tag_commit}" != "${release_sha}" ]]; then
+      continue
+    fi
+    if [[ "${reference_type}" != "tag" ]]; then
       printf 'release tag must be annotated: %s\n' "${existing_tag}" >&2
+      exit 1
+    fi
+    if [[ "${target_type}" != "commit" ]] || [[ "${target_object}" != "${release_sha}" ]]; then
+      printf 'release tag must directly annotate the release commit: %s\n' \
+        "${existing_tag}" >&2
       exit 1
     fi
     release_tags+=("${existing_tag}")
   fi
-done < <(git tag --points-at "${release_sha}")
+done < <(
+  git for-each-ref \
+    --format='%(refname:strip=2)|%(objecttype)|%(object)|%(type)' \
+    refs/tags
+)
 
 if [[ "${#release_tags[@]}" -gt 1 ]]; then
   printf 'release SHA has multiple version tags: %s\n' "${release_tags[*]}" >&2

@@ -17,6 +17,8 @@ from vexcalibur.execution_report_destination import BoundFileDestinationError
 runner = CliRunner()
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
 FINDINGS_ROOT = Path(__file__).parent / "fixtures" / "findings"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Bash completion contract")
 def test_shell_completion_does_not_prepare_execution_report(tmp_path: Path) -> None:
     report_path = tmp_path / "execution-report.json"

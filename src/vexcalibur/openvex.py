@@ -76,13 +76,14 @@ class OpenVexJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return OpenVEX 0.2.0 JSON."""
-        enforce_builtin_render_input_budget(
-            components=components,
-            findings=findings,
-            component_purl_copies=1,
-            finding_component_purl_copies=2,
-            additional_text=(self.author, self.role),
-        )
+        if type(self) is OpenVexJsonRenderer:
+            enforce_builtin_render_input_budget(
+                components=components,
+                findings=findings,
+                component_purl_copies=1,
+                finding_component_purl_copies=2,
+                additional_text=(self.author, self.role),
+            )
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:

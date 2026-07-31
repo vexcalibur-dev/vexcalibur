@@ -10,6 +10,7 @@ from vexcalibur.csaf import (
     Csaf20VexJsonRenderer,
     CsafPublisherCategory,
 )
+from vexcalibur.document import VexDocument
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
 from vexcalibur.generate import (
     ExecutionReportOutputFormat,
@@ -258,6 +259,95 @@ def test_builtin_renderer_subclass_uses_exact_post_render_limit(
         )
 
     assert render_was_called is True
+
+
+def _inherited_render_subclasses() -> tuple[VexRenderer, ...]:
+    class CustomCycloneDxRenderer(CycloneDxJsonRenderer):
+        def render_document(
+            self,
+            *,
+            document: VexDocument,
+            timestamp: datetime | None = None,
+        ) -> str:
+            del document, timestamp
+            return "{}\n"
+
+    class CustomOpenVexRenderer(OpenVexJsonRenderer):
+        def render_document(
+            self,
+            *,
+            document: VexDocument,
+            timestamp: datetime | None = None,
+        ) -> str:
+            del document, timestamp
+            return "{}\n"
+
+    class CustomCsafRenderer(Csaf20VexJsonRenderer):
+        def render_document(
+            self,
+            *,
+            document: VexDocument,
+            timestamp: datetime | None = None,
+        ) -> str:
+            del document, timestamp
+            return "{}\n"
+
+    return (
+        CustomCycloneDxRenderer(),
+        CustomOpenVexRenderer(author="https://security.example.test"),
+        CustomCsafRenderer(
+            metadata=Csaf20DocumentMetadata(
+                document_id="VEX-2026-0001",
+                title="Security advisory",
+                publisher_name="Example Security",
+                publisher_namespace="https://security.example.test",
+                publisher_category=CsafPublisherCategory.VENDOR,
+            )
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "renderer",
+    _inherited_render_subclasses(),
+    ids=("cyclonedx", "openvex", "csaf"),
+)
+def test_inherited_builtin_render_skips_builtin_preflight_budget(
+    renderer: VexRenderer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0.0"),
+    )
+    repeated_detail = "A" * 4_096
+    findings = tuple(
+        VulnerabilityFinding(
+            id=f"CVE-2026-{index:04d}",
+            source_name="Unit Test",
+            source_url="https://security.example.test/vulnerabilities",
+            component_ref=component.ref,
+            purl=component.purl.to_string(),
+            analysis_detail=repeated_detail,
+        )
+        for index in range(32)
+    )
+    monkeypatch.setattr(
+        "vexcalibur.render_budget.MAX_GENERATED_DOCUMENT_BYTES",
+        64 * 1024,
+    )
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 64)
+
+    rendered = generate_vex_from_components(
+        components=(component,),
+        source=_StaticSource(findings),
+        timestamp=None,
+        renderer=renderer,
+    )
+
+    assert rendered == "{}\n"
 
 
 def test_report_format_capability_does_not_enable_preflight_budgeting(

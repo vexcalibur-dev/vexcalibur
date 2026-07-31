@@ -7,6 +7,7 @@ import pytest
 
 import vexcalibur
 import vexcalibur.execution_report_destination as destination_module
+import vexcalibur.execution_report_filesystem as filesystem_module
 import vexcalibur.execution_report_staging as staging_module
 from vexcalibur.execution_report_destination import (
     BoundFileDestination,
@@ -226,6 +227,62 @@ def test_rollback_release_cancellation_removes_the_published_success_report(
     assert interrupted
     assert output_path.exists()
     assert not report_path.exists()
+    transaction.close()
+
+    assert transaction.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_interrupted_rollback_descriptor_release_removes_success_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(
+        _generation_result(monkeypatch),
+        binary_stdout=None,
+    )
+    rollback = transaction._report_rollback
+    assert rollback is not None
+    published_descriptor = rollback.published_fd
+    real_dup2 = filesystem_module.os.dup2
+    interrupted = False
+
+    def interrupt_published_transfer(
+        source: int,
+        candidate: int,
+        *,
+        inheritable: bool = True,
+    ) -> int:
+        nonlocal interrupted
+        if candidate == published_descriptor and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("published descriptor close interrupted")
+        return real_dup2(source, candidate, inheritable=inheritable)
+
+    monkeypatch.setattr(
+        filesystem_module.os,
+        "dup2",
+        interrupt_published_transfer,
+    )
+
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="published descriptor close interrupted",
+    ):
+        transaction.close()
+
+    assert interrupted
+    assert output_path.exists()
+    assert not report_path.exists()
+    assert transaction._report_rollback is None
+    os.close(published_descriptor)
     transaction.close()
 
     assert transaction.closed

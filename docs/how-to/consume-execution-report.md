@@ -23,8 +23,8 @@ from the fetched ref:
 set -euo pipefail
 
 RELEASE_TAG="${RELEASE_TAG:?set RELEASE_TAG to the reviewed release tag}"
-if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-  printf 'RELEASE_TAG must be an exact Vexcalibur release tag\n' >&2
+if [[ ! "${RELEASE_TAG}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  printf 'RELEASE_TAG must be a bounded vMAJOR.MINOR.PATCH release tag\n' >&2
   exit 2
 fi
 

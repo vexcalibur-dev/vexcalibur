@@ -84,6 +84,33 @@ def test_rejects_a_lightweight_release_tag(tmp_path: Path) -> None:
     assert completed.stderr == "release tag must be annotated: v1.2.3\n"
 
 
+def test_rejects_a_nested_annotated_release_tag(tmp_path: Path) -> None:
+    repository, release_sha = _repository(tmp_path)
+    _git(
+        repository,
+        "tag",
+        "--annotate",
+        "release-target",
+        "--message",
+        "inner",
+        release_sha,
+    )
+    _git(
+        repository,
+        "tag",
+        "--annotate",
+        "v1.2.3",
+        "--message",
+        "outer",
+        "release-target",
+    )
+
+    completed = _resolve(repository, release_sha)
+
+    assert completed.returncode == 1
+    assert completed.stderr == "release tag must directly annotate the release commit: v1.2.3\n"
+
+
 def test_rejects_multiple_release_tags_without_mutation(tmp_path: Path) -> None:
     repository, release_sha = _repository(tmp_path)
     _git(repository, "tag", "--annotate", "v1.2.3", "--message", "release", release_sha)

@@ -146,18 +146,19 @@ class Csaf20VexJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return CSAF 2.0 VEX JSON."""
-        enforce_builtin_render_input_budget(
-            components=components,
-            findings=findings,
-            component_purl_copies=2,
-            additional_text=(
-                self.metadata.document_id,
-                self.metadata.title,
-                self.metadata.publisher_name,
-                self.metadata.publisher_namespace,
-                self.tool_version,
-            ),
-        )
+        if type(self) is Csaf20VexJsonRenderer:
+            enforce_builtin_render_input_budget(
+                components=components,
+                findings=findings,
+                component_purl_copies=2,
+                additional_text=(
+                    self.metadata.document_id,
+                    self.metadata.title,
+                    self.metadata.publisher_name,
+                    self.metadata.publisher_namespace,
+                    self.tool_version,
+                ),
+            )
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:
