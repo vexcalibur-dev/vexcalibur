@@ -284,9 +284,9 @@ def test_interrupted_rollback_descriptor_release_removes_success_report(
     assert output_path.exists()
     assert not report_path.exists()
     assert transaction._report_rollback is None
-    with pytest.raises(OSError):
-        os.fstat(interrupted_descriptor)
+    os.fstat(interrupted_descriptor)
     transaction.close()
+    os.close(interrupted_descriptor)
 
     assert transaction.closed
 

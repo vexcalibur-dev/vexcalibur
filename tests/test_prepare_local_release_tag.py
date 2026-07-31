@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -100,6 +101,41 @@ def test_rejects_an_existing_tag_on_another_commit(tmp_path: Path) -> None:
     assert completed.returncode == 1
     assert "already exists" in completed.stderr
     assert _git(repository, "rev-parse", "v1.2.3^{commit}") == first_sha
+
+
+def test_tag_enumeration_failure_does_not_create_release_tag(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    release_sha = _commit(repository, "release\n")
+    executable_directory = tmp_path / "bin"
+    executable_directory.mkdir()
+    git_wrapper = executable_directory / "git"
+    git_wrapper.write_text(
+        """#!/bin/bash
+set -euo pipefail
+if [[ "${1:-}" = tag && "${2:-}" = --points-at ]]; then
+  exit 42
+fi
+exec "${REAL_GIT}" "$@"
+""",
+        encoding="utf-8",
+    )
+    git_wrapper.chmod(0o700)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{executable_directory}{os.pathsep}{environment['PATH']}"
+    environment["REAL_GIT"] = GIT
+
+    completed = subprocess.run(  # noqa: S603 - reviewed script and test-owned inputs
+        [str(SCRIPT), "v1.2.3", release_sha, sys.executable],
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "could not enumerate tags" in completed.stderr
+    assert _git(repository, "tag", "--list") == ""
 
 
 @pytest.mark.parametrize("competing_tag", ("9.9.9", "release-9.9.9"))

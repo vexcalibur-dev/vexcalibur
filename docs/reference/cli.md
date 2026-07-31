@@ -273,7 +273,7 @@ The CLI uses these fixed client defaults:
 | OSV-to-component expansion | 100,000 findings, checked before findings are materialized |
 | Built-in pre-render estimate and exact serialized VEX | 25 MiB UTF-8 budget; the conservative estimate may reject earlier |
 | Generation execution report | 16 KiB UTF-8, including its trailing newline |
-| Report-mode destination lock | 10-second wait for each destination directory lock |
+| Report-mode coordination lock | 10-second wait for each destination directory or per-report stdout sequence lock |
 | GitHub SBOM API and report download | 30 seconds per request; at most 30 report polls; one-second default delay; numeric `Retry-After` capped at 10 seconds; report polling is the only retry |
 
 `OsvClient` callers may lower or raise its constructor limits. Encoded and

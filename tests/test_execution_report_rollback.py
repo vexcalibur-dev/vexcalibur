@@ -113,16 +113,21 @@ def test_discarded_rollback_remains_idempotent_after_partial_close(
         rollback.close()
 
     assert rollback.published_fd == -1
-    assert rollback.parent_fd == parent_descriptor
+    retained_parent_descriptor = rollback.parent_fd
+    assert retained_parent_descriptor >= 0
+    assert retained_parent_descriptor != parent_descriptor
     assert rollback.discard()
     with pytest.raises(OSError):
         os.fstat(published_descriptor)
     os.fstat(parent_descriptor)
+    os.fstat(retained_parent_descriptor)
 
     rollback.close()
     assert rollback.closed
+    os.fstat(parent_descriptor)
     with pytest.raises(OSError):
-        os.fstat(parent_descriptor)
+        os.fstat(retained_parent_descriptor)
+    os.close(parent_descriptor)
     destination.close()
 
 
@@ -474,7 +479,6 @@ def test_staged_close_disowns_ambiguous_descriptor_before_release(
     destination = BoundFileDestination.prepare(tmp_path / "report.json")
     scope = destination.stage_bytes(b"private report")
     staged = scope.__enter__()
-    temporary_descriptor = staged.temporary_fd
     parent_descriptor = staged.parent_fd
     real_dup2 = filesystem_module.os.dup2
     interrupted = False
@@ -497,16 +501,19 @@ def test_staged_close_disowns_ambiguous_descriptor_before_release(
         staged.close()
 
     assert staged.temporary_fd == -1
-    assert staged.parent_fd == -1
+    retained_parent_descriptor = staged.parent_fd
+    assert retained_parent_descriptor >= 0
+    assert retained_parent_descriptor != parent_descriptor
     assert not staged.closed
-    with pytest.raises(OSError):
-        os.fstat(temporary_descriptor)
+    assert stat.S_ISDIR(os.fstat(retained_parent_descriptor).st_mode)
     os.fstat(parent_descriptor)
 
     scope.__exit__(None, None, None)
     assert staged.closed
     assert staged.parent_fd == -1
     os.fstat(parent_descriptor)
+    with pytest.raises(OSError):
+        os.fstat(retained_parent_descriptor)
     os.close(parent_descriptor)
     destination.close()
 

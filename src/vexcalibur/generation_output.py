@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, nullcontext, suppress
 from pathlib import Path
 from types import TracebackType
 from typing import BinaryIO, NoReturn
@@ -14,6 +14,7 @@ from vexcalibur.execution_report_destination import (
     DestinationLockError,
     StagedFileWrite,
     acquire_destination_locks,
+    acquire_stdout_sequence_lock,
 )
 from vexcalibur.execution_report_staging import PublishedFileRollback
 from vexcalibur.generation_result import GenerationResult
@@ -256,56 +257,58 @@ class GenerationOutputTransaction:
                     raise GenerationDocumentWriteError(self.output_path, exc) from exc
 
                 try:
-                    with acquire_destination_locks(
-                        (self.output_destination, self.report_destination)
-                    ):
-                        try:
-                            self.report_destination.remove_existing(
-                                destination_lock_held=True,
-                            )
-                        except BoundFileDestinationError as exc:
-                            raise GenerationReportWriteError(
-                                self.report_destination.requested_path,
-                                exc,
-                            ) from exc
-
+                    stdout_sequence = (
+                        acquire_stdout_sequence_lock(self.report_destination)
+                        if staged_output is None
+                        else nullcontext()
+                    )
+                    with stdout_sequence:
                         if staged_output is None:
+                            with acquire_destination_locks((self.report_destination,)):
+                                self._remove_existing_report()
                             try:
                                 if binary_stdout is None:
                                     raise OSError("binary standard output is unavailable")
                                 _write_all(binary_stdout, result.rendered_bytes)
                                 binary_stdout.flush()
                             except (OSError, TypeError, ValueError) as exc:
+                                with acquire_destination_locks((self.report_destination,)):
+                                    self._remove_existing_report()
                                 raise GenerationDocumentWriteError(None, exc) from exc
 
-                        if staged_output is not None:
+                        with acquire_destination_locks(
+                            (self.output_destination, self.report_destination)
+                        ):
+                            self._remove_existing_report()
+
+                            if staged_output is not None:
+                                try:
+                                    staged_output.commit(destination_lock_held=True)
+                                except BoundFileDestinationError as exc:
+                                    raise GenerationDocumentWriteError(
+                                        self.output_path,
+                                        exc,
+                                    ) from exc
+
                             try:
-                                staged_output.commit(destination_lock_held=True)
+                                self._verify_report_still_distinct()
                             except BoundFileDestinationError as exc:
-                                raise GenerationDocumentWriteError(
-                                    self.output_path,
+                                raise GenerationReportWriteError(
+                                    self.report_destination.requested_path,
                                     exc,
                                 ) from exc
 
-                        try:
-                            self._verify_report_still_distinct()
-                        except BoundFileDestinationError as exc:
-                            raise GenerationReportWriteError(
-                                self.report_destination.requested_path,
-                                exc,
-                            ) from exc
-
-                        try:
-                            report_rollback = staged_report._prepare_rollback()
-                            self._report_rollback = report_rollback
-                            object.__setattr__(self, "_discard_report_on_close", True)
-                            staged_report.commit(destination_lock_held=True)
-                            object.__setattr__(self, "_discard_report_on_close", False)
-                        except BoundFileDestinationError as exc:
-                            raise GenerationReportWriteError(
-                                self.report_destination.requested_path,
-                                exc,
-                            ) from exc
+                            try:
+                                report_rollback = staged_report._prepare_rollback()
+                                self._report_rollback = report_rollback
+                                object.__setattr__(self, "_discard_report_on_close", True)
+                                staged_report.commit(destination_lock_held=True)
+                                object.__setattr__(self, "_discard_report_on_close", False)
+                            except BoundFileDestinationError as exc:
+                                raise GenerationReportWriteError(
+                                    self.report_destination.requested_path,
+                                    exc,
+                                ) from exc
                 except DestinationLockError as exc:
                     if exc.destination is self.output_destination:
                         raise GenerationDocumentWriteError(self.output_path, exc) from exc
@@ -322,6 +325,17 @@ class GenerationOutputTransaction:
             elif report_rollback is not None:
                 report_rollback.close()
             raise
+
+    def _remove_existing_report(self) -> None:
+        try:
+            self.report_destination.remove_existing(
+                destination_lock_held=True,
+            )
+        except BoundFileDestinationError as exc:
+            raise GenerationReportWriteError(
+                self.report_destination.requested_path,
+                exc,
+            ) from exc
 
     def close(self) -> None:
         """Close every retained destination descriptor."""

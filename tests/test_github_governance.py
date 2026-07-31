@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,24 @@ def test_expected_snapshot_matches_policy() -> None:
     snapshot = governance.load_snapshot(FIXTURE)
 
     assert governance.validate_snapshot(snapshot) == ()
+
+
+def test_release_workflow_app_permissions_match_governance_policy() -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    token_start = workflow.rindex("- name: Generate app token")
+    token_end = workflow.index("\n      - name:", token_start + 1)
+    token_step = workflow[token_start:token_end]
+    requested = dict(re.findall(r"permission-([a-z-]+): ([a-z]+)", token_step))
+    requested["metadata"] = "read"
+
+    snapshot = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    installations = cast(
+        dict[str, list[dict[str, object]]],
+        snapshot["organization_installations"],
+    )["installations"]
+    expected = cast(dict[str, str], installations[0]["permissions"])
+
+    assert requested == expected
 
 
 def test_offline_cli_accepts_expected_snapshot(capsys: pytest.CaptureFixture[str]) -> None:
@@ -105,6 +124,28 @@ def test_missing_required_ruleset_is_a_violation(tmp_path: Path) -> None:
     assert (
         "vexcalibur-action ruleset 'protected main (PR + CI)': expected exactly one, got 0"
         in violations
+    )
+
+
+def test_integrationless_required_check_is_exactly_allowlisted(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    repositories = cast(dict[str, list[dict[str, object]]], raw["repository_rulesets"])
+    branch_ruleset = repositories["vexcalibur-action"][0]
+    rules = cast(list[dict[str, object]], branch_ruleset["rules"])
+    status_rule = next(rule for rule in rules if rule["type"] == "required_status_checks")
+    parameters = cast(dict[str, object], status_rule["parameters"])
+    checks = cast(list[dict[str, object]], parameters["required_status_checks"])
+    pre_commit = next(check for check in checks if check["context"] == "pre-commit.ci - pr")
+    pre_commit["integration_id"] = governance.GITHUB_ACTIONS_INTEGRATION_ID
+    path = tmp_path / "unexpected-integration.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    violations = governance.validate_snapshot(governance.load_snapshot(path))
+
+    assert any(
+        "vexcalibur-action default-branch ruleset required checks" in violation
+        and '["pre-commit.ci - pr",15368]' in violation
+        for violation in violations
     )
 
 

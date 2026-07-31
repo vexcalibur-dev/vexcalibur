@@ -690,6 +690,11 @@ def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> N
     assert "sha256sum --check --strict" in action_producer
     assert "action-matrix-execution.json" in action_producer
     assert "action-matrix-vex.json" in action_producer
+    assert "Record and verify the exact Action Python runtime" in action_producer
+    assert '"${RUNNER_TEMP}"/vexcalibur-action.*/venv/bin/python' in action_producer
+    assert "sys.version_info.major" in action_producer
+    assert 'actual}" != "${EXPECTED_PYTHON}' in action_producer
+    assert "action-matrix-runtime.json" in action_producer
     assert "Upload untrusted candidate Action outputs" in action_producer
     assert "Independently verify the generated report" not in action_producer
 
@@ -699,6 +704,9 @@ def test_release_reruns_exact_commit_platform_contracts_before_finalizing() -> N
     assert "Download fresh publication inventory" in action_verifier
     assert "Download untrusted candidate Action outputs" in action_verifier
     assert "sha256sum --check --strict SHA256SUMS" in action_verifier
+    assert "Independently verify the Action Python runtime" in action_verifier
+    assert "action-matrix-runtime.json" in action_verifier
+    assert "actual != sys.argv[2]" in action_verifier
     assert "python3 -I scripts/execution_report_oracle.py" in action_verifier
     assert "--manifest" in action_verifier
     assert "--expected-sha" in action_verifier

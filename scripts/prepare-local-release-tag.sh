@@ -28,13 +28,22 @@ if [[ "$(git rev-parse --verify HEAD)" != "${release_sha}" ]]; then
   exit 2
 fi
 
+set +e
+existing_tags="$(git tag --points-at "${release_sha}")"
+tag_enumeration_status="$?"
+set -e
+if [[ "${tag_enumeration_status}" -ne 0 ]]; then
+  echo "could not enumerate tags on the release SHA" >&2
+  exit 1
+fi
+
 competing_tags=()
 while IFS= read -r existing_tag; do
   if [[ "${existing_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]] && \
     [[ "${existing_tag}" != "${release_tag}" ]]; then
     competing_tags+=("${existing_tag}")
   fi
-done < <(git tag --points-at "${release_sha}")
+done <<<"${existing_tags}"
 if [[ "${#competing_tags[@]}" -ne 0 ]]; then
   printf 'release SHA already has competing version tag(s): %s\n' \
     "${competing_tags[*]}" >&2

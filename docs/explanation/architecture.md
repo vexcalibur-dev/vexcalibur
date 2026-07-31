@@ -234,10 +234,12 @@ require exit status `0` and a valid report. The report is never published
 before the document it describes.
 
 Standard output is different because Vexcalibur cannot stage or roll back a
-partial stream write. It acquires the report lock first, writes and flushes the
-document, publishes the report, and then releases the lock. See the
-[execution report reference](../reference/execution-report.md)
-for the concurrency boundary when an embedding shares one output stream across
+partial stream write. It holds a per-report sequence lock while it removes an
+intervening report, writes and flushes the document, and publishes the report.
+The directory lock is held only for the report removal and publication, not
+while the stream can block. See the
+[execution report reference](../reference/execution-report.md) for the
+concurrency boundary when an embedding shares one output stream across
 multiple report destinations.
 
 The report omits package names and URLs, vulnerability IDs, repository names,

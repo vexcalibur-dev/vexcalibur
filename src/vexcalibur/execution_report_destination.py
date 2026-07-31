@@ -35,6 +35,9 @@ from vexcalibur.execution_report_locks import LOCK_FILE_NAME as LOCK_FILE_NAME
 from vexcalibur.execution_report_locks import (
     acquire_destination_locks as acquire_destination_locks,
 )
+from vexcalibur.execution_report_locks import (
+    acquire_stdout_sequence_lock as acquire_stdout_sequence_lock,
+)
 from vexcalibur.execution_report_staging import StagedFileWrite as StagedFileWrite
 
 _exclusive_destination_lock = lock_module._exclusive_destination_lock
@@ -374,6 +377,9 @@ class BoundFileDestination:
         except OSError as exc:
             raise BoundFileDestinationError("bound parent directory is unavailable") from exc
 
+    def _coordination_key(self) -> bytes:
+        return self._name_bytes
+
     def _require_parent_descriptor(self) -> int:
         if self.closed:
             raise BoundFileDestinationError("bound parent directory is already closed")
@@ -388,8 +394,16 @@ class BoundFileDestination:
             return
         descriptor = self._parent_descriptor
         object.__setattr__(self, "_parent_descriptor", -1)
-        object.__setattr__(self, "_closed", True)
-        _close_descriptor_retryable(descriptor)
+        try:
+            outcome = _close_descriptor_retryable(descriptor)
+            if outcome.unchanged:
+                object.__setattr__(self, "_parent_descriptor", descriptor)
+            if outcome.failure is not None:
+                raise outcome.failure
+            if not outcome.released:
+                raise RuntimeError("descriptor release returned no final state")
+        finally:
+            object.__setattr__(self, "_closed", self._parent_descriptor == -1)
 
     def __copy__(self) -> BoundFileDestination:
         raise TypeError("bound file destinations cannot be copied")

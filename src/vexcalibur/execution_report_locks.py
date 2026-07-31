@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import stat
 import time
@@ -29,6 +30,8 @@ class _LockableDestination(Protocol):
     """The destination operations needed by lock coordination."""
 
     def _bound_parent_stat(self) -> os.stat_result: ...
+
+    def _coordination_key(self) -> bytes: ...
 
     def _require_parent_descriptor(self) -> int: ...
 
@@ -83,8 +86,40 @@ def acquire_destination_locks(
 
 
 @contextmanager
+def acquire_stdout_sequence_lock(
+    destination: _LockableDestination,
+) -> Iterator[None]:
+    """Serialize stdout and report publication for one report leaf."""
+    lock_name = f"stdout-{hashlib.sha256(destination._coordination_key()).hexdigest()}.lock"
+    try:
+        with _exclusive_named_destination_lock(
+            destination._require_parent_descriptor(),
+            lock_name,
+        ) as descriptor:
+            if destination.aliases_descriptor(descriptor):
+                raise BoundFileDestinationError(
+                    "destination must not replace a Vexcalibur coordination lock"
+                )
+            yield
+    except BoundFileDestinationError as exc:
+        raise DestinationLockError(destination, exc) from exc
+
+
+@contextmanager
 def _exclusive_destination_lock(
     parent_descriptor: int,
+) -> Iterator[int]:
+    with _exclusive_named_destination_lock(
+        parent_descriptor,
+        LOCK_FILE_NAME,
+    ) as descriptor:
+        yield descriptor
+
+
+@contextmanager
+def _exclusive_named_destination_lock(
+    parent_descriptor: int,
+    lock_file_name: str,
 ) -> Iterator[int]:
     import fcntl
 
@@ -94,8 +129,13 @@ def _exclusive_destination_lock(
             metadata = os.fstat(parent_descriptor)
             if not stat.S_ISDIR(metadata.st_mode):
                 raise OSError("destination parent is not a directory")
-            lock_descriptor = _open_private_destination_lock(
-                parent_descriptor,
+            lock_descriptor = (
+                _open_private_destination_lock(parent_descriptor)
+                if lock_file_name == LOCK_FILE_NAME
+                else _open_private_named_destination_lock(
+                    parent_descriptor,
+                    lock_file_name,
+                )
             )
         except (
             BoundFileDestinationError,
@@ -132,6 +172,16 @@ def _exclusive_destination_lock(
 
 def _open_private_destination_lock(
     parent_descriptor: int,
+) -> int:
+    return _open_private_named_destination_lock(
+        parent_descriptor,
+        LOCK_FILE_NAME,
+    )
+
+
+def _open_private_named_destination_lock(
+    parent_descriptor: int,
+    lock_file_name: str,
 ) -> int:
     lock_directory_descriptor = -1
     descriptor = -1
@@ -187,7 +237,7 @@ def _open_private_destination_lock(
         lock_flags |= getattr(os, "O_CLOEXEC", 0)
         lock_flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(
-            LOCK_FILE_NAME,
+            lock_file_name,
             lock_flags,
             0o600,
             dir_fd=lock_directory_descriptor,

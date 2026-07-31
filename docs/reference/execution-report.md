@@ -166,12 +166,17 @@ After generation, Vexcalibur publishes in this order:
 5. Publish the VEX document and check the destination paths again for aliases.
 6. Publish the report last, then release the locks.
 
-Standard output follows the same order, but its bytes cannot be rolled back
-after a partial write. Vexcalibur removes an intervening report before it writes
-the first byte, then holds the report lock while it writes and flushes standard
-output. If that pre-write cleanup fails, standard output remains unchanged.
-After a successful flush, Vexcalibur publishes the report and releases the
-lock.
+Standard output follows a related sequence, but its bytes cannot be rolled back
+after a partial write. Vexcalibur first takes a lock for the report name. While
+holding that lock, it briefly takes the directory lock and removes an
+intervening report. If cleanup fails, standard output remains unchanged.
+
+Vexcalibur releases the directory lock before it writes and flushes standard
+output. It then takes the directory lock again, removes any report created by a
+process that didn't use the sequence lock, and publishes the new report. The
+per-report lock remains held through the complete sequence. A blocked stream
+therefore serializes another writer for the same report path without blocking a
+different report path in that directory.
 
 Each atomic replacement is followed by a directory `fsync`. A failed file or
 directory flush makes the command fail. Vexcalibur removes an unpublished
@@ -197,18 +202,24 @@ operations, advisory `flock`, and `fsync`.
 Each destination parent contains a persistent `.vexcalibur-locks` directory.
 Vexcalibur requires that directory to be owned by the current user and sets its
 mode to `0700`. One `directory.lock` file coordinates every report-aware
-publication in that parent. Vexcalibur requires the file to be a regular file
-owned by the current user with one link, and sets its mode to `0600`. This
-fixed name gives processes the same coordination point even when they use
-different filesystem encodings.
+publication in that parent. Standard-output transactions also use a
+lock whose name starts with `stdout-`, continues with the 64-character
+lowercase SHA-256 digest of the report leaf name, and ends with `.lock`. Writers
+for that report therefore keep their stream and report order.
+
+Vexcalibur requires each lock to be a regular file owned by the current user
+with one link, and sets its mode to `0600`. The fixed directory lock name gives
+processes the same publication point even when they use different filesystem
+encodings.
 
 Do not use a destination parent that another user can write. A different user
 can create the fixed coordination directory first and prevent publication.
 Directly shared multi-user output directories are not supported.
 
-Vexcalibur retries a contended directory lock for up to 10 seconds. If the lock
-remains busy, publication fails without leaving a completed report. The
-coordination directory and lock file remain in place for later runs.
+Vexcalibur retries a contended directory or per-report sequence lock for up to
+10 seconds. If the lock remains busy, publication fails without leaving a
+completed report. The coordination directory and lock files remain in place
+for later runs.
 Vexcalibur reserves the complete `.vexcalibur-locks` directory namespace.
 Neither an output nor a report may name the directory, a file inside it, or a
 hard link to an acquired coordination lock.
@@ -261,12 +272,13 @@ nonzero. Automation must treat exit status `0` and a valid report as the
 success condition.
 
 The directory locks prevent cooperating Vexcalibur processes from interleaving
-their document and report commits. They do not coordinate every program that
-can write the directory. The path checks and advisory locks also cannot protect
-against a process that ignores the lock, runs as the same user and changes the
-coordination files, or changes an output after publication. Use a per-job
-directory that is isolated from untrusted processes, especially processes that
-share the same user ID.
+their file commits. The per-report sequence lock preserves stdout and report
+ordering when those processes use the same report path. These locks do not
+coordinate every program that can write the directory. The path checks and
+advisory locks also cannot protect against a process that ignores the lock,
+runs as the same user and changes the coordination files, or changes an output
+after publication. Use a per-job directory that is isolated from untrusted
+processes, especially processes that share the same user ID.
 
 An embedding must also serialize concurrent transactions that share one
 writable standard-output stream but use different report destinations. The

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import errno
 import io
 import os
 import pickle
@@ -12,6 +13,7 @@ import pytest
 
 import vexcalibur
 import vexcalibur.execution_report_destination as destination_module
+import vexcalibur.execution_report_filesystem as filesystem_module
 import vexcalibur.execution_report_locks as lock_module
 import vexcalibur.execution_report_staging as staging_module
 from vexcalibur.execution_report_destination import (
@@ -162,9 +164,45 @@ def test_interrupted_destination_close_never_closes_reused_descriptor(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
-@pytest.mark.parametrize("owner_kind", ("staged", "rollback"))
+def test_destination_close_retains_ownership_when_pipe_allocation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    descriptor = destination._parent_descriptor
+    real_pipe = os.pipe
+
+    def fail_pipe() -> tuple[int, int]:
+        raise OSError(errno.EMFILE, "synthetic descriptor exhaustion")
+
+    monkeypatch.setattr(filesystem_module.os, "pipe", fail_pipe)
+    with pytest.raises(OSError, match="descriptor exhaustion"):
+        destination.close()
+
+    assert destination.closed is False
+    assert destination._parent_descriptor == descriptor
+    os.fstat(descriptor)
+
+    monkeypatch.setattr(filesystem_module.os, "pipe", real_pipe)
+    destination.close()
+    assert destination.closed
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+@pytest.mark.parametrize(
+    ("owner_kind", "attribute"),
+    (
+        ("staged", "temporary_fd"),
+        ("staged", "parent_fd"),
+        ("rollback", "published_fd"),
+        ("rollback", "parent_fd"),
+    ),
+)
 def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
     owner_kind: str,
+    attribute: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -172,18 +210,25 @@ def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
     manager = destination.stage_bytes(b"report")
     staged = manager.__enter__()
     owner = staged if owner_kind == "staged" else staged._prepare_rollback()
-    attribute = "temporary_fd" if owner_kind == "staged" else "published_fd"
     owned_descriptor = getattr(owner, attribute)
     replacement: list[int] = []
     real_release = staging_module._close_descriptor_retryable
     real_close = os.close
+    replacement_path = (
+        tmp_path / staged.temporary_name
+        if attribute in {"temporary_fd", "published_fd"}
+        else tmp_path
+    )
+    replacement_flags = os.O_RDONLY
+    if attribute == "parent_fd":
+        replacement_flags |= os.O_DIRECTORY
+    replacement_source = os.open(replacement_path, replacement_flags)
 
-    def close_then_reuse(descriptor: int) -> None:
+    def close_then_reuse(descriptor: int) -> object:
         if descriptor != owned_descriptor:
-            real_release(descriptor)
-            return
+            return real_release(descriptor)
         real_close(descriptor)
-        replacement.append(os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY))
+        replacement.append(os.dup2(replacement_source, descriptor))
         assert replacement[-1] == owned_descriptor
         raise KeyboardInterrupt("synthetic post-close interruption")
 
@@ -196,7 +241,13 @@ def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
         with pytest.raises(KeyboardInterrupt, match="post-close interruption"):
             owner.close()
 
-        assert getattr(owner, attribute) == -1
+        retained_descriptor = getattr(owner, attribute)
+        if attribute == "parent_fd":
+            assert retained_descriptor >= 0
+            assert retained_descriptor != owned_descriptor
+            os.fstat(retained_descriptor)
+        else:
+            assert retained_descriptor == -1
         owner.close()
         os.fstat(replacement[0])
     finally:
@@ -211,6 +262,60 @@ def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
         destination.close()
         for descriptor in replacement:
             real_close(descriptor)
+        real_close(replacement_source)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+@pytest.mark.parametrize(
+    ("owner_kind", "failure_call", "retained_attribute"),
+    (
+        ("staged", 1, "temporary_fd"),
+        ("staged", 2, "parent_fd"),
+        ("rollback", 1, "published_fd"),
+        ("rollback", 2, "parent_fd"),
+    ),
+)
+def test_staging_owner_close_retains_descriptor_when_pipe_allocation_fails(
+    owner_kind: str,
+    failure_call: int,
+    retained_attribute: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    manager = destination.stage_bytes(b"report")
+    staged = manager.__enter__()
+    owner = staged if owner_kind == "staged" else staged._prepare_rollback()
+    retained_descriptor = getattr(owner, retained_attribute)
+    real_pipe = os.pipe
+    calls = 0
+
+    def fail_selected_pipe() -> tuple[int, int]:
+        nonlocal calls
+        calls += 1
+        if calls == failure_call:
+            raise OSError(errno.EMFILE, "synthetic descriptor exhaustion")
+        return real_pipe()
+
+    monkeypatch.setattr(filesystem_module.os, "pipe", fail_selected_pipe)
+    try:
+        with pytest.raises(OSError, match="descriptor exhaustion"):
+            owner.close()
+
+        assert owner.closed is False
+        assert getattr(owner, retained_attribute) == retained_descriptor
+        os.fstat(retained_descriptor)
+
+        monkeypatch.setattr(filesystem_module.os, "pipe", real_pipe)
+        owner.close()
+        assert owner.closed
+        with pytest.raises(OSError):
+            os.fstat(retained_descriptor)
+    finally:
+        monkeypatch.setattr(filesystem_module.os, "pipe", real_pipe)
+        owner.close()
+        manager.__exit__(None, None, None)
+        destination.close()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

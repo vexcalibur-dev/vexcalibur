@@ -3,6 +3,8 @@ from __future__ import annotations
 import errno
 import io
 import os
+import re
+import stat
 import threading
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -561,12 +563,10 @@ def test_invalid_stdout_write_count_leaves_no_execution_report(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
-def test_blocked_stdout_holds_publication_lock_until_report_is_published(
+def test_blocked_stdout_does_not_hold_unrelated_directory_publication_lock(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import fcntl
-
     class BlockingStdout:
         def __init__(self) -> None:
             self.write_started = threading.Event()
@@ -587,15 +587,14 @@ def test_blocked_stdout_holds_publication_lock_until_report_is_published(
         report_path=report_path,
         protected_paths=(),
     )
+    other_report_path = tmp_path / "other-execution-report.json"
+    other_transaction = GenerationOutputTransaction.prepare(
+        output_path=None,
+        report_path=other_report_path,
+        protected_paths=(),
+    )
     stdout = BlockingStdout()
-    lock_attempted = threading.Event()
     errors: list[BaseException] = []
-    real_flock = fcntl.flock
-
-    def observe_lock(descriptor: int, operation: int) -> None:
-        if operation & fcntl.LOCK_EX:
-            lock_attempted.set()
-        real_flock(descriptor, operation)
 
     def publish() -> None:
         try:
@@ -606,22 +605,36 @@ def test_blocked_stdout_holds_publication_lock_until_report_is_published(
         except BaseException as exc:
             errors.append(exc)
 
-    monkeypatch.setattr(fcntl, "flock", observe_lock)
     thread = threading.Thread(target=publish)
     thread.start()
     try:
         assert stdout.write_started.wait(timeout=5)
-        assert lock_attempted.is_set()
+        other_stdout = io.BytesIO()
+        other_transaction.commit(
+            _generation_result(monkeypatch),
+            binary_stdout=other_stdout,
+        )
+        assert other_stdout.getvalue() == _generation_result(monkeypatch).rendered_bytes
+        assert other_report_path.exists()
         stdout.release_write.set()
         thread.join(timeout=5)
     finally:
         stdout.release_write.set()
         thread.join(timeout=5)
+        transaction.close()
+        other_transaction.close()
 
     assert not thread.is_alive()
     assert errors == []
-    assert lock_attempted.is_set()
     assert report_path.exists()
+    sequence_locks = tuple((tmp_path / lock_module.LOCK_DIRECTORY_NAME).glob("stdout-*.lock"))
+    assert len(sequence_locks) == 2
+    for sequence_lock in sequence_locks:
+        assert re.fullmatch(r"stdout-[0-9a-f]{64}\.lock", sequence_lock.name)
+        metadata = sequence_lock.stat()
+        assert stat.S_ISREG(metadata.st_mode)
+        assert stat.S_IMODE(metadata.st_mode) == 0o600
+        assert metadata.st_nlink == 1
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")

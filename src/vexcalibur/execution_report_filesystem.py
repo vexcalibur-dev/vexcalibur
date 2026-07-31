@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 from contextlib import suppress
+from dataclasses import dataclass
 
 from vexcalibur.execution_report_errors import BoundFileDestinationError
 
@@ -70,27 +71,54 @@ def _remove_matching_destination(
 
 
 def _close_descriptor(descriptor: int) -> None:
-    _close_descriptor_retryable(descriptor)
+    outcome = _close_descriptor_retryable(descriptor)
+    if outcome.unchanged:
+        os.close(descriptor)
+        if outcome.failure is not None and not isinstance(outcome.failure, Exception):
+            raise outcome.failure
+        return
+    if outcome.failure is not None:
+        raise outcome.failure
+    if not outcome.released:
+        raise RuntimeError("descriptor release returned no final state")
 
 
-def _close_descriptor_retryable(descriptor: int) -> None:
+@dataclass(frozen=True, slots=True)
+class _DescriptorCloseOutcome:
+    released: bool
+    unchanged: bool
+    failure: BaseException | None
+
+
+def _close_descriptor_retryable(descriptor: int) -> _DescriptorCloseOutcome:
     """Release a disowned descriptor without retrying its numeric value.
 
     Callers that retain ownership state must clear that state before calling.
-    An asynchronous interruption may leak a descriptor, but no later cleanup
-    may close a different resource that reused the same number.
+    The outcome distinguishes a descriptor that is certainly unchanged from
+    one whose state is ambiguous after an interrupted operation.
     """
     try:
         os.fstat(descriptor)
     except OSError:
-        return
+        return _DescriptorCloseOutcome(
+            released=True,
+            unchanged=False,
+            failure=None,
+        )
 
     pipe_reader = -1
     pipe_writer = -1
     released = False
     failure: BaseException | None = None
     try:
-        pipe_reader, pipe_writer = os.pipe()
+        try:
+            pipe_reader, pipe_writer = os.pipe()
+        except BaseException as exc:
+            return _DescriptorCloseOutcome(
+                released=False,
+                unchanged=True,
+                failure=exc,
+            )
         os.dup2(pipe_reader, descriptor, inheritable=False)
         released = True
     except BaseException as exc:
@@ -112,4 +140,13 @@ def _close_descriptor_retryable(descriptor: int) -> None:
                 os.close(descriptor)
 
     if failure is not None and not released:
-        raise failure
+        return _DescriptorCloseOutcome(
+            released=False,
+            unchanged=False,
+            failure=failure,
+        )
+    return _DescriptorCloseOutcome(
+        released=True,
+        unchanged=False,
+        failure=None,
+    )

@@ -71,6 +71,12 @@ checks the policy again immediately before it publishes the draft. It also
 requires GitHub to report `immutable: true` and verify the release plus every
 asset after publication.
 
+The installed App must grant both requested permissions; GitHub adds
+Metadata-read automatically. If you add Administration-read to an existing App,
+an organization owner may need to approve the new permission before the
+installation can issue the publisher token. Run `make governance-check` after
+that approval.
+
 ## Prepare the release commit
 
 Start from current `main` with no local changes:
