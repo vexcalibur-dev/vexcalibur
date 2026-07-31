@@ -18,6 +18,7 @@ from vexcalibur.execution_report_errors import (
     BoundFileDestinationError as BoundFileDestinationError,
 )
 from vexcalibur.execution_report_errors import DestinationLockError as DestinationLockError
+from vexcalibur.execution_report_errors import _retain_cleanup_failures
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
     _close_descriptor_retryable,
@@ -307,7 +308,13 @@ class BoundFileDestination:
         try:
             with self.stage_bytes(serialized) as staged:
                 staged.commit()
-        finally:
+        except BaseException as primary_failure:
+            try:
+                self.close()
+            except BaseException as cleanup_failure:
+                _retain_cleanup_failures(primary_failure, (cleanup_failure,))
+            raise
+        else:
             self.close()
 
     def verify_parent_path(self) -> None:

@@ -59,6 +59,7 @@ try {
     tests/test_cli_execution_report.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output `
     tests/test_documented_ci.py::test_execution_report_schema_checkout_bytes_are_pinned_to_lf `
     tests/test_execution_report_consumer_example.py::test_consumer_example_accepts_a_matching_report `
+    tests/test_execution_report_consumer_example.py::test_consumer_example_opens_inputs_in_binary_mode `
     tests/test_execution_report_consumer_example.py::test_consumer_example_reports_validation_failure_without_a_traceback
 
   $wheels = @(

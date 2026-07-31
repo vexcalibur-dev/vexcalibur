@@ -11,7 +11,10 @@ from types import TracebackType
 from typing import NoReturn, Protocol
 
 import vexcalibur.execution_report_locks as lock_module
-from vexcalibur.execution_report_errors import BoundFileDestinationError
+from vexcalibur.execution_report_errors import (
+    BoundFileDestinationError,
+    _retain_cleanup_failures,
+)
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
     _close_descriptor_retryable,
@@ -479,13 +482,19 @@ def stage_destination_bytes(
         else:
             primary_failure = exc
         if cleanup_failures:
-            primary_failure.__dict__["vexcalibur_cleanup_failures"] = tuple(cleanup_failures)
+            _retain_cleanup_failures(primary_failure, tuple(cleanup_failures))
         if primary_failure is exc:
             raise
         raise primary_failure from exc
     try:
         yield staged
-    finally:
+    except BaseException as primary_failure:
+        try:
+            staged.close()
+        except BaseException as cleanup_failure:
+            _retain_cleanup_failures(primary_failure, (cleanup_failure,))
+        raise
+    else:
         staged.close()
 
 
@@ -502,21 +511,27 @@ def _create_temporary_file(parent_fd: int) -> tuple[int, str]:
         try:
             os.fchmod(descriptor, 0o600)
             return _temporary_file_result(descriptor, name)
-        except BaseException:
+        except BaseException as exc:
+            cleanup_failures: list[BaseException] = []
             try:
-                try:
-                    expected = os.fstat(descriptor)
-                except OSError:
-                    pass
-                else:
-                    _remove_matching_destination(
-                        parent_fd=parent_fd,
-                        name=name,
-                        expected=expected,
-                    )
-            finally:
+                _remove_temporary_file(parent_fd, name, descriptor)
+            except BaseException as cleanup_failure:
+                cleanup_failures.append(cleanup_failure)
+            try:
                 _close_descriptor(descriptor)
-            raise
+            except BaseException as cleanup_failure:
+                if all(cleanup_failure is not failure for failure in cleanup_failures):
+                    cleanup_failures.append(cleanup_failure)
+            if isinstance(exc, BoundFileDestinationError):
+                primary_failure: BaseException = exc
+            elif isinstance(exc, OSError):
+                primary_failure = BoundFileDestinationError(str(exc))
+            else:
+                primary_failure = exc
+            _retain_cleanup_failures(primary_failure, tuple(cleanup_failures))
+            if primary_failure is exc:
+                raise
+            raise primary_failure from exc
     raise BoundFileDestinationError("could not allocate a unique temporary file")
 
 
@@ -531,15 +546,29 @@ def _cleanup_staged_file(
 ) -> None:
     try:
         if temporary_name:
-            try:
-                expected = os.fstat(temporary_fd)
-            except OSError:
-                pass
-            else:
-                _remove_matching_destination(
-                    parent_fd=parent_fd,
-                    name=temporary_name,
-                    expected=expected,
-                )
-    finally:
+            _remove_temporary_file(parent_fd, temporary_name, temporary_fd)
+    except BaseException as primary_failure:
+        try:
+            _close_descriptor(parent_fd)
+        except BaseException as cleanup_failure:
+            _retain_cleanup_failures(primary_failure, (cleanup_failure,))
+        raise
+    else:
         _close_descriptor(parent_fd)
+
+
+def _remove_temporary_file(
+    parent_fd: int,
+    temporary_name: str,
+    temporary_fd: int,
+) -> None:
+    try:
+        expected = os.fstat(temporary_fd)
+    except OSError as exc:
+        raise BoundFileDestinationError("could not inspect the staged temporary file") from exc
+    if not _remove_matching_destination(
+        parent_fd=parent_fd,
+        name=temporary_name,
+        expected=expected,
+    ):
+        raise BoundFileDestinationError("could not remove the staged temporary file")

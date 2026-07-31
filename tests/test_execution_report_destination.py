@@ -123,6 +123,35 @@ def test_cancellation_during_temporary_file_setup_removes_temporary_file(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_temporary_setup_preserves_primary_and_cleanup_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "execution-report.json")
+
+    def fail_fchmod(descriptor: int, mode: int) -> None:
+        raise OSError("temporary mode failed")
+
+    monkeypatch.setattr(destination_module.os, "fchmod", fail_fchmod)
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        lambda **kwargs: False,
+    )
+
+    with pytest.raises(BoundFileDestinationError, match="temporary mode failed") as captured:
+        destination.write_bytes(b"private report")
+
+    assert captured.value.__cause__ is not None
+    assert str(captured.value.__cause__) == "temporary mode failed"
+    (cleanup_failure,) = captured.value.vexcalibur_cleanup_failures  # type: ignore[attr-defined]
+    assert isinstance(cleanup_failure, BoundFileDestinationError)
+    assert str(cleanup_failure) == "could not remove the staged temporary file"
+    assert len(list(tmp_path.glob(".vexcalibur-*.tmp"))) == 1
+    assert destination.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 def test_cancellation_during_temporary_file_handoff_closes_the_descriptor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -207,6 +236,73 @@ def test_cancellation_during_staging_cleanup_closes_all_descriptors(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_failed_staged_removal_is_retained_as_a_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+
+    def fail_fsync(descriptor: int) -> None:
+        raise OSError("staging fsync failed")
+
+    monkeypatch.setattr(destination_module.os, "fsync", fail_fsync)
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        lambda **kwargs: False,
+    )
+
+    with pytest.raises(BoundFileDestinationError, match="staging fsync failed") as captured:
+        destination.write_bytes(b"private report")
+
+    (cleanup_failure,) = captured.value.vexcalibur_cleanup_failures  # type: ignore[attr-defined]
+    assert isinstance(cleanup_failure, BoundFileDestinationError)
+    assert str(cleanup_failure) == "could not remove the staged temporary file"
+    assert len(list(tmp_path.glob(".vexcalibur-*.tmp"))) == 1
+    assert destination.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_destination_close_failure_appends_to_staging_cleanup_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "execution-report.json")
+    staging_cleanup_failure = BoundFileDestinationError("staging cleanup failed")
+    destination_cleanup_failure = BoundFileDestinationError("destination cleanup failed")
+    real_close = BoundFileDestination.close
+
+    def fail_fsync(descriptor: int) -> None:
+        raise OSError("staging fsync failed")
+
+    def fail_staging_cleanup(*args: object, **kwargs: object) -> None:
+        raise staging_cleanup_failure
+
+    def close_then_fail(selected: BoundFileDestination) -> None:
+        real_close(selected)
+        if selected is destination:
+            raise destination_cleanup_failure
+
+    monkeypatch.setattr(destination_module.os, "fsync", fail_fsync)
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        fail_staging_cleanup,
+    )
+    monkeypatch.setattr(BoundFileDestination, "close", close_then_fail)
+
+    with pytest.raises(BoundFileDestinationError, match="staging fsync failed") as captured:
+        destination.write_bytes(b"private report")
+
+    assert captured.value.vexcalibur_cleanup_failures == (  # type: ignore[attr-defined]
+        staging_cleanup_failure,
+        destination_cleanup_failure,
+    )
+    assert destination.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 def test_destination_finalizer_bypasses_stateful_close_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -242,6 +338,33 @@ def test_stage_scope_cancellation_removes_staged_file(
     for descriptor in staging_descriptors:
         with pytest.raises(OSError):
             os.fstat(descriptor)
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_stage_scope_preserves_body_failure_when_close_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "execution-report.json")
+    primary_failure = KeyboardInterrupt("stage body failed")
+    cleanup_failure = BoundFileDestinationError("stage close failed")
+    real_close = staging_module.StagedFileWrite.close
+
+    def close_then_fail(staged: staging_module.StagedFileWrite) -> None:
+        real_close(staged)
+        raise cleanup_failure
+
+    monkeypatch.setattr(staging_module.StagedFileWrite, "close", close_then_fail)
+
+    with (
+        pytest.raises(KeyboardInterrupt) as captured,
+        destination.stage_bytes(b"private report"),
+    ):
+        raise primary_failure
+
+    assert captured.value is primary_failure
+    assert captured.value.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
     destination.close()
 
 

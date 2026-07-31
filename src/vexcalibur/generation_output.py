@@ -16,6 +16,7 @@ from vexcalibur.execution_report_destination import (
     acquire_destination_locks,
     acquire_stdout_sequence_lock,
 )
+from vexcalibur.execution_report_errors import _retain_cleanup_failures
 from vexcalibur.execution_report_staging import PublishedFileRollback
 from vexcalibur.generation_result import GenerationResult
 
@@ -342,7 +343,7 @@ class GenerationOutputTransaction:
                     final_cleanup_failure=cleanup_failure,
                 )
                 if secondary_failures:
-                    primary_failure.__dict__["vexcalibur_cleanup_failures"] = secondary_failures
+                    _retain_cleanup_failures(primary_failure, secondary_failures)
                 pending_failure = primary_failure
                 pending_traceback = primary_failure.__traceback__
             elif isinstance(failure, Exception):
