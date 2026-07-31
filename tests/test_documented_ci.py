@@ -25,6 +25,20 @@ def test_windows_documentation_uses_the_canonical_platform_contract() -> None:
     assert assignment < installed_check
 
 
+def test_windows_platform_contract_references_existing_pytest_nodes() -> None:
+    contract = (ROOT / "scripts/check-execution-report-windows.ps1").read_text(encoding="utf-8")
+    node_ids = re.findall(
+        r"(?m)^\s+(tests/[A-Za-z0-9_./-]+[.]py::test_[A-Za-z0-9_]+)",
+        contract,
+    )
+
+    assert node_ids
+    for node_id in node_ids:
+        relative_path, test_name = node_id.split("::", maxsplit=1)
+        test_module = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert re.search(rf"(?m)^def {re.escape(test_name)}\(", test_module), node_id
+
+
 def test_execution_report_schema_checkout_bytes_are_pinned_to_lf() -> None:
     attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
 

@@ -159,7 +159,16 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
         protected_paths=(),
     )
     real_setattr = GenerationOutputTransaction.__setattr__
+    real_prepare_rollback = staging_module.StagedFileWrite._prepare_rollback
+    prepared_rollbacks: list[staging_module.PublishedFileRollback] = []
     interrupted = False
+
+    def capture_prepared_rollback(
+        staged: staging_module.StagedFileWrite,
+    ) -> staging_module.PublishedFileRollback:
+        rollback = real_prepare_rollback(staged)
+        prepared_rollbacks.append(rollback)
+        return rollback
 
     def interrupt_rollback_handoff(
         target: GenerationOutputTransaction,
@@ -177,6 +186,11 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
         "__setattr__",
         interrupt_rollback_handoff,
     )
+    monkeypatch.setattr(
+        staging_module.StagedFileWrite,
+        "_prepare_rollback",
+        capture_prepared_rollback,
+    )
 
     with (
         transaction,
@@ -191,6 +205,8 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
         )
 
     assert interrupted
+    assert len(prepared_rollbacks) == 1
+    assert prepared_rollbacks[0].closed
     assert output_path.exists()
     assert not report_path.exists()
 

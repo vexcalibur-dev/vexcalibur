@@ -344,7 +344,14 @@ class GenerationOutputTransaction:
         try:
             self._verify_report_still_distinct()
             rollback = staged_report._prepare_rollback()
-            self._report_rollback = rollback
+            try:
+                self._report_rollback = rollback
+            except BaseException as failure:
+                try:
+                    rollback.close()
+                except BaseException as cleanup_failure:
+                    _retain_cleanup_failures(failure, (cleanup_failure,))
+                raise
             object.__setattr__(self, "_discard_report_on_close", True)
             staged_report.commit(destination_lock_held=True)
             object.__setattr__(self, "_discard_report_on_close", False)

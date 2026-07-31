@@ -421,9 +421,10 @@ def _decode_json(raw: bytes, *, field: str) -> object:
 def _component_identity_count(document: object) -> int:
     """Count a release inventory already normalized by ``release_evidence``.
 
-    The publication-inventory job canonicalizes PURLs before it hashes this
-    SBOM. This verifier doesn't import Vexcalibur or ``packageurl``, so a system
-    interpreter can independently check the structure and reference uniqueness.
+    The publication-inventory job validates PURLs and component references
+    before it hashes this SBOM. This verifier doesn't import Vexcalibur or
+    ``packageurl``, so a system interpreter can independently check the
+    structure and reference uniqueness.
     """
     sbom = _require_dict(document, field="SBOM input")
     roots = _require_list(sbom.get("components", []), field="SBOM components")
