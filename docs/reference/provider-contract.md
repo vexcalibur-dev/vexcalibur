@@ -43,6 +43,49 @@ Vexcalibur reserves `local_file`, `public_osv`, and `custom_osv` for exact
 built-in source implementations. An injected OSV client is an extension and
 therefore records `custom`, regardless of the endpoint it contacts.
 
+## Optional preflight protocol
+
+A source that must validate policy before Vexcalibur loads remote inventory can
+also implement `GenerationSourcePreflight`:
+
+```python
+from dataclasses import dataclass
+
+from vexcalibur.domain import (
+    ComponentIdentity,
+    VulnerabilityFinding,
+    VulnerabilitySourceInputError,
+)
+
+
+@dataclass(frozen=True)
+class ExampleSource:
+    public_data_sharing_allowed: bool
+
+    def validate_before_inventory_load(self) -> None:
+        if not self.public_data_sharing_allowed:
+            raise VulnerabilitySourceInputError(
+                "public data sharing requires explicit consent"
+            )
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        return ()
+```
+
+`generate_vex_from_github_source_result`, `generate_vex_from_github_sbom`, and
+`generate_vex_from_github_sbom_result` call this hook before they construct a
+GitHub client or request the repository inventory. The hook must only inspect
+local configuration. It must not open a file, create a network client, or make
+a request.
+
+Raise `VulnerabilitySourceInputError` when the selected inventory makes the
+source configuration invalid. Vexcalibur reports that exception as an
+`SbomError` and retains the original exception as its cause. Other exceptions
+propagate unchanged. A source with no preflight work can omit the method.
+
 ## Component identity
 
 | Field | Type | Meaning |
@@ -145,6 +188,10 @@ mapping, and CLI error reporting. A paginated network source also needs
 exact-limit and limit-plus-one body tests, compressed and chunked responses,
 error-body limits, repeated and oversized tokens, pagination floods, record
 deduplication, total deadlines, and expansion-limit tests.
+
+When a provider implements `GenerationSourcePreflight`, add an ordering test
+that makes the hook fail. Assert that Vexcalibur did not call the selected
+GitHub client factory or inventory loader.
 
 First-party providers put these tests in the Vexcalibur suite. External
 providers run the equivalent contract and integration tests in their owning

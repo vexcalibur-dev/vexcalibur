@@ -726,6 +726,7 @@ def test_staging_cleanup_preserves_a_typed_primary_failure(
     assert close_failed
     assert captured.value.__cause__ is primary_cause
     assert captured.value.__context__ is primary_cause
+    assert captured.value.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
     assert cleanup_failure.__context__ is captured.value
     assert not report_path.exists()
     transaction.abort()
@@ -779,6 +780,7 @@ def test_staging_cleanup_preserves_an_interrupting_primary_failure(
     assert captured.value is interruption
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+    assert captured.value.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
     assert cleanup_failure.__context__ is captured.value
     assert not report_path.exists()
     transaction.abort()

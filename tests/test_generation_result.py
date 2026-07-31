@@ -393,6 +393,30 @@ def test_source_preflight_input_error_translation_retains_original_cause() -> No
     assert captured.value.__cause__ is failure
 
 
+def test_source_preflight_runs_before_github_client_construction() -> None:
+    failure = SentinelExtensionError("source preflight failed")
+    factory_calls = 0
+
+    class FailingPreflightSource(FakeVulnerabilitySource):
+        def validate_before_inventory_load(self) -> None:
+            raise failure
+
+    def create_client() -> FakeGithubSbomClient:
+        nonlocal factory_calls
+        factory_calls += 1
+        return FakeGithubSbomClient()
+
+    with pytest.raises(SentinelExtensionError) as captured:
+        generate_vex_from_github_source_result(
+            repository="vexcalibur-dev/vexcalibur",
+            source=FailingPreflightSource(()),
+            github_client_factory=create_client,
+        )
+
+    assert captured.value is failure
+    assert factory_calls == 0
+
+
 def test_custom_generation_requires_explicit_execution_report_context() -> None:
     component = _component()
     source = FakeVulnerabilitySource(())

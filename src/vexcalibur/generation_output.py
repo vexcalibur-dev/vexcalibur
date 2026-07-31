@@ -336,6 +336,13 @@ class GenerationOutputTransaction:
 
             primary_failure = _generation_primary_failure(failure)
             if primary_failure is not None:
+                secondary_failures = _generation_cleanup_failures(
+                    failure,
+                    primary=primary_failure,
+                    final_cleanup_failure=cleanup_failure,
+                )
+                if secondary_failures:
+                    primary_failure.__dict__["vexcalibur_cleanup_failures"] = secondary_failures
                 pending_failure = primary_failure
                 pending_traceback = primary_failure.__traceback__
             elif isinstance(failure, Exception):
@@ -517,6 +524,27 @@ def _generation_primary_failure(error: BaseException) -> BaseException | None:
             return current
         current = current.__context__
     return None
+
+
+def _generation_cleanup_failures(
+    error: BaseException,
+    *,
+    primary: BaseException,
+    final_cleanup_failure: BaseException | None,
+) -> tuple[BaseException, ...]:
+    """Return cleanup failures without changing either exception chain."""
+    failures: list[BaseException] = []
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and current is not primary and id(current) not in seen:
+        seen.add(id(current))
+        failures.append(current)
+        current = current.__context__
+    if final_cleanup_failure is not None and all(
+        final_cleanup_failure is not failure for failure in failures
+    ):
+        failures.append(final_cleanup_failure)
+    return tuple(failures)
 
 
 def _register_destination_close(
