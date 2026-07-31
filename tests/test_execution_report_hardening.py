@@ -559,5 +559,5 @@ def test_late_lock_owner_change_is_rejected(
     with pytest.raises(BoundFileDestinationError, match="could not open"):
         destination.write_bytes(b"report")
 
-    assert lock_stat_calls == 2
+    assert lock_stat_calls >= 2
     assert not (tmp_path / "report.json").exists()

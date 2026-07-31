@@ -8,13 +8,11 @@ from pathlib import Path
 
 from vexcalibur.domain import VulnerabilitySource
 from vexcalibur.generate import (
-    _generate_vex_from_github_selected_source_result,
-    _validate_source_before_inventory_load,
+    generate_vex_from_github_source_result,
     generate_vex_from_local_findings_result,
     generate_vex_from_sbom_result,
 )
 from vexcalibur.generation_result import GenerationResult
-from vexcalibur.generation_selection import select_finding_source
 from vexcalibur.github_sbom import (
     GithubSbomClient,
     normalize_github_api_url,
@@ -108,21 +106,18 @@ class GenerateCommandRequest:
         if repository is None:
             raise AssertionError("generate request repository validation failed")
         source = self._source
-        _validate_source_before_inventory_load(source)
-        selected_source = select_finding_source(source)
-        client = GithubSbomClient(
-            api_url=self.github_api_url,
-            token=resolve_github_token(
-                api_url=self.github_api_url,
-                token_env=self.github_token_env,
-                allow_gh_cli=self.use_gh_auth,
-            ),
-        )
-        return _generate_vex_from_github_selected_source_result(
+        return generate_vex_from_github_source_result(
             repository=repository,
-            source=selected_source,
+            source=source,
             timestamp=self.timestamp,
-            github_client=client,
+            github_client_factory=lambda: GithubSbomClient(
+                api_url=self.github_api_url,
+                token=resolve_github_token(
+                    api_url=self.github_api_url,
+                    token_env=self.github_token_env,
+                    allow_gh_cli=self.use_gh_auth,
+                ),
+            ),
             renderer=self.renderer,
         )
 

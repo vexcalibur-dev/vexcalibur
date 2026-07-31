@@ -483,7 +483,9 @@ def test_distribution_metadata_checks_use_one_isolated_locked_wrapper() -> None:
     assert "--isolated" in wrapper
     assert "--frozen" in wrapper
     assert "--only-group dist-verify" in wrapper
-    assert "python -I scripts/verify-dist-metadata.py" in wrapper
+    assert "python -I -c" in wrapper
+    assert 'sys.path.insert(0, str(repo_root / "scripts"))' in wrapper
+    assert 'str(repo_root / "scripts" / "verify-dist-metadata.py")' in wrapper
     assert pyproject["tool"]["uv"]["default-groups"] == ["dev"]
     assert {"include-group": "dist-verify"} in pyproject["dependency-groups"]["dev"]
     assert pyproject["dependency-groups"]["dist-verify"] == [

@@ -133,12 +133,58 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-The companion Action passes the same generation arguments to an installed
-package. Execution-report support is not yet available in a published package
-release, so this default-branch guide does not provide an Action recipe for it.
-Follow [Consume a generation execution report](consume-execution-report.md) for
-the source-checkout procedure and the checks required before automation accepts
-either file.
+## Run the released GitHub Action
+
+This workflow uses the tested `v0.2.2` Action pair: Action commit
+`80c930ee228c2757a4aadb51ce29a79c5066d6ca` and `vexcalibur==0.3.1`. It keeps
+the vulnerability lookup local and uploads the generated VEX file only after
+the generation step succeeds.
+
+```yaml
+name: Generate VEX
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vex:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Generate CycloneDX VEX
+        uses: vexcalibur-dev/vexcalibur-action@80c930ee228c2757a4aadb51ce29a79c5066d6ca # v0.2.2
+        with:
+          package-spec: vexcalibur==0.3.1
+          args: |
+            generate
+            ${{ github.workspace }}/path/to/sbom.json
+            --offline
+            --findings-file
+            ${{ github.workspace }}/path/to/findings.json
+            --output
+            ${{ runner.temp }}/vex.json
+
+      - name: Upload VEX
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cyclonedx-vex
+          path: ${{ runner.temp }}/vex.json
+          if-no-files-found: error
+```
+
+Replace both `path/to` values with files in your repository. A passing
+**Generate CycloneDX VEX** step followed by a `cyclonedx-vex` artifact is the
+success signal.
+
+The Action and package are separate trust decisions. To update either pin, use
+the Action release's
+[compatibility declaration](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
+to select a pair tested together.
 
 ## Read XML input
 

@@ -351,3 +351,16 @@ def test_validator_rejects_an_unsupported_output_format(tmp_path: Path) -> None:
             expected_version="0.5.0",
             expected_finding_count=0,
         )
+
+
+def test_validator_rejects_a_string_output_format_cleanly(tmp_path: Path) -> None:
+    with pytest.raises(
+        ExecutionReportValidationError,
+        match="unsupported output format",
+    ):
+        validate_execution_reports(
+            tmp_path,
+            formats=("cyclonedx",),  # type: ignore[arg-type]
+            expected_version="0.5.0",
+            expected_finding_count=0,
+        )

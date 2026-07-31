@@ -160,6 +160,30 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_exception_after_commit_removes_the_published_success_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="post-commit interruption"), transaction:
+        transaction.commit(
+            _generation_result(monkeypatch),
+            binary_stdout=None,
+        )
+        raise KeyboardInterrupt("post-commit interruption")
+
+    assert output_path.exists()
+    assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
 def test_rollback_release_cancellation_removes_the_published_success_report(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -205,6 +229,46 @@ def test_rollback_release_cancellation_removes_the_published_success_report(
     transaction.close()
 
     assert transaction.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_interruption_after_physical_rollback_release_keeps_success_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(
+        _generation_result(monkeypatch),
+        binary_stdout=None,
+    )
+    real_close = staging_module.PublishedFileRollback.close
+
+    def close_then_interrupt(
+        rollback: staging_module.PublishedFileRollback,
+    ) -> None:
+        if rollback.closed:
+            return
+        real_close(rollback)
+        raise KeyboardInterrupt("rollback was already released")
+
+    monkeypatch.setattr(
+        staging_module.PublishedFileRollback,
+        "close",
+        close_then_interrupt,
+    )
+
+    transaction.close()
+
+    assert transaction.closed
+    assert transaction._report_rollback is None
+    assert output_path.exists()
+    assert report_path.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")

@@ -117,8 +117,11 @@ def vex_document_from_findings(
 ) -> VexDocument:
     """Adapt provider components and findings into a deterministic VEX snapshot."""
     components_by_ref = _components_by_ref(components)
+    referenced_component_refs = {finding.component_ref for finding in findings}
     products_by_ref = {
-        ref: _product_from_component(component) for ref, component in components_by_ref.items()
+        ref: _product_from_component(component)
+        for ref, component in components_by_ref.items()
+        if ref in referenced_component_refs
     }
     assertions = tuple(
         dict.fromkeys(

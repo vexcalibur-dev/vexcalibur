@@ -113,6 +113,8 @@ def validate_execution_reports(
     expected_component_count: int | None = None,
 ) -> None:
     """Validate canonical reports and their exact generated-document bindings."""
+    if any(type(output_format) is not ExecutionReportOutputFormat for output_format in formats):
+        raise ExecutionReportValidationError("formats contain an unsupported output format")
     if not formats or len(set(formats)) != len(formats):
         raise ExecutionReportValidationError("formats must be unique and nonempty")
     if any(output_format not in _DOCUMENT_NAMES for output_format in formats):

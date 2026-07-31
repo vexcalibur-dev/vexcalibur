@@ -182,16 +182,25 @@ class StagedFileWrite:
         """Retain an independent handle that can remove this publication."""
         if not self.committed or not self._retain_publication:
             raise BoundFileDestinationError("staged file is not published")
+        return self._prepare_rollback()
+
+    def _prepare_rollback(self) -> PublishedFileRollback:
+        """Retain rollback ownership before the staged file is published."""
         parent_fd = -1
+        published_fd = -1
         try:
             parent_fd = os.dup(self.parent_fd)
+            published_fd = os.dup(self.temporary_fd)
             return PublishedFileRollback._create(
                 parent_fd=parent_fd,
+                published_fd=published_fd,
                 name=self.destination._name_bytes,
-                expected=self.temporary_stat,
             )
         except BaseException as exc:
-            _close_descriptor(parent_fd)
+            try:
+                _close_descriptor(published_fd)
+            finally:
+                _close_descriptor(parent_fd)
             if isinstance(exc, OSError):
                 raise BoundFileDestinationError(
                     "could not retain the published file rollback handle"
@@ -264,54 +273,73 @@ _PUBLISHED_FILE_ROLLBACK_TOKEN = object()
 class PublishedFileRollback:
     """Independent identity-bound handle for removing one published file."""
 
-    __slots__ = ("_closed", "expected", "name", "parent_fd")
+    __slots__ = ("_closed", "_discarded", "name", "parent_fd", "published_fd")
 
     def __init__(
         self,
         construction_token: object,
         *,
         parent_fd: int,
+        published_fd: int,
         name: str | bytes,
-        expected: os.stat_result,
     ) -> None:
         if construction_token is not _PUBLISHED_FILE_ROLLBACK_TOKEN:
             raise TypeError("published rollback handles require a staged file")
         self.parent_fd = parent_fd
+        self.published_fd = published_fd
         self.name = name
-        self.expected = expected
         self._closed = False
+        self._discarded = False
 
     @classmethod
     def _create(
         cls,
         *,
         parent_fd: int,
+        published_fd: int,
         name: str | bytes,
-        expected: os.stat_result,
     ) -> PublishedFileRollback:
         return cls(
             _PUBLISHED_FILE_ROLLBACK_TOKEN,
             parent_fd=parent_fd,
+            published_fd=published_fd,
             name=name,
-            expected=expected,
         )
 
     def discard(self) -> bool:
         """Remove the publication only if it still has the retained identity."""
+        if self._discarded:
+            return True
         if self._closed:
             return False
-        return _remove_matching_destination(
-            parent_fd=self.parent_fd,
-            name=self.name,
-            expected=self.expected,
-        )
+        with lock_module._exclusive_destination_lock(self.parent_fd):
+            expected = os.fstat(self.published_fd)
+            removed = _remove_matching_destination(
+                parent_fd=self.parent_fd,
+                name=self.name,
+                expected=expected,
+            )
+        if removed:
+            object.__setattr__(self, "_discarded", True)
+        return removed
 
     def close(self) -> None:
-        """Release the retained directory descriptor."""
+        """Release the retained file and directory descriptors."""
         if self._closed:
             return
-        _close_descriptor_retryable(self.parent_fd)
+        self._close_owned_descriptor("published_fd")
+        self._close_owned_descriptor("parent_fd")
         object.__setattr__(self, "_closed", True)
+
+    @property
+    def closed(self) -> bool:
+        """Return whether both retained descriptors were released."""
+        return self._closed
+
+    def _close_owned_descriptor(self, attribute: str) -> None:
+        descriptor = getattr(self, attribute)
+        _close_descriptor_retryable(descriptor)
+        object.__setattr__(self, attribute, -1)
 
     def __copy__(self) -> PublishedFileRollback:
         raise TypeError("published rollback handles cannot be copied")

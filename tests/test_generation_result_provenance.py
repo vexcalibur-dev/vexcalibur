@@ -574,6 +574,56 @@ def test_github_source_validates_extension_declaration_before_loading_inventory(
     assert loads == []
 
 
+def test_github_source_validates_extension_before_constructing_client() -> None:
+    factory_calls = 0
+
+    class InvalidDeclaredSource(FakeVulnerabilitySource):
+        def execution_report_finding_source(self) -> FindingSourceCategory:
+            return FindingSourceCategory.LOCAL_FILE
+
+    def create_client() -> FakeGithubSbomClient:
+        nonlocal factory_calls
+        factory_calls += 1
+        return FakeGithubSbomClient()
+
+    with pytest.raises(ValueError, match=r"FindingSourceCategory\.CUSTOM"):
+        generate_vex_from_github_source_result(
+            repository="vexcalibur-dev/vexcalibur",
+            github_client_factory=create_client,
+            source=InvalidDeclaredSource(()),
+        )
+
+    assert factory_calls == 0
+
+
+def test_github_source_constructs_a_client_factory_once() -> None:
+    factory_calls = 0
+    client = FakeGithubSbomClient()
+
+    def create_client() -> FakeGithubSbomClient:
+        nonlocal factory_calls
+        factory_calls += 1
+        return client
+
+    generate_vex_from_github_source_result(
+        repository="vexcalibur-dev/vexcalibur",
+        github_client_factory=create_client,
+        source=FakeVulnerabilitySource(()),
+    )
+
+    assert factory_calls == 1
+
+
+def test_github_source_rejects_a_client_and_factory_together() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        generate_vex_from_github_source_result(
+            repository="vexcalibur-dev/vexcalibur",
+            github_client=FakeGithubSbomClient(),
+            github_client_factory=FakeGithubSbomClient,
+            source=FakeVulnerabilitySource(()),
+        )
+
+
 def test_github_source_validates_context_before_loading_inventory() -> None:
     loads: list[str] = []
 

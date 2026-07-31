@@ -78,13 +78,17 @@ class OpenVexJsonRenderer:
         """Adapt provider findings and return OpenVEX 0.2.0 JSON."""
         if type(self) is OpenVexJsonRenderer:
             budget = RenderInputBudget()
-            components_by_ref = {component.ref: component for component in components}
-            referenced = {finding.component_ref for finding in findings}
-            for component in components:
-                if component.ref in referenced:
-                    budget.add_component(component, purl_copies=1)
+            referenced: set[str] = set()
             for finding in findings:
                 budget.add_finding(finding)
+                referenced.add(finding.component_ref)
+            components_by_ref = {}
+            for component in components:
+                budget.add_component_reference()
+                if component.ref in referenced:
+                    components_by_ref[component.ref] = component
+                    budget.add_component(component, purl_copies=1)
+            for finding in findings:
                 finding_component = components_by_ref.get(finding.component_ref)
                 if finding_component is not None:
                     budget.add_package_url(finding_component, copies=2)

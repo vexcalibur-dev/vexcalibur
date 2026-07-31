@@ -17,6 +17,9 @@ import vexcalibur.generate_command as generate_command
 from vexcalibur import cli
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
 from vexcalibur.execution_report_destination import BoundFileDestinationError
+from vexcalibur.generation_output import (
+    GenerationOutputTransaction,
+)
 from vexcalibur.generation_result import (
     ExecutionReportOutputFormat,
     FindingSourceCategory,
@@ -75,6 +78,89 @@ def test_generate_writes_execution_report_after_vex_output(tmp_path: Path) -> No
         "sha256": hashlib.sha256(document).hexdigest(),
         "bytes": len(document),
     }
+
+
+def test_cli_interruption_after_commit_removes_the_success_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    real_commit = GenerationOutputTransaction.commit
+
+    def commit_then_interrupt(
+        transaction: GenerationOutputTransaction,
+        result: GenerationResult,
+        *,
+        binary_stdout: io.BufferedIOBase | None = None,
+    ) -> None:
+        real_commit(transaction, result, binary_stdout=binary_stdout)
+        raise KeyboardInterrupt("post-commit interruption")
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "commit",
+        commit_then_interrupt,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 130
+    assert isinstance(result.exception, SystemExit)
+    assert output_path.exists()
+    assert not report_path.exists()
+
+
+def test_cli_reports_finalization_failure_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+
+    def fail_rollback_release(transaction: GenerationOutputTransaction) -> None:
+        del transaction
+        raise OSError("synthetic release failure")
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "_release_report_rollback",
+        fail_rollback_release,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Could not finalize generate outputs: synthetic release failure" in result.output
+    assert "Traceback" not in result.output
+    assert output_path.exists()
+    assert not report_path.exists()
 
 
 def test_generate_report_counts_repeated_analysis_states(tmp_path: Path) -> None:

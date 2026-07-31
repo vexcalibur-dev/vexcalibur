@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import socket
 import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -532,11 +534,11 @@ def test_cancellation_during_rollback_handoff_closes_the_retained_descriptor(
         cls: type[staging_module.PublishedFileRollback],
         *,
         parent_fd: int,
+        published_fd: int,
         name: str | bytes,
-        expected: os.stat_result,
     ) -> staging_module.PublishedFileRollback:
-        del cls, name, expected
-        observed_descriptors.append(parent_fd)
+        del cls, name
+        observed_descriptors.extend((parent_fd, published_fd))
         raise KeyboardInterrupt("rollback handoff interrupted")
 
     monkeypatch.setattr(
@@ -553,12 +555,119 @@ def test_cancellation_during_rollback_handoff_closes_the_retained_descriptor(
         ):
             staged.retain_rollback()
 
-    assert len(observed_descriptors) == 1
-    with pytest.raises(OSError):
-        os.fstat(observed_descriptors[0])
+    assert len(observed_descriptors) == 2
+    for descriptor in observed_descriptors:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
     assert path.read_bytes() == b"private report"
     destination.close()
     path.unlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_retained_rollback_holds_inode_and_locks_identity_checked_removal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    rollback: staging_module.PublishedFileRollback
+
+    with destination.stage_bytes(b"private report") as staged:
+        rollback = staged._prepare_rollback()
+        staged.commit()
+
+    published = os.fstat(rollback.published_fd)
+    assert published.st_dev == path.stat().st_dev
+    assert published.st_ino == path.stat().st_ino
+    lock_held = False
+    real_remove = staging_module._remove_matching_destination
+
+    @contextmanager
+    def observe_lock(parent_fd: int) -> Iterator[None]:
+        nonlocal lock_held
+        assert parent_fd == rollback.parent_fd
+        lock_held = True
+        try:
+            yield
+        finally:
+            lock_held = False
+
+    def observe_remove(**kwargs: object) -> bool:
+        assert lock_held
+        expected = kwargs["expected"]
+        assert isinstance(expected, os.stat_result)
+        retained = os.fstat(rollback.published_fd)
+        assert expected.st_dev == retained.st_dev
+        assert expected.st_ino == retained.st_ino
+        return real_remove(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        staging_module.lock_module,
+        "_exclusive_destination_lock",
+        observe_lock,
+    )
+    monkeypatch.setattr(
+        staging_module,
+        "_remove_matching_destination",
+        observe_remove,
+    )
+
+    assert rollback.discard()
+    assert not path.exists()
+    rollback.close()
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_discarded_rollback_remains_idempotent_after_partial_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+
+    with destination.stage_bytes(b"private report") as staged:
+        rollback = staged._prepare_rollback()
+        staged.commit()
+
+    assert rollback.discard()
+    parent_descriptor = rollback.parent_fd
+    published_descriptor = rollback.published_fd
+    real_dup2 = filesystem_module.os.dup2
+    interrupted = False
+
+    def interrupt_parent_transfer(
+        source: int,
+        candidate: int,
+        *,
+        inheritable: bool = True,
+    ) -> int:
+        nonlocal interrupted
+        if candidate == parent_descriptor and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("parent close interrupted")
+        return real_dup2(source, candidate, inheritable=inheritable)
+
+    monkeypatch.setattr(
+        filesystem_module.os,
+        "dup2",
+        interrupt_parent_transfer,
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="parent close interrupted"):
+        rollback.close()
+
+    assert rollback.published_fd == -1
+    assert rollback.parent_fd == parent_descriptor
+    assert rollback.discard()
+    with pytest.raises(OSError):
+        os.fstat(published_descriptor)
+    os.fstat(parent_descriptor)
+
+    rollback.close()
+    assert rollback.closed
+    destination.close()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
@@ -844,17 +953,22 @@ def test_destination_close_retains_ownership_when_interrupted_before_close(
 ) -> None:
     destination = BoundFileDestination.prepare(tmp_path / "report.json")
     descriptor = destination._parent_descriptor
-    real_close = filesystem_module.os.close
+    real_dup2 = filesystem_module.os.dup2
     interrupted = False
 
-    def interrupt_before_close(candidate: int) -> None:
+    def interrupt_before_transfer(
+        source: int,
+        candidate: int,
+        *,
+        inheritable: bool = True,
+    ) -> int:
         nonlocal interrupted
         if candidate == descriptor and not interrupted:
             interrupted = True
             raise KeyboardInterrupt("descriptor close interrupted")
-        real_close(candidate)
+        return real_dup2(source, candidate, inheritable=inheritable)
 
-    monkeypatch.setattr(filesystem_module.os, "close", interrupt_before_close)
+    monkeypatch.setattr(filesystem_module.os, "dup2", interrupt_before_transfer)
 
     with pytest.raises(KeyboardInterrupt, match="descriptor close interrupted"):
         destination.close()
@@ -874,13 +988,20 @@ def test_destination_close_completes_when_interrupted_after_physical_close(
 ) -> None:
     destination = BoundFileDestination.prepare(tmp_path / "report.json")
     descriptor = destination._parent_descriptor
-    real_close = filesystem_module.os.close
+    real_dup2 = filesystem_module.os.dup2
 
-    def interrupt_after_close(candidate: int) -> None:
-        real_close(candidate)
-        raise KeyboardInterrupt("descriptor was already closed")
+    def interrupt_after_transfer(
+        source: int,
+        candidate: int,
+        *,
+        inheritable: bool = True,
+    ) -> int:
+        result = real_dup2(source, candidate, inheritable=inheritable)
+        if candidate == descriptor:
+            raise KeyboardInterrupt("descriptor was already closed")
+        return result
 
-    monkeypatch.setattr(filesystem_module.os, "close", interrupt_after_close)
+    monkeypatch.setattr(filesystem_module.os, "dup2", interrupt_after_transfer)
 
     destination.close()
 
@@ -899,17 +1020,22 @@ def test_staged_close_retries_only_descriptors_still_owned(
     staged = scope.__enter__()
     temporary_descriptor = staged.temporary_fd
     parent_descriptor = staged.parent_fd
-    real_close = filesystem_module.os.close
+    real_dup2 = filesystem_module.os.dup2
     interrupted = False
 
-    def interrupt_parent_close(candidate: int) -> None:
+    def interrupt_parent_transfer(
+        source: int,
+        candidate: int,
+        *,
+        inheritable: bool = True,
+    ) -> int:
         nonlocal interrupted
         if candidate == parent_descriptor and not interrupted:
             interrupted = True
             raise KeyboardInterrupt("parent close interrupted")
-        real_close(candidate)
+        return real_dup2(source, candidate, inheritable=inheritable)
 
-    monkeypatch.setattr(filesystem_module.os, "close", interrupt_parent_close)
+    monkeypatch.setattr(filesystem_module.os, "dup2", interrupt_parent_transfer)
 
     with pytest.raises(KeyboardInterrupt, match="parent close interrupted"):
         staged.close()

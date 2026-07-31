@@ -137,10 +137,14 @@ document metadata. Any later failure leaves no stale success marker from that
 transaction.
 
 Stale-report cleanup briefly takes the report directory lock while Vexcalibur
-prepares the destination. The long-lived locks that keep document and report
-publication in one transaction begin during commit, after generation. Another
-process can publish a newer report after the failed transaction removes the
-old one. It can also replace a successful report after this command exits.
+prepares the destination. The locks that coordinate the document and report
+replacements begin during commit, after generation. The replacements are
+individually atomic, but the pair is not an atomic two-file commit. A failure
+after Vexcalibur replaces the document can leave that document in place without
+a report.
+
+Another process can publish a newer report after the failed transaction removes
+the old one. It can also replace a successful report after this command exits.
 Give each job its own output directory when consumers must retain a one-to-one
 mapping between a VEX document and its report.
 
@@ -159,13 +163,19 @@ After generation, Vexcalibur publishes in this order:
 Standard output follows the same order, but its bytes cannot be rolled back
 after a partial write. Vexcalibur removes an intervening report before it writes
 the first byte, then holds the report lock while it writes and flushes standard
-output. A cleanup failure leaves standard output unchanged. After a successful
-flush, Vexcalibur publishes the report and releases the lock.
+output. If that pre-write cleanup fails, standard output remains unchanged.
+After a successful flush, Vexcalibur publishes the report and releases the
+lock.
 
 Each atomic replacement is followed by a directory `fsync`. A failed file or
 directory flush makes the command fail. Vexcalibur removes an unpublished
 temporary file when it can, but callers must not treat leftover private
 temporary files as completed reports.
+
+If the command is interrupted after report publication but before successful
+finalization, Vexcalibur removes the report when the path still names the file
+it published. The document may remain. A concurrent replacement at the report
+path is left alone.
 
 A parent-directory change stops the operation instead of redirecting either
 write. The parent must already exist and must be readable, writable, and
@@ -229,8 +239,8 @@ an execution report on every supported platform. The caller writes the VEX
 document and report separately, so those writes do not provide the CLI's
 transaction guarantees.
 
-The report is limited to 16 KiB. A missing or stale package version, invalid report
-value, size violation, or write failure makes the command fail.
+The report is limited to 16 KiB. A missing or stale package version, invalid
+report value, size violation, or write failure makes the command fail.
 
 The VEX file and report are separate atomic writes, not one two-file
 transaction. A later report-write failure can leave the replaced VEX file, or

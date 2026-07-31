@@ -70,23 +70,49 @@ def _remove_matching_destination(
 
 
 def _close_descriptor(descriptor: int) -> None:
-    with suppress(OSError):
-        os.close(descriptor)
+    failure: BaseException | None = None
+    for _ in range(2):
+        try:
+            _close_descriptor_retryable(descriptor)
+            return
+        except BaseException as exc:
+            failure = exc
+    if failure is not None:
+        raise failure
 
 
 def _close_descriptor_retryable(descriptor: int) -> None:
-    """Close an owned descriptor without losing retryable ownership."""
+    """Release an owned descriptor without relying on its number after close."""
     try:
-        expected = os.fstat(descriptor)
+        os.fstat(descriptor)
     except OSError:
         return
+
+    pipe_reader = -1
+    pipe_writer = -1
+    released = False
+    failure: BaseException | None = None
     try:
-        os.close(descriptor)
-    except BaseException:
+        pipe_reader, pipe_writer = os.pipe()
+        os.dup2(pipe_reader, descriptor, inheritable=False)
+        released = True
+    except BaseException as exc:
+        failure = exc
         try:
-            actual = os.fstat(descriptor)
+            descriptor_stat = os.fstat(descriptor)
+            pipe_stat = os.fstat(pipe_reader)
         except OSError:
-            return
-        if not _same_identity(actual, expected):
-            return
-        raise
+            pass
+        else:
+            released = _same_identity(descriptor_stat, pipe_stat)
+    finally:
+        with suppress(BaseException):
+            os.close(pipe_writer)
+        with suppress(BaseException):
+            os.close(pipe_reader)
+        if released:
+            with suppress(BaseException):
+                os.close(descriptor)
+
+    if failure is not None and not released:
+        raise failure

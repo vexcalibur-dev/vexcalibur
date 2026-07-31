@@ -18,6 +18,19 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.utils import canonicalize_name
 
 try:
+    from scripts.archive_limits import (
+        ArchivePreflightError,
+        preflight_tar_gzip_stream,
+        preflight_zip_member_count,
+    )
+except ModuleNotFoundError:
+    from archive_limits import (  # type: ignore[no-redef]
+        ArchivePreflightError,
+        preflight_tar_gzip_stream,
+        preflight_zip_member_count,
+    )
+
+try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib
@@ -157,6 +170,7 @@ def _find_artifacts(dist_dir: Path) -> tuple[Path, Path]:
 
 
 def _read_wheel_metadata(path: Path) -> DistributionMetadata:
+    _preflight_wheel(path)
     with zipfile.ZipFile(path) as wheel:
         members = wheel.infolist()
         _validate_zip_members(members)
@@ -185,6 +199,7 @@ def _read_wheel_metadata(path: Path) -> DistributionMetadata:
 
 
 def _read_sdist_metadata(path: Path) -> DistributionMetadata:
+    _preflight_sdist(path)
     with tarfile.open(path, "r:gz") as sdist:
         metadata: bytes | None = None
         entry_points: bytes | None = None
@@ -465,6 +480,7 @@ def _verify_required_sdist_files(
             raise SystemExit(f"Required sdist source exceeds the byte limit: {source_path}")
         expected[f"{archive_root}/{relative_path.as_posix()}"] = source_path.read_bytes()
 
+    _preflight_sdist(sdist_path)
     with tarfile.open(sdist_path, "r:gz") as sdist:
         found: set[str] = set()
         for member in _validated_sdist_members(sdist):
@@ -546,6 +562,30 @@ def _validate_member_name(name: str, *, artifact: str) -> None:
         or any(part in {"", ".", ".."} for part in canonical.split("/"))
     ):
         raise SystemExit(f"{artifact} contains an unsafe archive member path.")
+
+
+def _preflight_wheel(path: Path) -> None:
+    try:
+        preflight_zip_member_count(
+            path,
+            artifact="wheel",
+            maximum_members=MAX_ARCHIVE_MEMBERS,
+            maximum_directory_bytes=MAX_ARCHIVE_BYTES,
+        )
+    except (ArchivePreflightError, OSError) as exc:
+        raise SystemExit(str(exc).capitalize()) from exc
+
+
+def _preflight_sdist(path: Path) -> None:
+    try:
+        preflight_tar_gzip_stream(
+            path,
+            artifact="sdist",
+            maximum_members=MAX_ARCHIVE_MEMBERS,
+            maximum_file_bytes=MAX_ARCHIVE_UNCOMPRESSED_BYTES,
+        )
+    except ArchivePreflightError as exc:
+        raise SystemExit(str(exc).capitalize()) from exc
 
 
 if __name__ == "__main__":

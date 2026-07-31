@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -377,14 +378,20 @@ def generate_vex_from_github_source_result(
     source: VulnerabilitySource,
     timestamp: datetime | None = None,
     github_client: GithubSbomComponentLoader | None = None,
+    github_client_factory: Callable[[], GithubSbomComponentLoader] | None = None,
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
     """Generate a report-aware result from GitHub inventory and one source."""
+    if github_client is not None and github_client_factory is not None:
+        raise ValueError("github_client and github_client_factory are mutually exclusive")
     _validate_source_before_inventory_load(source)
+    selected_source = select_finding_source(source)
+    if github_client_factory is not None:
+        github_client = github_client_factory()
     return _generate_vex_from_github_selected_source_result(
         repository=repository,
-        source=select_finding_source(source),
+        source=selected_source,
         timestamp=timestamp,
         github_client=github_client,
         renderer=renderer,

@@ -375,7 +375,8 @@ class GenerationExecutionReport:
             raise ValueError("generation result has no execution report context")
         version = result._execution_report_version()
         rendered_bytes = result.rendered_bytes
-        counts = Counter(finding.analysis_state for finding in result.findings)
+        input_snapshot = result._input_snapshot
+        counts = Counter(finding.analysis_state for finding in input_snapshot.findings)
         report = cls(
             schema_version=EXECUTION_REPORT_SCHEMA_VERSION,
             command="generate",
@@ -383,8 +384,8 @@ class GenerationExecutionReport:
             inventory_source=execution_context.inventory_source,
             finding_source=execution_context.finding_source,
             output_format=execution_context.output_format,
-            component_count=len(result.components),
-            finding_count=len(result.findings),
+            component_count=len(input_snapshot.components),
+            finding_count=len(input_snapshot.findings),
             analysis_state_counts=tuple(
                 (state, counts[state]) for state in _V1_ANALYSIS_STATES if counts[state] > 0
             ),

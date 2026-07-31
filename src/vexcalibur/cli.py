@@ -1,6 +1,7 @@
 """Command-line entrypoint for Vexcalibur."""
 
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, BinaryIO, cast
 
@@ -19,6 +20,7 @@ from vexcalibur.csaf import (
 from vexcalibur.generate_command import GenerateCommandRequest
 from vexcalibur.generation_output import (
     GenerationDocumentWriteError,
+    GenerationOutputError,
     GenerationOutputPreparationError,
     GenerationOutputTransaction,
     GenerationReportConstructionError,
@@ -366,10 +368,11 @@ def generate(
                     write_text_stdout=lambda text: typer.echo(text, nl=False),
                 )
             else:
-                output_transaction.commit(
-                    generation,
-                    binary_stdout=(_binary_standard_output() if output_file is None else None),
-                )
+                with output_transaction:
+                    output_transaction.commit(
+                        generation,
+                        binary_stdout=(_binary_standard_output() if output_file is None else None),
+                    )
         except GenerationReportConstructionError as exc:
             typer.echo(f"Could not create execution report: {exc}", err=True)
             raise typer.Exit(code=1) from exc
@@ -383,9 +386,14 @@ def generate(
                 err=True,
             )
             raise typer.Exit(code=1) from exc
-    finally:
+        except GenerationOutputError as exc:
+            typer.echo(f"Could not finalize generate outputs: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+    except BaseException:
         if output_transaction is not None:
-            output_transaction.close()
+            with suppress(BaseException):
+                output_transaction.abort()
+        raise
 
 
 def _renderer_from_generate_options(

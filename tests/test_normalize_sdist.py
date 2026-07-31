@@ -135,6 +135,25 @@ def test_normalization_rejects_links_without_leaving_output(tmp_path: Path) -> N
     assert not output.exists()
 
 
+def test_normalization_rejects_pax_metadata_before_materialization(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "pax.tar.gz"
+    contents = b"bounded"
+    member = tarfile.TarInfo("vexcalibur-0.4.0/member")
+    member.size = len(contents)
+    member.pax_headers = {"comment": "metadata tarfile would materialize"}
+    with tarfile.open(source, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+        archive.addfile(member, BytesIO(contents))
+    output = tmp_path / "normalized.tar.gz"
+
+    completed = _normalize(source, output)
+
+    assert completed.returncode == 1
+    assert "unsupported PAX metadata key" in completed.stderr
+    assert not output.exists()
+
+
 @pytest.mark.parametrize(
     "member_name",
     ["C:/outside.txt", "c:relative.txt", "vexcalibur-0.4.0/control\nname"],

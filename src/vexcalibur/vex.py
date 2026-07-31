@@ -67,12 +67,14 @@ class CycloneDxJsonRenderer:
         """Adapt provider findings and return CycloneDX 1.6 VEX JSON."""
         if type(self) is CycloneDxJsonRenderer:
             budget = RenderInputBudget()
-            referenced = {finding.component_ref for finding in findings}
-            for component in components:
-                if component.ref in referenced:
-                    budget.add_component(component, purl_copies=2)
+            referenced: set[str] = set()
             for finding in findings:
                 budget.add_finding(finding)
+                referenced.add(finding.component_ref)
+            for component in components:
+                budget.add_component_reference()
+                if component.ref in referenced:
+                    budget.add_component(component, purl_copies=2)
         return self.render_document(
             document=vex_document_from_findings(components=components, findings=findings),
             timestamp=timestamp,

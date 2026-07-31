@@ -113,21 +113,6 @@ same maximum. It accepts only the reviewed schema bytes from the same checkout;
 a changed or substituted schema is rejected before JSON Schema evaluation.
 Schema references cannot trigger network requests.
 
-## Consume reports in GitHub Actions
-
-A workflow recipe must pin a package release that already contains
-`--execution-report`. This default-branch page cannot name that future release,
-so it deliberately omits the Action recipe for now. Use the source-checkout
-procedure above until the release notes and the installed
-`vexcalibur generate --help` output confirm support.
-
-After publication, open the release's immutable tag on GitHub and use the
-`docs/` tree and schema from that tag. GitHub Pages and Read the Docs describe
-the default branch; they are not immutable release documentation. Keep the
-schema and package on the same tag, pin the companion Action to a full commit,
-validate the report before reading it, and upload neither file when validation
-fails.
-
 ## Keep the trust boundary explicit
 
 The report omits package names and URLs, vulnerability IDs, repository names,

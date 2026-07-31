@@ -181,12 +181,21 @@ The ``*_result`` helpers pass plain ``tuple`` objects to the source and
 renderer. Sources return ``VulnerabilityFinding`` values in a tuple. Renderers
 return UTF-8 encodable text.
 
+Direct ``GenerationResult`` construction has an exact-type contract.
+``rendered_document`` must be a built-in ``str``. ``components`` and
+``findings`` must be built-in ``tuple`` objects containing exact
+``ComponentIdentity`` and ``VulnerabilityFinding`` values, respectively.
+``execution_context`` must be ``None`` or an exact
+``GenerationExecutionContext``. Lists, tuple subclasses, and domain subclasses
+are rejected.
+
 The compatibility helpers preserve caller and extension container and element
 identities. The ``*_result`` helpers isolate each extension boundary instead.
 They copy component and finding subclasses into exact ``ComponentIdentity`` and
 ``VulnerabilityFinding`` values, give the renderer separate copies, and retain
-private primitive snapshots for the result. Subclass-only state is not
-retained.
+private primitive snapshots for the result. The ``components`` and ``findings``
+properties materialize a new built-in tuple of exact domain values on each
+access. Subclass-only state and object identity are not retained.
 
 .. automodule:: vexcalibur.generate
    :members: generate_vex_from_components, generate_vex_from_components_result, generate_vex_from_source, generate_vex_from_source_result, generate_vex_from_sbom, generate_vex_from_sbom_result, generate_vex_from_github_source_result, generate_vex_from_github_sbom, generate_vex_from_github_sbom_result, generate_vex_from_local_findings, generate_vex_from_local_findings_result

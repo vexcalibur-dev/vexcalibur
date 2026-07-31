@@ -57,6 +57,10 @@ class GenerationReportWriteError(GenerationOutputError):
         self.destination = destination
 
 
+class GenerationOutputCleanupError(GenerationOutputError):
+    """Raised when a completed or aborted output transaction cannot close."""
+
+
 def write_generation_document(
     result: GenerationResult,
     *,
@@ -292,9 +296,11 @@ class GenerationOutputTransaction:
                             ) from exc
 
                         try:
-                            staged_report.commit(destination_lock_held=True)
-                            report_rollback = staged_report.retain_rollback()
+                            report_rollback = staged_report._prepare_rollback()
                             self._report_rollback = report_rollback
+                            object.__setattr__(self, "_discard_report_on_close", True)
+                            staged_report.commit(destination_lock_held=True)
+                            object.__setattr__(self, "_discard_report_on_close", False)
                         except BoundFileDestinationError as exc:
                             raise GenerationReportWriteError(
                                 self.report_destination.requested_path,
@@ -308,12 +314,12 @@ class GenerationOutputTransaction:
                         exc,
                     ) from exc
         except BaseException:
-            if staged_report is not None:
-                for _ in range(2):
-                    with suppress(BaseException):
-                        if staged_report.discard_committed():
-                            break
-            if report_rollback is not None:
+            retained_rollback = self._report_rollback
+            if retained_rollback is not None:
+                object.__setattr__(self, "_discard_report_on_close", True)
+                with suppress(BaseException):
+                    self._discard_published_report()
+            elif report_rollback is not None:
                 report_rollback.close()
             raise
 
@@ -344,8 +350,19 @@ class GenerationOutputTransaction:
                 if failure is None:
                     failure = exc
         if failure is not None:
+            if isinstance(failure, GenerationOutputError):
+                raise failure
+            if isinstance(failure, Exception):
+                raise GenerationOutputCleanupError(str(failure)) from failure
             raise failure
         object.__setattr__(self, "_closed", True)
+
+    def abort(self) -> None:
+        """Remove a published report, then close every retained descriptor."""
+        if self.closed:
+            return
+        object.__setattr__(self, "_discard_report_on_close", True)
+        self.close()
 
     def __copy__(self) -> GenerationOutputTransaction:
         raise TypeError("generation output transactions cannot be copied")
@@ -368,7 +385,11 @@ class GenerationOutputTransaction:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        self.close()
+        if exc_type is None:
+            self.close()
+        else:
+            with suppress(BaseException):
+                self.abort()
 
     def __del__(self) -> None:
         with suppress(Exception):
@@ -406,16 +427,29 @@ class GenerationOutputTransaction:
             if failure is not None:
                 raise error from failure
             raise error
-        rollback.close()
-        object.__setattr__(self, "_report_rollback", None)
-        object.__setattr__(self, "_discard_report_on_close", False)
+        try:
+            rollback.close()
+            object.__setattr__(self, "_report_rollback", None)
+            object.__setattr__(self, "_discard_report_on_close", False)
+        except BaseException:
+            if rollback.closed:
+                object.__setattr__(self, "_report_rollback", None)
+                object.__setattr__(self, "_discard_report_on_close", False)
+                return
+            raise
 
     def _release_report_rollback(self) -> None:
         rollback = self._report_rollback
         if rollback is None:
             return
-        rollback.close()
-        object.__setattr__(self, "_report_rollback", None)
+        try:
+            rollback.close()
+            object.__setattr__(self, "_report_rollback", None)
+        except BaseException:
+            if rollback.closed:
+                object.__setattr__(self, "_report_rollback", None)
+                return
+            raise
 
 
 def _label_destination_error(

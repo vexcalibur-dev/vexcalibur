@@ -148,12 +148,14 @@ class Csaf20VexJsonRenderer:
         """Adapt provider findings and return CSAF 2.0 VEX JSON."""
         if type(self) is Csaf20VexJsonRenderer:
             budget = RenderInputBudget()
-            referenced = {finding.component_ref for finding in findings}
-            for component in components:
-                if component.ref in referenced:
-                    budget.add_component(component, purl_copies=2)
+            referenced: set[str] = set()
             for finding in findings:
                 budget.add_finding(finding)
+                referenced.add(finding.component_ref)
+            for component in components:
+                budget.add_component_reference()
+                if component.ref in referenced:
+                    budget.add_component(component, purl_copies=2)
             for value in (
                 self.metadata.document_id,
                 self.metadata.title,

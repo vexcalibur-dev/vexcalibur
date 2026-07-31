@@ -8,6 +8,7 @@ from vexcalibur.render import VexRenderError
 
 _BASE_BYTES = 4 * 1024
 _COMPONENT_BYTES = 512
+_COMPONENT_REFERENCE_BYTES = 128
 _FINDING_BYTES = 1024
 _TEXT_COPIES = 4
 _PURL_UNRESERVED_CHARACTERS = frozenset(
@@ -34,6 +35,10 @@ class RenderInputBudget:
             component.type,
         ):
             self.add_text(value)
+
+    def add_component_reference(self) -> None:
+        """Account for indexing one component before relevance is known."""
+        self.add_fixed(_COMPONENT_REFERENCE_BYTES)
 
     def add_finding(self, finding: VulnerabilityFinding) -> None:
         """Account for fields that a built-in renderer may emit for one finding."""
