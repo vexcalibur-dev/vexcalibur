@@ -160,6 +160,43 @@ exec /usr/bin/git "$@"
     assert "could not enumerate release tags" in completed.stderr
 
 
+def test_rejects_failed_release_tag_resolution_without_outputs(tmp_path: Path) -> None:
+    repository, release_sha = _repository(tmp_path)
+    _git(repository, "tag", "--annotate", "v1.2.3", "--message", "release", release_sha)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "rev-parse" && "${3:-}" == "refs/tags/v1.2.3^{commit}" ]]; then
+  printf 'synthetic tag resolution failure\n' >&2
+  exit 74
+fi
+exec /usr/bin/git "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+
+    completed = subprocess.run(  # noqa: S603 - test-owned Git wrapper
+        [str(SCRIPT), release_sha],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert "synthetic tag resolution failure" in completed.stderr
+    assert "could not resolve release tag: v1.2.3" in completed.stderr
+
+
 @pytest.mark.parametrize("release_sha", ("not-a-sha", "a" * 40))
 def test_rejects_invalid_commits(tmp_path: Path, release_sha: str) -> None:
     repository, _ = _repository(tmp_path)

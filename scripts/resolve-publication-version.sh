@@ -25,8 +25,12 @@ fi
 while IFS='|' read -r existing_tag reference_type target_object target_type; do
   if [[ "${existing_tag}" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
     if ! tag_commit="$(
-      git rev-parse --verify "refs/tags/${existing_tag}^{commit}" 2>/dev/null
-    )" || [[ "${tag_commit}" != "${release_sha}" ]]; then
+      git rev-parse --verify "refs/tags/${existing_tag}^{commit}"
+    )"; then
+      printf 'could not resolve release tag: %s\n' "${existing_tag}" >&2
+      exit 1
+    fi
+    if [[ "${tag_commit}" != "${release_sha}" ]]; then
       continue
     fi
     if [[ "${reference_type}" != "tag" ]]; then

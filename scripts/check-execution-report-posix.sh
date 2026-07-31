@@ -27,8 +27,10 @@ uv run --frozen pytest -q \
   tests/test_execution_report_destination_cli.py \
   tests/test_execution_report_destination_locks.py \
   tests/test_execution_report_hardening.py \
+  tests/test_execution_report_rollback.py \
   tests/test_generation_output.py \
   tests/test_generation_output_concurrency.py \
+  tests/test_generation_output_recovery.py \
   tests/test_cli_execution_report.py
 
 shopt -s nullglob

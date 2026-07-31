@@ -529,12 +529,13 @@ def test_cancellation_during_rollback_handoff_closes_the_retained_descriptor(
         cls: type[staging_module.PublishedFileRollback],
         *,
         expected: os.stat_result,
+        lock_fd: int,
         parent_fd: int,
         published_fd: int,
         name: str | bytes,
     ) -> staging_module.PublishedFileRollback:
         del cls, expected, name
-        observed_descriptors.extend((parent_fd, published_fd))
+        observed_descriptors.extend((lock_fd, parent_fd, published_fd))
         raise KeyboardInterrupt("rollback handoff interrupted")
 
     monkeypatch.setattr(
@@ -551,7 +552,7 @@ def test_cancellation_during_rollback_handoff_closes_the_retained_descriptor(
         ):
             staged.retain_rollback()
 
-    assert len(observed_descriptors) == 2
+    assert len(observed_descriptors) == 3
     for descriptor in observed_descriptors:
         with pytest.raises(OSError):
             os.fstat(descriptor)

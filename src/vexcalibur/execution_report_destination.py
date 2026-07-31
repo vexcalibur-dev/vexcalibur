@@ -378,7 +378,7 @@ class BoundFileDestination:
             raise BoundFileDestinationError("bound parent directory is unavailable") from exc
 
     def _coordination_key(self) -> bytes:
-        return self._name_bytes
+        return _filename_key(self.name).encode("utf-8", errors="surrogatepass")
 
     def _require_parent_descriptor(self) -> int:
         if self.closed:

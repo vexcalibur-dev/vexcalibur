@@ -192,12 +192,51 @@ def test_destination_close_retains_ownership_when_pipe_allocation_fails(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 @pytest.mark.parametrize(
+    "failure",
+    (
+        KeyboardInterrupt("synthetic preflight interruption"),
+        OSError(errno.ENOMEM, "synthetic preflight resource failure"),
+    ),
+)
+def test_destination_close_retains_ownership_when_preflight_fails(
+    failure: BaseException,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    descriptor = destination._parent_descriptor
+    real_fstat = filesystem_module.os.fstat
+    failed = False
+
+    def fail_preflight(candidate: int) -> os.stat_result:
+        nonlocal failed
+        if candidate == descriptor and not failed:
+            failed = True
+            raise failure
+        return real_fstat(candidate)
+
+    monkeypatch.setattr(filesystem_module.os, "fstat", fail_preflight)
+    with pytest.raises(type(failure), match="preflight"):
+        destination.close()
+
+    assert destination.closed is False
+    assert destination._parent_descriptor == descriptor
+    real_fstat(descriptor)
+
+    monkeypatch.setattr(filesystem_module.os, "fstat", real_fstat)
+    destination.close()
+    assert destination.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+@pytest.mark.parametrize(
     ("owner_kind", "attribute"),
     (
         ("staged", "temporary_fd"),
         ("staged", "parent_fd"),
         ("rollback", "published_fd"),
         ("rollback", "parent_fd"),
+        ("rollback", "lock_fd"),
     ),
 )
 def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
@@ -214,11 +253,12 @@ def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
     replacement: list[int] = []
     real_release = staging_module._close_descriptor_retryable
     real_close = os.close
-    replacement_path = (
-        tmp_path / staged.temporary_name
-        if attribute in {"temporary_fd", "published_fd"}
-        else tmp_path
-    )
+    if attribute in {"temporary_fd", "published_fd"}:
+        replacement_path = tmp_path / staged.temporary_name
+    elif attribute == "lock_fd":
+        replacement_path = tmp_path / lock_module.LOCK_DIRECTORY_NAME / lock_module.LOCK_FILE_NAME
+    else:
+        replacement_path = tmp_path
     replacement_flags = os.O_RDONLY
     if attribute == "parent_fd":
         replacement_flags |= os.O_DIRECTORY

@@ -17,6 +17,7 @@ from vexcalibur.execution_report_filesystem import (
     _remove_matching_destination,
     _require_path_identity,
     _require_private_regular_file,
+    _same_identity,
 )
 
 
@@ -186,22 +187,28 @@ class StagedFileWrite:
 
     def _prepare_rollback(self) -> PublishedFileRollback:
         """Retain rollback ownership before the staged file is published."""
+        lock_fd = -1
         parent_fd = -1
         published_fd = -1
         try:
+            lock_fd = lock_module._open_private_destination_lock(self.parent_fd)
             parent_fd = os.dup(self.parent_fd)
             published_fd = os.dup(self.temporary_fd)
             return PublishedFileRollback._create(
                 expected=self.temporary_stat,
+                lock_fd=lock_fd,
                 parent_fd=parent_fd,
                 published_fd=published_fd,
                 name=self.destination._name_bytes,
             )
         except BaseException as exc:
             try:
-                _close_descriptor(published_fd)
+                try:
+                    _close_descriptor(published_fd)
+                finally:
+                    _close_descriptor(parent_fd)
             finally:
-                _close_descriptor(parent_fd)
+                _close_descriptor(lock_fd)
             if isinstance(exc, OSError):
                 raise BoundFileDestinationError(
                     "could not retain the published file rollback handle"
@@ -296,6 +303,7 @@ class PublishedFileRollback:
         "_closed",
         "_discarded",
         "expected",
+        "lock_fd",
         "name",
         "parent_fd",
         "published_fd",
@@ -306,6 +314,7 @@ class PublishedFileRollback:
         construction_token: object,
         *,
         expected: os.stat_result,
+        lock_fd: int,
         parent_fd: int,
         published_fd: int,
         name: str | bytes,
@@ -313,6 +322,7 @@ class PublishedFileRollback:
         if construction_token is not _PUBLISHED_FILE_ROLLBACK_TOKEN:
             raise TypeError("published rollback handles require a staged file")
         self.expected = expected
+        self.lock_fd = lock_fd
         self.parent_fd = parent_fd
         self.published_fd = published_fd
         self.name = name
@@ -324,6 +334,7 @@ class PublishedFileRollback:
         cls,
         *,
         expected: os.stat_result,
+        lock_fd: int,
         parent_fd: int,
         published_fd: int,
         name: str | bytes,
@@ -331,6 +342,7 @@ class PublishedFileRollback:
         return cls(
             _PUBLISHED_FILE_ROLLBACK_TOKEN,
             expected=expected,
+            lock_fd=lock_fd,
             parent_fd=parent_fd,
             published_fd=published_fd,
             name=name,
@@ -340,9 +352,9 @@ class PublishedFileRollback:
         """Remove the publication only if it still has the retained identity."""
         if self._discarded:
             return True
-        if self._closed:
+        if not self.can_discard:
             return False
-        with lock_module._exclusive_destination_lock(self.parent_fd):
+        with lock_module._exclusive_open_lock(self.lock_fd):
             removed = _remove_matching_destination(
                 parent_fd=self.parent_fd,
                 name=self.name,
@@ -352,12 +364,24 @@ class PublishedFileRollback:
             object.__setattr__(self, "_discarded", True)
         return removed
 
+    @property
+    def can_discard(self) -> bool:
+        """Return whether the retained descriptor still pins the publication."""
+        if self._closed:
+            return False
+        try:
+            retained = os.fstat(self.published_fd)
+        except OSError:
+            return False
+        return _same_identity(retained, self.expected)
+
     def close(self) -> None:
         """Release the retained file and directory descriptors."""
         if self._closed:
             return
         self._close_owned_descriptor("published_fd")
         self._close_owned_descriptor("parent_fd")
+        self._close_owned_descriptor("lock_fd")
         object.__setattr__(self, "_closed", True)
 
     @property

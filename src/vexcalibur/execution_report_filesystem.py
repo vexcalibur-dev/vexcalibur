@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from contextlib import suppress
@@ -99,11 +100,23 @@ def _close_descriptor_retryable(descriptor: int) -> _DescriptorCloseOutcome:
     """
     try:
         os.fstat(descriptor)
-    except OSError:
+    except OSError as exc:
+        if exc.errno != errno.EBADF:
+            return _DescriptorCloseOutcome(
+                released=False,
+                unchanged=True,
+                failure=exc,
+            )
         return _DescriptorCloseOutcome(
             released=True,
             unchanged=False,
             failure=None,
+        )
+    except BaseException as exc:
+        return _DescriptorCloseOutcome(
+            released=False,
+            unchanged=True,
+            failure=exc,
         )
 
     pipe_reader = -1
@@ -126,8 +139,11 @@ def _close_descriptor_retryable(descriptor: int) -> _DescriptorCloseOutcome:
         try:
             descriptor_stat = os.fstat(descriptor)
             pipe_stat = os.fstat(pipe_reader)
-        except OSError:
-            pass
+        except OSError as probe_error:
+            if probe_error.errno != errno.EBADF:
+                failure = probe_error
+        except BaseException as probe_error:
+            failure = probe_error
         else:
             released = _same_identity(descriptor_stat, pipe_stat)
     finally:

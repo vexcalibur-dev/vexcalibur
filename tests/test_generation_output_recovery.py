@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -109,6 +110,39 @@ def test_cleanup_cancellation_removes_the_published_success_report(
     assert interrupted
     assert output_path.exists()
     assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_descriptor_exhaustion_after_publication_uses_retained_rollback_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    real_pipe = filesystem_module.os.pipe
+
+    def exhaust_after_publication() -> tuple[int, int]:
+        if report_path.exists():
+            raise OSError(errno.EMFILE, "synthetic descriptor exhaustion")
+        return real_pipe()
+
+    monkeypatch.setattr(filesystem_module.os, "pipe", exhaust_after_publication)
+    with pytest.raises(OSError, match="descriptor exhaustion"):
+        transaction.commit(
+            _generation_result(monkeypatch),
+            binary_stdout=None,
+        )
+
+    assert output_path.exists()
+    assert not report_path.exists()
+
+    monkeypatch.setattr(filesystem_module.os, "pipe", real_pipe)
+    transaction.abort()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
@@ -234,7 +268,7 @@ def test_rollback_release_cancellation_removes_the_published_success_report(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
 @pytest.mark.parametrize("descriptor_role", ("published_fd", "parent_fd"))
-def test_interrupted_rollback_descriptor_release_removes_success_report(
+def test_interrupted_rollback_descriptor_release_preserves_success_report(
     descriptor_role: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -282,7 +316,7 @@ def test_interrupted_rollback_descriptor_release_removes_success_report(
 
     assert interrupted
     assert output_path.exists()
-    assert not report_path.exists()
+    assert report_path.exists()
     assert transaction._report_rollback is None
     os.fstat(interrupted_descriptor)
     transaction.close()

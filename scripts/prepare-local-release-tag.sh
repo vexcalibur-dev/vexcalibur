@@ -51,15 +51,27 @@ if [[ "${#competing_tags[@]}" -ne 0 ]]; then
 fi
 
 created_tag=false
-if git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null; then
-  tag_sha="$(git rev-parse --verify "refs/tags/${release_tag}^{commit}")"
+set +e
+existing_tag_ref="$(
+  git rev-parse -q --verify "refs/tags/${release_tag}" 2>/dev/null
+)"
+existing_tag_status="$?"
+set -e
+if [[ "${existing_tag_status}" -eq 0 ]]; then
+  if ! tag_sha="$(git rev-parse --verify "refs/tags/${release_tag}^{commit}")"; then
+    echo "could not resolve existing release tag ${release_tag}" >&2
+    exit 1
+  fi
   if [[ "${tag_sha}" != "${release_sha}" ]]; then
     echo "release tag ${release_tag} already exists on ${tag_sha}, not ${release_sha}" >&2
     exit 1
   fi
-else
+elif [[ "${existing_tag_status}" -eq 1 ]] && [[ -z "${existing_tag_ref}" ]]; then
   git tag "${release_tag}" "${release_sha}"
   created_tag=true
+else
+  echo "could not inspect existing release tag ${release_tag}" >&2
+  exit 1
 fi
 
 set +e

@@ -121,8 +121,6 @@ def _exclusive_named_destination_lock(
     parent_descriptor: int,
     lock_file_name: str,
 ) -> Iterator[int]:
-    import fcntl
-
     lock_descriptor = -1
     try:
         try:
@@ -144,30 +142,50 @@ def _exclusive_named_destination_lock(
             ValueError,
         ) as exc:
             raise BoundFileDestinationError("could not open the destination lock") from exc
-        deadline = time.monotonic() + DESTINATION_LOCK_TIMEOUT_SECONDS
-        while True:
-            try:
-                fcntl.flock(lock_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if not isinstance(exc, BlockingIOError) and exc.errno not in {
-                    errno.EACCES,
-                    errno.EAGAIN,
-                }:
-                    raise BoundFileDestinationError("could not lock the destination") from exc
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise BoundFileDestinationError(
-                        "timed out waiting for the destination lock"
-                    ) from exc
-                time.sleep(min(DESTINATION_LOCK_RETRY_SECONDS, remaining))
-        try:
+        with _exclusive_open_lock(lock_descriptor):
             yield lock_descriptor
-        finally:
-            with suppress(OSError):
-                fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
     finally:
         _close_descriptor(lock_descriptor)
+
+
+@contextmanager
+def _exclusive_open_lock(lock_descriptor: int) -> Iterator[None]:
+    """Exclusively lock one already-open private coordination file."""
+    import fcntl
+
+    try:
+        metadata = os.fstat(lock_descriptor)
+    except OSError as exc:
+        raise BoundFileDestinationError("could not inspect the destination lock") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_nlink != 1
+    ):
+        raise BoundFileDestinationError("destination lock must be a private regular file")
+
+    deadline = time.monotonic() + DESTINATION_LOCK_TIMEOUT_SECONDS
+    while True:
+        try:
+            fcntl.flock(lock_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except OSError as exc:
+            if not isinstance(exc, BlockingIOError) and exc.errno not in {
+                errno.EACCES,
+                errno.EAGAIN,
+            }:
+                raise BoundFileDestinationError("could not lock the destination") from exc
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundFileDestinationError(
+                    "timed out waiting for the destination lock"
+                ) from exc
+            time.sleep(min(DESTINATION_LOCK_RETRY_SECONDS, remaining))
+    try:
+        yield
+    finally:
+        with suppress(OSError):
+            fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
 
 
 def _open_private_destination_lock(

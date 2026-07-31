@@ -429,6 +429,11 @@ class GenerationOutputTransaction:
         if rollback is None:
             object.__setattr__(self, "_discard_report_on_close", False)
             return
+        if not rollback.can_discard:
+            rollback.close()
+            object.__setattr__(self, "_report_rollback", None)
+            object.__setattr__(self, "_discard_report_on_close", False)
+            return
         failure: BaseException | None = None
         for _ in range(2):
             try:

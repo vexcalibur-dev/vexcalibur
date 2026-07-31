@@ -251,6 +251,91 @@ def test_concurrent_stdout_transactions_bind_the_final_report(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+@pytest.mark.parametrize(
+    ("first_name", "second_name"),
+    (
+        ("Report.json", "report.json"),
+        ("caf\u00e9.json", "cafe\u0301.json"),
+    ),
+)
+def test_alias_equivalent_stdout_reports_share_one_sequence_lock(
+    first_name: str,
+    second_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    first = GenerationOutputTransaction.prepare(
+        output_path=None,
+        report_path=tmp_path / first_name,
+        protected_paths=(),
+    )
+    second = GenerationOutputTransaction.prepare(
+        output_path=None,
+        report_path=tmp_path / second_name,
+        protected_paths=(),
+    )
+    first_written = threading.Event()
+    release_first = threading.Event()
+    second_written = threading.Event()
+    errors: list[BaseException] = []
+
+    class BlockingStdout:
+        def write(self, value: bytes) -> int:
+            if threading.current_thread().name == "alias-first":
+                first_written.set()
+            else:
+                second_written.set()
+            return len(value)
+
+        def flush(self) -> None:
+            if threading.current_thread().name == "alias-first" and not release_first.wait(
+                timeout=5
+            ):
+                raise AssertionError("test did not release the first alias writer")
+
+    stdout = BlockingStdout()
+
+    def publish(
+        transaction: GenerationOutputTransaction,
+        result: GenerationResult,
+    ) -> None:
+        try:
+            transaction.commit(
+                result,
+                binary_stdout=stdout,  # type: ignore[arg-type]
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = (
+        threading.Thread(
+            target=publish,
+            args=(first, _distinct_generation_result(monkeypatch, "first")),
+            name="alias-first",
+        ),
+        threading.Thread(
+            target=publish,
+            args=(second, _distinct_generation_result(monkeypatch, "second")),
+            name="alias-second",
+        ),
+    )
+    threads[0].start()
+    assert first_written.wait(timeout=5)
+    threads[1].start()
+    assert not second_written.wait(timeout=0.1)
+    release_first.set()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    sequence_locks = tuple((tmp_path / lock_module.LOCK_DIRECTORY_NAME).glob("stdout-*.lock"))
+    assert len(sequence_locks) == 1
+    first.close()
+    second.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
 def test_opposite_role_directories_are_locked_without_deadlock(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

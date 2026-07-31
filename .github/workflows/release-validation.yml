@@ -1217,49 +1217,6 @@ jobs:
             --execution-report
             ${{ runner.temp }}/action-matrix-execution.json
 
-      - name: Record and verify the exact Action Python runtime
-        env:
-          EXPECTED_PYTHON: ${{ matrix.python-version }}
-        run: |
-          set -euo pipefail
-
-          shopt -s nullglob
-          runtimes=("${RUNNER_TEMP}"/vexcalibur-action.*/venv/bin/python)
-          shopt -u nullglob
-          if (( ${#runtimes[@]} != 1 )) || [[ ! -x "${runtimes[0]:-}" ]]; then
-            echo "expected exactly one executable Vexcalibur Action runtime" >&2
-            exit 1
-          fi
-          actual="$("${runtimes[0]}" -I -c \
-            'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-          if [[ "${actual}" != "${EXPECTED_PYTHON}" ]]; then
-            printf 'Vexcalibur Action used Python %s, expected %s\n' \
-              "${actual}" "${EXPECTED_PYTHON}" >&2
-            exit 1
-          fi
-          runtime_file="${RUNNER_TEMP}/action-matrix-runtime.json"
-          umask 077
-          "${runtimes[0]}" -I - "${runtime_file}" <<'PY'
-          import json
-          import os
-          import sys
-          from pathlib import Path
-
-          runtime = f"{sys.version_info.major}.{sys.version_info.minor}"
-          payload = (
-              json.dumps({"python": runtime}, separators=(",", ":"), sort_keys=True) + "\n"
-          ).encode("utf-8")
-          flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-          flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-          descriptor = os.open(Path(sys.argv[1]), flags, 0o600)
-          with os.fdopen(descriptor, "wb") as stream:
-              if stream.write(payload) != len(payload):
-                  raise SystemExit("could not write the complete Action runtime diagnostic")
-              stream.flush()
-              os.fsync(stream.fileno())
-          PY
-          test "$(stat --format=%a -- "${runtime_file}")" = 600
-
       - name: Upload untrusted candidate Action outputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1267,7 +1224,6 @@ jobs:
           path: |
             ${{ runner.temp }}/action-matrix-vex.json
             ${{ runner.temp }}/action-matrix-execution.json
-            ${{ runner.temp }}/action-matrix-runtime.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -1331,44 +1287,6 @@ jobs:
             cd "${RUNNER_TEMP}/action-matrix-verification-inventory"
             sha256sum --check --strict SHA256SUMS
           )
-
-      - name: Independently verify the Action Python runtime
-        env:
-          EXPECTED_PYTHON: ${{ matrix.python-version }}
-        run: |
-          python3 -I - \
-            "${RUNNER_TEMP}/action-matrix-verification-output/action-matrix-runtime.json" \
-            "${EXPECTED_PYTHON}" <<'PY'
-          import json
-          import os
-          import stat
-          import sys
-          from pathlib import Path
-
-          runtime_path = Path(sys.argv[1])
-          flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-          flags |= getattr(os, "O_NOFOLLOW", 0)
-          descriptor = os.open(runtime_path, flags)
-          with os.fdopen(descriptor, "rb") as stream:
-              metadata = os.fstat(stream.fileno())
-              if (
-                  not stat.S_ISREG(metadata.st_mode)
-                  or metadata.st_nlink != 1
-                  or metadata.st_size > 128
-              ):
-                  raise SystemExit("Action runtime diagnostic is not a bounded regular file")
-              raw = stream.read(129)
-          if not raw.endswith(b"\n"):
-              raise SystemExit("Action runtime diagnostic is malformed")
-          value = json.loads(raw)
-          if type(value) is not dict or set(value) != {"python"}:
-              raise SystemExit("Action runtime diagnostic has unexpected fields")
-          actual = value["python"]
-          if type(actual) is not str or actual != sys.argv[2]:
-              raise SystemExit(
-                  f"Action runtime used Python {actual!r}, expected {sys.argv[2]!r}"
-              )
-          PY
 
       - name: Independently verify the generated report
         run: |

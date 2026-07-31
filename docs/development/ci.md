@@ -145,11 +145,20 @@ and generated evidence.
 
 The release and recovery workflows also require the release-platform
 contracts. They rerun the exact commit on Windows and macOS with Python 3.10
-and 3.14, then install the exact wheel through the pinned companion Action on
-every supported Python version. Publication assets are not finalized until
-those jobs pass. Pull-request CI does not repeat that matrix inside its
-unprivileged publication rehearsal because the parent CI workflow already
-requires the same native checks.
+and 3.14. The installed CLI matrix runs the exact wheel on every supported
+Python version. A separate companion matrix passes each version to the pinned
+Action and independently verifies the generated VEX and execution report.
+Publication assets are not finalized until those jobs pass. Pull-request CI
+does not repeat that matrix inside its unprivileged publication rehearsal
+because the parent CI workflow already requires the same native checks.
+
+The Action commit and `actions/setup-python` are the trust basis for interpreter
+selection in the companion matrix. Candidate code runs with the job's user
+permissions, so a runtime file produced after that code exits would only be a
+self-attestation. The release gate does not create or consume one. Instead, the
+installed CLI matrix supplies independent interpreter coverage, while the
+companion matrix checks the Action integration and verifies candidate output in
+a fresh job.
 
 The publication graph has five independent roles:
 

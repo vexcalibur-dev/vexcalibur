@@ -38,9 +38,9 @@ def test_retained_rollback_holds_inode_and_locks_identity_checked_removal(
     real_remove = staging_module._remove_matching_destination
 
     @contextmanager
-    def observe_lock(parent_fd: int) -> Iterator[None]:
+    def observe_lock(lock_fd: int) -> Iterator[None]:
         nonlocal lock_held
-        assert parent_fd == rollback.parent_fd
+        assert lock_fd == rollback.lock_fd
         lock_held = True
         try:
             yield
@@ -58,7 +58,7 @@ def test_retained_rollback_holds_inode_and_locks_identity_checked_removal(
 
     monkeypatch.setattr(
         staging_module.lock_module,
-        "_exclusive_destination_lock",
+        "_exclusive_open_lock",
         observe_lock,
     )
     monkeypatch.setattr(
@@ -128,6 +128,61 @@ def test_discarded_rollback_remains_idempotent_after_partial_close(
     with pytest.raises(OSError):
         os.fstat(retained_parent_descriptor)
     os.close(parent_descriptor)
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_rollback_refuses_identity_only_removal_after_inode_pin_is_lost(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+
+    with destination.stage_bytes(b"private report") as staged:
+        rollback = staged._prepare_rollback()
+        staged.commit()
+
+    original_published = rollback.published_fd
+    original_parent = rollback.parent_fd
+    real_release = staging_module._close_descriptor_retryable
+    close_calls = 0
+
+    def fail_parent_release(descriptor: int) -> object:
+        nonlocal close_calls
+        close_calls += 1
+        if close_calls == 2:
+            return filesystem_module._DescriptorCloseOutcome(
+                released=False,
+                unchanged=True,
+                failure=OSError("synthetic parent close failure"),
+            )
+        return real_release(descriptor)
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        fail_parent_release,
+    )
+    with pytest.raises(OSError, match="parent close failure"):
+        rollback.close()
+
+    assert rollback.published_fd == -1
+    assert rollback.parent_fd == original_parent
+    with pytest.raises(OSError):
+        os.fstat(original_published)
+    path.unlink()
+    path.write_bytes(b"replacement")
+
+    assert rollback.discard() is False
+    assert path.read_bytes() == b"replacement"
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        real_release,
+    )
+    rollback.close()
     destination.close()
 
 
