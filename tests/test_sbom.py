@@ -905,10 +905,14 @@ def test_load_cyclonedx_json_rejects_wrong_bom_format(tmp_path: Path) -> None:
         load_cyclonedx_json(sbom_path)
 
 
-def test_load_cyclonedx_json_rejects_unsupported_spec_version(tmp_path: Path) -> None:
+@pytest.mark.parametrize("spec_version", ('"9.9"', "[]", "{}"))
+def test_load_cyclonedx_json_rejects_unsupported_spec_version(
+    spec_version: str,
+    tmp_path: Path,
+) -> None:
     sbom_path = tmp_path / "unsupported-version.json"
     sbom_path.write_text(
-        '{"bomFormat": "CycloneDX", "specVersion": "9.9", "version": 1}',
+        f'{{"bomFormat": "CycloneDX", "specVersion": {spec_version}, "version": 1}}',
         encoding="utf-8",
     )
 

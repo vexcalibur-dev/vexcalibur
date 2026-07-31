@@ -35,6 +35,7 @@ CORPUS_EXPECTATIONS: dict[str, tuple[str, str | None]] = {
     "report/malformed-utf8.hex": ("rejected", "VexRenderError"),
     "report/valid-multibyte.txt": ("accepted", None),
     "sbom/forbidden-entity.xml": ("rejected", "SbomError"),
+    "sbom/invalid-spec-version.json": ("rejected", "SbomError"),
     "sbom/valid-json.json": ("accepted", None),
     "sbom/valid-xml.xml": ("accepted", None),
 }
