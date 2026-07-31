@@ -42,6 +42,7 @@ from vexcalibur.execution_report_staging import StagedFileWrite as StagedFileWri
 
 _exclusive_destination_lock = lock_module._exclusive_destination_lock
 _open_private_destination_lock = lock_module._open_private_destination_lock
+_FINALIZER_CLOSE_DESCRIPTOR = os.close
 _BOUND_DESTINATION_TOKEN = object()
 
 
@@ -436,8 +437,13 @@ class BoundFileDestination:
         self.close()
 
     def __del__(self) -> None:
+        descriptor = getattr(self, "_parent_descriptor", -1)
+        object.__setattr__(self, "_parent_descriptor", -1)
+        object.__setattr__(self, "_closed", True)
+        if descriptor < 0:
+            return
         with suppress(Exception):
-            self.close()
+            _FINALIZER_CLOSE_DESCRIPTOR(descriptor)
 
 
 def _parent_preparation_error(*, path: Path, error: OSError | RuntimeError) -> str:

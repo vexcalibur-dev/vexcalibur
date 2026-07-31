@@ -80,6 +80,38 @@ def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
     assert result.stdout == "execution report verified\n"
 
 
+def test_consumer_example_opens_inputs_in_binary_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "binary-input.json"
+    payload = b"before\r\nafter\x1aend"
+    path.write_bytes(payload)
+    real_open = consumer.os.open
+    native_binary_flag = hasattr(consumer.os, "O_BINARY")
+    binary_flag = getattr(consumer.os, "O_BINARY", 1 << 29)
+    observed_flags = 0
+
+    def track_binary_flag(selected_path: Path, flags: int) -> int:
+        nonlocal observed_flags
+        observed_flags = flags
+        native_flags = flags if native_binary_flag else flags & ~binary_flag
+        return real_open(selected_path, native_flags)
+
+    monkeypatch.setattr(consumer.os, "O_BINARY", binary_flag, raising=False)
+    monkeypatch.setattr(consumer.os, "open", track_binary_flag)
+
+    result = consumer._read_bounded_file(
+        path,
+        role="test input",
+        maximum=len(payload),
+        too_large="test input is too large",
+    )
+
+    assert observed_flags & binary_flag
+    assert result == payload
+
+
 @pytest.mark.parametrize(
     "path",
     [

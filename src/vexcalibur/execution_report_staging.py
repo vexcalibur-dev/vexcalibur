@@ -462,15 +462,27 @@ def stage_destination_bytes(
             temporary_stat=temporary_stat,
         )
     except BaseException as exc:
+        cleanup_failures: list[BaseException] = []
         try:
             _cleanup_staged_file(parent_fd, temporary_name, file_descriptor)
-        finally:
+        except BaseException as cleanup_failure:
+            cleanup_failures.append(cleanup_failure)
+        try:
             _close_descriptor(file_descriptor)
+        except BaseException as cleanup_failure:
+            if all(cleanup_failure is not failure for failure in cleanup_failures):
+                cleanup_failures.append(cleanup_failure)
         if isinstance(exc, BoundFileDestinationError):
+            primary_failure: BaseException = exc
+        elif isinstance(exc, OSError):
+            primary_failure = BoundFileDestinationError(str(exc))
+        else:
+            primary_failure = exc
+        if cleanup_failures:
+            primary_failure.__dict__["vexcalibur_cleanup_failures"] = tuple(cleanup_failures)
+        if primary_failure is exc:
             raise
-        if isinstance(exc, OSError):
-            raise BoundFileDestinationError(str(exc)) from exc
-        raise
+        raise primary_failure from exc
     try:
         yield staged
     finally:

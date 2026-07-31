@@ -51,6 +51,7 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
     if not stat.S_ISREG(before_open.st_mode):
         raise ValueError(f"{role} must be a regular file")
     flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)

@@ -177,8 +177,10 @@ def test_cancellation_during_staging_cleanup_closes_all_descriptors(
     def fail_fsync(descriptor: int) -> None:
         raise OSError("staging fsync failed")
 
+    cleanup_failure = KeyboardInterrupt("synthetic cleanup cancellation")
+
     def cancel_cleanup(*args: object, **kwargs: object) -> None:
-        raise KeyboardInterrupt
+        raise cleanup_failure
 
     monkeypatch.setattr(
         BoundFileDestination,
@@ -192,13 +194,37 @@ def test_cancellation_during_staging_cleanup_closes_all_descriptors(
         cancel_cleanup,
     )
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(BoundFileDestinationError, match="staging fsync failed") as captured:
         destination.write_bytes(b"private report")
 
+    assert captured.value.__cause__ is not None
+    assert str(captured.value.__cause__) == "staging fsync failed"
+    assert captured.value.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
     for descriptor in (*staging_descriptors, bound_parent_descriptor):
         with pytest.raises(OSError):
             os.fstat(descriptor)
     assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_destination_finalizer_bypasses_stateful_close_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "execution-report.json")
+    descriptor = destination._parent_descriptor
+
+    def unexpected_close(_destination: BoundFileDestination) -> None:
+        raise AssertionError("finalizer dispatched through close")
+
+    monkeypatch.setattr(BoundFileDestination, "close", unexpected_close)
+
+    destination.__del__()
+
+    assert destination.closed
+    assert destination._parent_descriptor == -1
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
