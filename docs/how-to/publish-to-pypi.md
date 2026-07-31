@@ -185,13 +185,21 @@ fi
 
 gh auth status --active --hostname github.com
 
-if [[ -n "$(git status --porcelain)" ]]; then
+if ! WORKTREE_STATUS="$(git status --porcelain)"; then
+  printf 'Could not inspect the worktree before recovery.\n' >&2
+  exit 1
+fi
+if [[ -n "$WORKTREE_STATUS" ]]; then
   printf 'Recovery requires a clean worktree.\n' >&2
   exit 1
 fi
 git switch main
 git pull --ff-only origin main
-if [[ -n "$(git status --porcelain)" ]]; then
+if ! WORKTREE_STATUS="$(git status --porcelain)"; then
+  printf 'Could not inspect the worktree after updating main.\n' >&2
+  exit 1
+fi
+if [[ -n "$WORKTREE_STATUS" ]]; then
   printf 'Recovery requires a clean worktree after updating main.\n' >&2
   exit 1
 fi

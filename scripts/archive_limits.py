@@ -29,6 +29,22 @@ class ArchivePreflightError(ValueError):
     """Raised when an archive exceeds a pre-materialization boundary."""
 
 
+class ArchiveSnapshot:
+    """An unchanged, bounded archive image captured by one file descriptor."""
+
+    __slots__ = ("_contents",)
+
+    def __init__(self, contents: bytearray) -> None:
+        self._contents = contents
+
+    def __len__(self) -> int:
+        return len(self._contents)
+
+    def open(self) -> BytesIO:
+        """Return an independent binary stream over the captured contents."""
+        return BytesIO(self._contents)
+
+
 def preflight_zip_member_count(
     path: Path,
     *,
@@ -36,7 +52,7 @@ def preflight_zip_member_count(
     maximum_members: int,
     maximum_directory_bytes: int,
     maximum_archive_bytes: int = _DEFAULT_MAX_ARCHIVE_BYTES,
-) -> bytes:
+) -> ArchiveSnapshot:
     """Return a preflighted snapshot before ``zipfile`` constructs members."""
     snapshot = _read_archive_snapshot(
         path,
@@ -45,50 +61,54 @@ def preflight_zip_member_count(
     )
     size = len(snapshot)
     tail_size = min(size, _ZIP_EOCD_SIZE + _ZIP_MAX_COMMENT_BYTES)
-    stream = BytesIO(snapshot)
-    stream.seek(size - tail_size)
-    tail = stream.read(tail_size)
+    with snapshot.open() as stream:
+        stream.seek(size - tail_size)
+        tail = stream.read(tail_size)
 
-    search_end = len(tail)
-    while True:
-        offset = tail.rfind(_ZIP_EOCD_SIGNATURE, 0, search_end)
-        if offset < 0:
-            raise ArchivePreflightError(f"{artifact} has no bounded ZIP directory record")
-        if offset + _ZIP_EOCD_SIZE <= len(tail):
-            (
-                _signature,
-                disk_number,
-                directory_disk,
-                disk_members,
-                total_members,
-                directory_size,
-                directory_offset,
-                comment_size,
-            ) = struct.unpack_from("<4s4H2LH", tail, offset)
-            if offset + _ZIP_EOCD_SIZE + comment_size == len(tail):
-                break
-        search_end = offset
+        search_end = len(tail)
+        while True:
+            offset = tail.rfind(_ZIP_EOCD_SIGNATURE, 0, search_end)
+            if offset < 0:
+                raise ArchivePreflightError(f"{artifact} has no bounded ZIP directory record")
+            if offset + _ZIP_EOCD_SIZE <= len(tail):
+                (
+                    _signature,
+                    disk_number,
+                    directory_disk,
+                    disk_members,
+                    total_members,
+                    directory_size,
+                    directory_offset,
+                    comment_size,
+                ) = struct.unpack_from("<4s4H2LH", tail, offset)
+                if offset + _ZIP_EOCD_SIZE + comment_size == len(tail):
+                    break
+            search_end = offset
 
-    if disk_number != 0 or directory_disk != 0 or disk_members != total_members:
-        raise ArchivePreflightError(f"{artifact} uses an unsupported multidisk ZIP")
-    if total_members == 0xFFFF or directory_size == 0xFFFFFFFF or directory_offset == 0xFFFFFFFF:
-        raise ArchivePreflightError(f"{artifact} uses unsupported ZIP64 metadata")
-    if total_members > maximum_members:
-        raise ArchivePreflightError(f"{artifact} contains too many archive members")
-    if directory_size > maximum_directory_bytes:
-        raise ArchivePreflightError(f"{artifact} ZIP central directory exceeds the byte limit")
-    directory_end = directory_offset + directory_size
-    eocd_offset = size - tail_size + offset
-    if directory_end != eocd_offset:
-        raise ArchivePreflightError(f"{artifact} has an invalid ZIP directory boundary")
-    _preflight_zip_central_directory(
-        stream,
-        artifact=artifact,
-        directory_offset=directory_offset,
-        directory_size=directory_size,
-        expected_members=total_members,
-        maximum_members=maximum_members,
-    )
+        if disk_number != 0 or directory_disk != 0 or disk_members != total_members:
+            raise ArchivePreflightError(f"{artifact} uses an unsupported multidisk ZIP")
+        if (
+            total_members == 0xFFFF
+            or directory_size == 0xFFFFFFFF
+            or directory_offset == 0xFFFFFFFF
+        ):
+            raise ArchivePreflightError(f"{artifact} uses unsupported ZIP64 metadata")
+        if total_members > maximum_members:
+            raise ArchivePreflightError(f"{artifact} contains too many archive members")
+        if directory_size > maximum_directory_bytes:
+            raise ArchivePreflightError(f"{artifact} ZIP central directory exceeds the byte limit")
+        directory_end = directory_offset + directory_size
+        eocd_offset = size - tail_size + offset
+        if directory_end != eocd_offset:
+            raise ArchivePreflightError(f"{artifact} has an invalid ZIP directory boundary")
+        _preflight_zip_central_directory(
+            stream,
+            artifact=artifact,
+            directory_offset=directory_offset,
+            directory_size=directory_size,
+            expected_members=total_members,
+            maximum_members=maximum_members,
+        )
     return snapshot
 
 
@@ -134,7 +154,7 @@ def preflight_tar_gzip_stream(
     maximum_members: int,
     maximum_file_bytes: int,
     maximum_archive_bytes: int = _DEFAULT_MAX_ARCHIVE_BYTES,
-) -> bytes:
+) -> ArchiveSnapshot:
     """Return a bounded gzip-compressed tar snapshot for ``tarfile``.
 
     Setuptools emits one PAX ``mtime`` record for each sdist member. This
@@ -160,7 +180,7 @@ def preflight_tar_gzip_stream(
     pax_bytes = 0
     pax_headers = 0
     try:
-        with BytesIO(snapshot) as raw, gzip.GzipFile(fileobj=raw, mode="rb") as stream:
+        with snapshot.open() as raw, gzip.GzipFile(fileobj=raw, mode="rb") as stream:
             while True:
                 header, consumed = _read_bounded(
                     stream,
@@ -238,14 +258,15 @@ def _read_archive_snapshot(
     *,
     artifact: str,
     maximum_bytes: int,
-) -> bytes:
-    """Return bounded bytes from one unchanged regular-file identity."""
+) -> ArchiveSnapshot:
+    """Return a bounded image of one unchanged regular-file identity."""
     descriptor = -1
     try:
         before_open = path.lstat()
         if not stat.S_ISREG(before_open.st_mode):
             raise ArchivePreflightError(f"{artifact} must be a regular, non-symlink file")
         flags = os.O_RDONLY
+        flags |= getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         flags |= getattr(os, "O_NONBLOCK", 0)
@@ -256,15 +277,19 @@ def _read_archive_snapshot(
         if opened.st_size > maximum_bytes:
             raise ArchivePreflightError(f"{artifact} exceeds the compressed byte limit")
 
-        content = bytearray()
-        while len(content) <= maximum_bytes:
+        content = bytearray(min(maximum_bytes + 1, opened.st_size + 1))
+        content_size = 0
+        while content_size < len(content):
             chunk = os.read(
                 descriptor,
-                min(1024 * 1024, maximum_bytes + 1 - len(content)),
+                min(1024 * 1024, len(content) - content_size),
             )
             if not chunk:
                 break
-            content.extend(chunk)
+            chunk_end = content_size + len(chunk)
+            content[content_size:chunk_end] = chunk
+            content_size = chunk_end
+        del content[content_size:]
         after_read = os.fstat(descriptor)
         current_path = path.lstat()
     except ArchivePreflightError:
@@ -300,7 +325,7 @@ def _read_archive_snapshot(
         or len(content) != opened.st_size
     ):
         raise ArchivePreflightError(f"{artifact} changed while it was read")
-    return bytes(content)
+    return ArchiveSnapshot(content)
 
 
 def _padded_tar_size(size: int) -> int:

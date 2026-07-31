@@ -134,11 +134,17 @@ if ((${#release_tags[@]} > 1)); then
   previous_tag="${release_tags[$((${#release_tags[@]} - 2))]}"
 fi
 
-if [[ -z "${manual_version}" ]] && [[ -n "${latest_tag}" ]] && [[ "$(tag_commit "${latest_tag}")" == "${head_sha}" ]]; then
-  existing_version="$(normalize_version "${latest_tag}")"
+if [[ -z "${manual_version}" ]] && ((${#head_release_tags[@]} == 1)); then
+  existing_tag="${head_release_tags[0]}"
+  if [[ "${existing_tag}" != "${latest_tag}" ]]; then
+    printf 'release SHA already has a non-latest version tag: %s; latest merged tag: %s\n' \
+      "${existing_tag}" "${latest_tag}" >&2
+    exit 1
+  fi
+  existing_version="$(normalize_version "${existing_tag}")"
   require_version "${existing_version}"
   emit skip false
-  emit tag "${latest_tag}"
+  emit tag "${existing_tag}"
   emit version "${existing_version}"
   emit previous_tag "${previous_tag}"
   emit bump existing

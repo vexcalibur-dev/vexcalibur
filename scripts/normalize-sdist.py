@@ -80,7 +80,7 @@ def _read_members(path: Path) -> list[Member]:
     names: set[str] = set()
     uncompressed_bytes = 0
     try:
-        with tarfile.open(fileobj=BytesIO(snapshot), mode="r:gz") as archive:
+        with snapshot.open() as stream, tarfile.open(fileobj=stream, mode="r:gz") as archive:
             for index, member in enumerate(archive):
                 if index >= MAX_MEMBERS:
                     raise NormalizationError("sdist contains too many members")

@@ -230,6 +230,9 @@ class GenerationOutputTransaction:
 
         staged_report: StagedFileWrite | None = None
         report_rollback: PublishedFileRollback | None = None
+        pending_failure: BaseException | None = None
+        pending_traceback: TracebackType | None = None
+        pending_cause: BaseException | None = None
         try:
             with ExitStack() as stack:
                 try:
@@ -331,23 +334,22 @@ class GenerationOutputTransaction:
                 except BaseException as exc:
                     cleanup_failure = exc
 
-            typed_failure = (
-                _generation_output_failure(failure) if isinstance(failure, Exception) else None
-            )
-            if typed_failure is not None:
-                if typed_failure is failure and cleanup_failure is None:
-                    raise
-                cause = cleanup_failure if cleanup_failure is not None else failure
-                _detach_context_reference(cause, typed_failure)
-                raise typed_failure.with_traceback(typed_failure.__traceback__) from cause
-            if not isinstance(failure, Exception):
-                if cleanup_failure is not None:
-                    raise failure.with_traceback(failure.__traceback__) from cleanup_failure
-                raise
-            error = GenerationOutputCleanupError(str(failure))
-            if cleanup_failure is not None:
-                raise error from cleanup_failure
-            raise error from failure
+            primary_failure = _generation_primary_failure(failure)
+            if primary_failure is not None:
+                pending_failure = primary_failure
+                pending_traceback = primary_failure.__traceback__
+            elif isinstance(failure, Exception):
+                pending_failure = GenerationOutputCleanupError(str(failure))
+                pending_cause = cleanup_failure if cleanup_failure is not None else failure
+            else:  # pragma: no cover - every non-Exception is a primary failure
+                pending_failure = failure
+                pending_traceback = failure.__traceback__
+
+        if pending_failure is None:
+            return
+        if pending_cause is not None:
+            raise pending_failure.with_traceback(pending_traceback) from pending_cause
+        raise pending_failure.with_traceback(pending_traceback)
 
     def _remove_existing_report(self) -> None:
         try:
@@ -505,28 +507,16 @@ def _label_destination_error(
     return message
 
 
-def _generation_output_failure(error: Exception) -> GenerationOutputError | None:
-    """Return the typed primary failure hidden by context-manager cleanup."""
+def _generation_primary_failure(error: BaseException) -> BaseException | None:
+    """Return a typed or interrupting primary hidden by cleanup."""
     current: BaseException | None = error
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, GenerationOutputError):
+        if isinstance(current, GenerationOutputError) or not isinstance(current, Exception):
             return current
         current = current.__context__
     return None
-
-
-def _detach_context_reference(error: BaseException, target: BaseException) -> None:
-    """Remove a back-reference before chaining the primary error to cleanup."""
-    current: BaseException | None = error
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if current.__context__ is target:
-            current.__context__ = target.__context__
-            return
-        current = current.__context__
 
 
 def _register_destination_close(

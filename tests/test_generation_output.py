@@ -690,16 +690,18 @@ def test_staging_cleanup_preserves_a_typed_primary_failure(
     )
     real_close = destination_module.StagedFileWrite.close
     close_failed = False
+    primary_cause = BoundFileDestinationError("synthetic distinctness failure")
+    cleanup_failure = BoundFileDestinationError("synthetic cleanup failure")
 
     def fail_distinctness(_transaction: GenerationOutputTransaction) -> None:
-        raise BoundFileDestinationError("synthetic distinctness failure")
+        raise primary_cause
 
     def fail_first_output_cleanup(staged: destination_module.StagedFileWrite) -> None:
         nonlocal close_failed
         real_close(staged)
         if staged.destination.requested_path == output_path and not close_failed:
             close_failed = True
-            raise BoundFileDestinationError("synthetic cleanup failure")
+            raise cleanup_failure
 
     monkeypatch.setattr(
         GenerationOutputTransaction,
@@ -712,13 +714,72 @@ def test_staging_cleanup_preserves_a_typed_primary_failure(
         fail_first_output_cleanup,
     )
 
-    with pytest.raises(GenerationReportWriteError, match="synthetic distinctness failure"):
+    with pytest.raises(
+        GenerationReportWriteError,
+        match="synthetic distinctness failure",
+    ) as captured:
         transaction.commit(
             _generation_result(monkeypatch),
             binary_stdout=None,
         )
 
     assert close_failed
+    assert captured.value.__cause__ is primary_cause
+    assert captured.value.__context__ is primary_cause
+    assert cleanup_failure.__context__ is captured.value
+    assert not report_path.exists()
+    transaction.abort()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_staging_cleanup_preserves_an_interrupting_primary_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    real_close = destination_module.StagedFileWrite.close
+    close_failed = False
+    interruption = KeyboardInterrupt("synthetic generation interruption")
+    cleanup_failure = BoundFileDestinationError("synthetic cleanup failure")
+
+    def interrupt_distinctness(_transaction: GenerationOutputTransaction) -> None:
+        raise interruption
+
+    def fail_first_output_cleanup(staged: destination_module.StagedFileWrite) -> None:
+        nonlocal close_failed
+        real_close(staged)
+        if staged.destination.requested_path == output_path and not close_failed:
+            close_failed = True
+            raise cleanup_failure
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "_verify_report_still_distinct",
+        interrupt_distinctness,
+    )
+    monkeypatch.setattr(
+        destination_module.StagedFileWrite,
+        "close",
+        fail_first_output_cleanup,
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="synthetic generation interruption") as captured:
+        transaction.commit(
+            _generation_result(monkeypatch),
+            binary_stdout=None,
+        )
+
+    assert close_failed
+    assert captured.value is interruption
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert cleanup_failure.__context__ is captured.value
     assert not report_path.exists()
     transaction.abort()
 

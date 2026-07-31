@@ -179,6 +179,62 @@ def test_archive_snapshot_rejects_an_inode_swap_while_reading(
     assert replaced
 
 
+def test_archive_snapshot_opens_the_descriptor_in_binary_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path = tmp_path / "binary.zip"
+    payload = b"before\r\nafter\x1aend"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("payload.bin", payload)
+    real_open = archive_limits.os.open
+    native_binary_flag = hasattr(archive_limits.os, "O_BINARY")
+    binary_flag = getattr(archive_limits.os, "O_BINARY", 1 << 29)
+    observed_flags = 0
+
+    def track_binary_flag(path: Path, flags: int) -> int:
+        nonlocal observed_flags
+        observed_flags = flags
+        native_flags = flags if native_binary_flag else flags & ~binary_flag
+        return real_open(path, native_flags)
+
+    monkeypatch.setattr(archive_limits.os, "O_BINARY", binary_flag, raising=False)
+    monkeypatch.setattr(archive_limits.os, "open", track_binary_flag)
+
+    snapshot = preflight_zip_member_count(
+        archive_path,
+        artifact="test ZIP",
+        maximum_members=10,
+        maximum_directory_bytes=1024,
+    )
+
+    assert observed_flags & binary_flag
+    with snapshot.open() as stream, zipfile.ZipFile(stream) as archive:
+        assert archive.read("payload.bin") == payload
+
+
+def test_archive_consumer_uses_the_preflighted_snapshot_after_path_replacement(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "artifact.zip"
+    replacement = tmp_path / "replacement.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("selected", b"original")
+    with zipfile.ZipFile(replacement, "w") as archive:
+        archive.writestr("selected", b"replacement")
+
+    snapshot = preflight_zip_member_count(
+        archive_path,
+        artifact="test ZIP",
+        maximum_members=10,
+        maximum_directory_bytes=1024,
+    )
+    replacement.replace(archive_path)
+
+    with snapshot.open() as stream, zipfile.ZipFile(stream) as archive:
+        assert archive.read("selected") == b"original"
+
+
 def test_tar_preflight_accepts_bounded_setuptools_pax_mtime(
     tmp_path: Path,
 ) -> None:

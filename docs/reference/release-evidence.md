@@ -318,13 +318,28 @@ uv run --frozen python scripts/release_evidence.py verify-bundle \
 Verify a schema-2 publication bundle against an exact tag and commit:
 
 ```bash
+set -euo pipefail
+
 RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
 if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
   echo "Set RELEASE_TAG to the exact publication bundle tag." >&2
   exit 2
 fi
-git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-RELEASE_SHA="$(git rev-parse --verify "$RELEASE_TAG^{commit}")"
+
+PUBLICATION_REF="refs/vexcalibur-publication/${RELEASE_TAG}-$$"
+cleanup_publication_ref() {
+  git update-ref -d "$PUBLICATION_REF" 2>/dev/null || true
+}
+trap cleanup_publication_ref EXIT
+
+git fetch --force --no-tags origin \
+  "refs/tags/${RELEASE_TAG}:${PUBLICATION_REF}"
+if [[ "$(git cat-file -t "$PUBLICATION_REF")" != "tag" ]] ||
+  [[ "$(git cat-file -p "$PUBLICATION_REF" | sed -n '2s/^type //p')" != "commit" ]]; then
+  printf 'Publication verification requires an annotated tag that directly names a commit.\n' >&2
+  exit 1
+fi
+RELEASE_SHA="$(git rev-parse --verify "${PUBLICATION_REF}^{commit}")"
 
 uv run --frozen python scripts/release_evidence.py verify-publication \
   --bundle-dir build/publication-assets \

@@ -10,7 +10,6 @@ import stat
 import tarfile
 import zipfile
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path, PurePosixPath
 
 from packaging.markers import InvalidMarker, Marker
@@ -21,12 +20,14 @@ from packaging.utils import canonicalize_name
 try:
     from scripts.archive_limits import (
         ArchivePreflightError,
+        ArchiveSnapshot,
         preflight_tar_gzip_stream,
         preflight_zip_member_count,
     )
 except ModuleNotFoundError:
     from archive_limits import (  # type: ignore[no-redef]
         ArchivePreflightError,
+        ArchiveSnapshot,
         preflight_tar_gzip_stream,
         preflight_zip_member_count,
     )
@@ -173,8 +174,8 @@ def _find_artifacts(dist_dir: Path) -> tuple[Path, Path]:
     return wheels[0], sdists[0]
 
 
-def _read_wheel_metadata(path: Path, snapshot: bytes) -> DistributionMetadata:
-    with zipfile.ZipFile(BytesIO(snapshot)) as wheel:
+def _read_wheel_metadata(path: Path, snapshot: ArchiveSnapshot) -> DistributionMetadata:
+    with snapshot.open() as stream, zipfile.ZipFile(stream) as wheel:
         members = wheel.infolist()
         _validate_zip_members(members)
         metadata_members = [
@@ -201,8 +202,8 @@ def _read_wheel_metadata(path: Path, snapshot: bytes) -> DistributionMetadata:
         )
 
 
-def _read_sdist_metadata(path: Path, snapshot: bytes) -> DistributionMetadata:
-    with tarfile.open(fileobj=BytesIO(snapshot), mode="r:gz") as sdist:
+def _read_sdist_metadata(path: Path, snapshot: ArchiveSnapshot) -> DistributionMetadata:
+    with snapshot.open() as stream, tarfile.open(fileobj=stream, mode="r:gz") as sdist:
         metadata: bytes | None = None
         entry_points: bytes | None = None
         for member in _validated_sdist_members(sdist):
@@ -456,7 +457,7 @@ def _verify_required_sdist_files(
     archive_root: str,
     source_root: Path | None,
     required_files: list[PurePosixPath],
-    sdist_snapshot: bytes,
+    sdist_snapshot: ArchiveSnapshot,
 ) -> None:
     if not required_files:
         return
@@ -483,7 +484,7 @@ def _verify_required_sdist_files(
             raise SystemExit(f"Required sdist source exceeds the byte limit: {source_path}")
         expected[f"{archive_root}/{relative_path.as_posix()}"] = source_path.read_bytes()
 
-    with tarfile.open(fileobj=BytesIO(sdist_snapshot), mode="r:gz") as sdist:
+    with sdist_snapshot.open() as stream, tarfile.open(fileobj=stream, mode="r:gz") as sdist:
         found: set[str] = set()
         for member in _validated_sdist_members(sdist):
             expected_bytes = expected.get(member.name)
@@ -566,7 +567,7 @@ def _validate_member_name(name: str, *, artifact: str) -> None:
         raise SystemExit(f"{artifact} contains an unsafe archive member path.")
 
 
-def _preflight_wheel(path: Path) -> bytes:
+def _preflight_wheel(path: Path) -> ArchiveSnapshot:
     try:
         return preflight_zip_member_count(
             path,
@@ -579,7 +580,7 @@ def _preflight_wheel(path: Path) -> bytes:
         raise SystemExit(str(exc).capitalize()) from exc
 
 
-def _preflight_sdist(path: Path) -> bytes:
+def _preflight_sdist(path: Path) -> ArchiveSnapshot:
     try:
         return preflight_tar_gzip_stream(
             path,

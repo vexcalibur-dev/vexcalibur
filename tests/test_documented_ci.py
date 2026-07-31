@@ -1,7 +1,11 @@
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+BASH = shutil.which("bash")
 VERSION_BODY_PATTERN = (
     r"(0|[1-9][0-9]{0,5})\."
     r"(0|[1-9][0-9]{0,5})\."
@@ -69,3 +73,81 @@ def test_release_recovery_guide_requires_exact_tag_schema_version() -> None:
     assert documentation.count("has_exact_tag_schema_version() {") == 1
     assert 'type(message.get("schema_version")) is int' in documentation
     assert 'has_exact_tag_schema_version "$TAG_OBJECT"' in documentation
+
+
+def test_release_recovery_guide_fails_closed_when_status_cannot_run(tmp_path: Path) -> None:
+    if BASH is None:
+        raise RuntimeError("bash is required to test documented recovery")
+    documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
+    section = documentation.split("## Recover an interrupted GitHub Release", maxsplit=1)[1]
+    script = section.split("```bash\n", maxsplit=1)[1].split("\n```", maxsplit=1)[0]
+    script = script.replace("REPLACE_WITH_RELEASE_TAG", "v1.2.3")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "gh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (fake_bin / "git").write_text(
+        '#!/bin/sh\nif [ "$1" = "status" ]; then\n  exit 73\nfi\nexit 74\n',
+        encoding="utf-8",
+    )
+    (fake_bin / "gh").chmod(0o755)
+    (fake_bin / "git").chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    completed = subprocess.run(  # noqa: S603
+        [BASH, "-c", script],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert completed.stderr == "Could not inspect the worktree before recovery.\n"
+
+
+def test_publication_verification_guide_stops_after_a_failed_fetch(tmp_path: Path) -> None:
+    if BASH is None:
+        raise RuntimeError("bash is required to test publication verification")
+    documentation = (ROOT / "docs/reference/release-evidence.md").read_text(encoding="utf-8")
+    section = documentation.split(
+        "Verify a schema-2 publication bundle against an exact tag and commit:",
+        maxsplit=1,
+    )[1]
+    script = section.split("```bash\n", maxsplit=1)[1].split("\n```", maxsplit=1)[0]
+    script = script.replace("REPLACE_WITH_RELEASE_TAG", "v1.2.3")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    rev_parse_marker = tmp_path / "rev-parse-ran"
+    (fake_bin / "git").write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "fetch" ]; then\n'
+        "  exit 73\n"
+        "fi\n"
+        'if [ "$1" = "update-ref" ]; then\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [ "$1" = "rev-parse" ]; then\n'
+        '  : > "$REV_PARSE_MARKER"\n'
+        "fi\n"
+        "exit 74\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "git").chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["REV_PARSE_MARKER"] = str(rev_parse_marker)
+
+    completed = subprocess.run(  # noqa: S603
+        [BASH, "-c", script],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    assert completed.returncode == 73
+    assert not rev_parse_marker.exists()

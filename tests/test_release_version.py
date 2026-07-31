@@ -176,6 +176,19 @@ def test_multiple_release_tags_on_current_head_are_rejected(tmp_path: Path) -> N
     assert "v0.1.0 v0.2.0" in result.stderr
 
 
+def test_automatic_release_rejects_a_lower_tag_on_current_head(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v2.0.0", "-m", "Release v2.0.0")
+    commit(repo, "fix: update after major release")
+    run_git(repo, "tag", "-a", "v1.5.0", "-m", "Conflicting lower release")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release SHA already has a non-latest version tag: v1.5.0" in result.stderr
+    assert "latest merged tag: v2.0.0" in result.stderr
+
+
 def test_manual_release_rejects_lower_version(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "-a", "v0.2.0", "-m", "Release v0.2.0")

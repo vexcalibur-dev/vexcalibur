@@ -15,7 +15,6 @@ import tarfile
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -25,12 +24,14 @@ from packageurl import PackageURL
 try:
     from scripts.archive_limits import (
         ArchivePreflightError,
+        ArchiveSnapshot,
         preflight_tar_gzip_stream,
         preflight_zip_member_count,
     )
 except ModuleNotFoundError:
     from archive_limits import (  # type: ignore[no-redef]
         ArchivePreflightError,
+        ArchiveSnapshot,
         preflight_tar_gzip_stream,
         preflight_zip_member_count,
     )
@@ -183,7 +184,7 @@ def validate_wheel_source(wheel_path: Path, *, release_sha: str) -> str:
     snapshot = _preflight_wheel(wheel_path)
 
     try:
-        with zipfile.ZipFile(BytesIO(snapshot)) as wheel:
+        with snapshot.open() as stream, zipfile.ZipFile(stream) as wheel:
             _validate_zip_members(wheel.infolist())
             distribution_metadata = [
                 member
@@ -1887,7 +1888,7 @@ def _read_wheel_distribution_metadata(path: Path) -> dict[str, str]:
     _require_bounded_publication_file(path)
     snapshot = _preflight_wheel(path)
     try:
-        with zipfile.ZipFile(BytesIO(snapshot)) as wheel:
+        with snapshot.open() as stream, zipfile.ZipFile(stream) as wheel:
             _validate_zip_members(wheel.infolist())
             members = [
                 member
@@ -1920,7 +1921,7 @@ def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[st
     member_names: set[str] = set()
     uncompressed_bytes = 0
     try:
-        with tarfile.open(fileobj=BytesIO(snapshot), mode="r:gz") as sdist:
+        with snapshot.open() as stream, tarfile.open(fileobj=stream, mode="r:gz") as sdist:
             for index, member in enumerate(sdist):
                 if index >= MAX_ARCHIVE_MEMBERS:
                     raise EvidenceError("sdist contains too many archive members")
@@ -1971,7 +1972,7 @@ def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[st
     return _parse_distribution_metadata(metadata, artifact="sdist"), commit_match.group(1)
 
 
-def _preflight_wheel(path: Path) -> bytes:
+def _preflight_wheel(path: Path) -> ArchiveSnapshot:
     try:
         return preflight_zip_member_count(
             path,
@@ -1984,7 +1985,7 @@ def _preflight_wheel(path: Path) -> bytes:
         raise EvidenceError(str(exc)) from exc
 
 
-def _preflight_sdist(path: Path) -> bytes:
+def _preflight_sdist(path: Path) -> ArchiveSnapshot:
     try:
         return preflight_tar_gzip_stream(
             path,
