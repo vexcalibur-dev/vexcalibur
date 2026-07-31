@@ -26,6 +26,7 @@ def read_bounded_regular_file(
     rejected after a nonblocking open and before any content is read.
     """
     flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
 

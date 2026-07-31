@@ -47,6 +47,7 @@ def _require_nonnegative_integer(value: object, *, field: str) -> int:
 
 def _read_regular_file(path: Path, *, maximum_bytes: int, field: str) -> bytes:
     flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)

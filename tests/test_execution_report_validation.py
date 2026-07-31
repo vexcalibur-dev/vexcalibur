@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import vexcalibur.execution_report_validation as validation_module
 from vexcalibur.execution_report_validation import (
     ExecutionReportValidationError,
     validate_execution_reports,
@@ -106,6 +107,37 @@ def test_validator_accepts_canonical_multistate_reports_for_every_format(
         expected_finding_count=5,
         expected_component_count=2,
     )
+
+
+def test_validator_opens_report_inputs_in_binary_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "binary-input.json"
+    payload = b"before\r\nafter\x1aend"
+    path.write_bytes(payload)
+    real_open = validation_module.os.open
+    native_binary_flag = hasattr(validation_module.os, "O_BINARY")
+    binary_flag = getattr(validation_module.os, "O_BINARY", 1 << 29)
+    observed_flags = 0
+
+    def track_binary_flag(selected_path: Path, flags: int) -> int:
+        nonlocal observed_flags
+        observed_flags = flags
+        native_flags = flags if native_binary_flag else flags & ~binary_flag
+        return real_open(selected_path, native_flags)
+
+    monkeypatch.setattr(validation_module.os, "O_BINARY", binary_flag, raising=False)
+    monkeypatch.setattr(validation_module.os, "open", track_binary_flag)
+
+    result = validation_module._read_regular_file(
+        path,
+        maximum_bytes=len(payload),
+        field="test input",
+    )
+
+    assert observed_flags & binary_flag
+    assert result == payload
 
 
 def test_validator_rejects_noncanonical_report_bytes(tmp_path: Path) -> None:

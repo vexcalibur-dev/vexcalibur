@@ -15,8 +15,8 @@ VERSION = "0.4.0"
 WHEEL = f"vexcalibur-{VERSION}-py3-none-any.whl"
 SDIST = f"vexcalibur-{VERSION}.tar.gz"
 CONTENTS = {
-    WHEEL: b"wheel contents\n",
-    SDIST: b"sdist contents\n",
+    WHEEL: b"wheel\r\ncontents\x1a\n",
+    SDIST: b"sdist\r\ncontents\x1a\n",
 }
 PACKAGE_TYPES = {WHEEL: "bdist_wheel", SDIST: "sdist"}
 

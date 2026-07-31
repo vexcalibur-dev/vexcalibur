@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import scripts.execution_report_oracle as oracle_module
 from scripts.execution_report_oracle import (
     MAX_FINDINGS_BYTES,
     ExecutionReportOracleError,
@@ -108,6 +109,37 @@ def _verify(paths: dict[str, Path]) -> None:
 
 def test_action_generation_oracle_accepts_bound_inputs(tmp_path: Path) -> None:
     _verify(_write_valid_inputs(tmp_path))
+
+
+def test_oracle_opens_bound_inputs_in_binary_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "binary-input.json"
+    payload = b"before\r\nafter\x1aend"
+    path.write_bytes(payload)
+    real_open = oracle_module.os.open
+    native_binary_flag = hasattr(oracle_module.os, "O_BINARY")
+    binary_flag = getattr(oracle_module.os, "O_BINARY", 1 << 29)
+    observed_flags = 0
+
+    def track_binary_flag(selected_path: Path, flags: int) -> int:
+        nonlocal observed_flags
+        observed_flags = flags
+        native_flags = flags if native_binary_flag else flags & ~binary_flag
+        return real_open(selected_path, native_flags)
+
+    monkeypatch.setattr(oracle_module.os, "O_BINARY", binary_flag, raising=False)
+    monkeypatch.setattr(oracle_module.os, "open", track_binary_flag)
+
+    result = oracle_module.read_bounded_regular_file(
+        path,
+        max_bytes=len(payload),
+        field="test input",
+    )
+
+    assert observed_flags & binary_flag
+    assert result == payload
 
 
 def test_component_oracle_accepts_production_depth_boundary() -> None:

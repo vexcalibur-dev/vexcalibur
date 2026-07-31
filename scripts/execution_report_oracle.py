@@ -185,6 +185,7 @@ def read_bounded_regular_file(
     """Read a bounded regular file without following a final symlink."""
     try:
         flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
     except OSError as exc:
