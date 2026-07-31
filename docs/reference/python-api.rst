@@ -379,19 +379,13 @@ form produced by ``to_json``. It raises ``TypeError`` for another Python input
 type and ``GenerationExecutionReportParseError`` for invalid serialized
 content.
 
-A custom source can implement ``execution_report_finding_source`` and return
-``FindingSourceCategory.CUSTOM``. A custom renderer can implement
-``execution_report_output_format`` and return
-``ExecutionReportOutputFormat.CUSTOM``. Subclass
-``ExecutionReportFindingSourceDeclaration`` or
-``ExecutionReportOutputFormatDeclaration`` so a type checker can validate the
-method signature.
-A subclass does not inherit a built-in source or renderer identity. It must
-provide its own category method or receive an explicit
-``GenerationExecutionContext``. This prevents changed extension behavior from
-being reported as a built-in operation. Extensions may declare only ``CUSTOM``.
-The built-in category members are reserved for Vexcalibur's exact built-in
-source and renderer types.
+Custom sources and renderers cannot assign their own report categories. The
+caller must provide a complete ``GenerationExecutionContext`` and use the
+``CUSTOM`` source or output category for each extension boundary. A subclass
+does not inherit a built-in source or renderer identity. This prevents changed
+extension behavior from being reported as a built-in operation. The built-in
+category members are reserved for Vexcalibur's exact built-in source and
+renderer types.
 
 Code that supplies components directly can produce a complete report without
 claiming a built-in inventory, source, or output identity:
@@ -415,7 +409,7 @@ that does not request a report never reads that metadata.
 JSON would exceed 16 KiB. The report JSON includes one trailing newline.
 
 .. automodule:: vexcalibur.generation_result
-   :members: EXECUTION_REPORT_SCHEMA_VERSION, GenerationReportMetadataError, GenerationExecutionReportParseError, GeneratedDocumentMetadataDict, GenerationExecutionReportDict, InventorySourceCategory, FindingSourceCategory, ExecutionReportOutputFormat, ExecutionReportFindingSourceDeclaration, ExecutionReportOutputFormatDeclaration, GenerationExecutionContext, GenerationResult, GeneratedDocumentMetadata, GenerationExecutionReport, parse_generation_execution_report
+   :members: EXECUTION_REPORT_SCHEMA_VERSION, GenerationReportMetadataError, GenerationExecutionReportParseError, GeneratedDocumentMetadataDict, GenerationExecutionReportDict, InventorySourceCategory, FindingSourceCategory, ExecutionReportOutputFormat, GenerationExecutionContext, GenerationResult, GeneratedDocumentMetadata, GenerationExecutionReport, parse_generation_execution_report
    :show-inheritance:
 
 VEX rendering

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import scripts.release_evidence as release_evidence
 
+from tests.archive_fixtures import pax_record, write_extension_tar_gzip
 from vexcalibur.generation_result import (
     GenerationExecutionReportParseError,
     parse_generation_execution_report,
@@ -66,6 +67,20 @@ def _write_test_sdist(path: Path, *, version: str = "0.4.0", commit: str = "a" *
     with tarfile.open(path, "w:gz") as sdist:
         sdist.addfile(member, BytesIO(metadata))
         sdist.addfile(version_member, BytesIO(version_source))
+
+
+def test_release_evidence_rejects_solaris_pax_sdist_size_rewrite(
+    tmp_path: Path,
+) -> None:
+    sdist = tmp_path / "vexcalibur-0.1.0.tar.gz"
+    write_extension_tar_gzip(
+        sdist,
+        extension_type=b"X",
+        extension_payload=pax_record("size", "1"),
+    )
+
+    with pytest.raises(release_evidence.EvidenceError, match="unsupported PAX metadata key"):
+        release_evidence._read_sdist_distribution_metadata(sdist, "0.1.0")
 
 
 def _write_integrity_bundle(tmp_path: Path) -> Path:

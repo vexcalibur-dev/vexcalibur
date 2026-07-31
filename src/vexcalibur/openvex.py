@@ -21,7 +21,7 @@ from vexcalibur.document import (
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
 from vexcalibur.render import VexRenderError
-from vexcalibur.render_budget import RenderInputBudget
+from vexcalibur.render_budget import enforce_builtin_render_input_budget
 
 OPENVEX_SPEC_VERSION = "0.2.0"
 OPENVEX_CONTEXT = f"https://openvex.dev/ns/v{OPENVEX_SPEC_VERSION}"
@@ -76,24 +76,13 @@ class OpenVexJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return OpenVEX 0.2.0 JSON."""
-        if type(self) is OpenVexJsonRenderer:
-            budget = RenderInputBudget()
-            referenced: set[str] = set()
-            for finding in findings:
-                budget.add_finding(finding)
-                referenced.add(finding.component_ref)
-            components_by_ref = {}
-            for component in components:
-                budget.add_component_reference()
-                if component.ref in referenced:
-                    components_by_ref[component.ref] = component
-                    budget.add_component(component, purl_copies=1)
-            for finding in findings:
-                finding_component = components_by_ref.get(finding.component_ref)
-                if finding_component is not None:
-                    budget.add_package_url(finding_component, copies=2)
-            budget.add_text(self.author)
-            budget.add_text(self.role)
+        enforce_builtin_render_input_budget(
+            components=components,
+            findings=findings,
+            component_purl_copies=1,
+            finding_component_purl_copies=2,
+            additional_text=(self.author, self.role),
+        )
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:

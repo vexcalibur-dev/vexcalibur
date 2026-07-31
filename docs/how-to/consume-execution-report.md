@@ -9,33 +9,71 @@ This guide requires Linux or macOS, Bash, Git, and `uv`. It uses the
 repository's locked development environment because that environment includes
 a JSON Schema Draft 2020-12 validator.
 
-Releases that predate execution-report support do not include this option. Use
-an immutable release or reviewed full commit SHA, then confirm that
+Vexcalibur v0.4.2 and earlier do not include execution reports. Use an
+immutable release or a reviewed pull-request commit, then confirm that
 `vexcalibur generate --help` lists `--execution-report` before you update
 automation.
 
-Replace `REPLACE_WITH_FULL_COMMIT_SHA` below with the lowercase, 40-character
-commit SHA for the release you selected. Run these commands from a clean
-working directory:
+For a release, set `RELEASE_TAG` to the exact version you reviewed. This
+sequence fetches only that tag from the official repository, requires an
+annotated tag that points directly to a commit, and derives the checkout SHA
+from the fetched ref:
 
 ```bash
 set -euo pipefail
 
-revision="REPLACE_WITH_FULL_COMMIT_SHA"
-if [[ ! "${revision}" =~ ^[0-9a-f]{40}$ ]]; then
-  printf 'revision must be a full lowercase commit SHA\n' >&2
+RELEASE_TAG="${RELEASE_TAG:?set RELEASE_TAG to the reviewed release tag}"
+if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+  printf 'RELEASE_TAG must be an exact Vexcalibur release tag\n' >&2
   exit 2
 fi
-git clone https://github.com/vexcalibur-dev/vexcalibur.git
+
+git init vexcalibur
 cd vexcalibur
-git checkout --detach "${revision}"
-test "$(git rev-parse HEAD)" = "${revision}"
+git remote add origin https://github.com/vexcalibur-dev/vexcalibur.git
+git fetch --depth=1 origin \
+  "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+
+read -r object_type _ target_type release_sha < <(
+  git for-each-ref \
+    --format='%(objecttype) %(objectname) %(*objecttype) %(*objectname)' \
+    "refs/tags/${RELEASE_TAG}"
+)
+test "${object_type}" = "tag"
+test "${target_type}" = "commit"
+[[ "${release_sha}" =~ ^[0-9a-f]{40}$ ]]
+
+git checkout --detach "${release_sha}"
+test "$(git rev-parse HEAD)" = "${release_sha}"
 uv sync --frozen
 uv run --frozen vexcalibur generate --help | grep -- --execution-report
 ```
 
-The final command must print the option. Use the schema from that same checkout
-and run the remaining commands from the repository root.
+For unreleased work, record the full SHA you reviewed and fetch the pull
+request's head ref. The comparison fails if the pull request moved after your
+review:
+
+```bash
+set -euo pipefail
+
+PR_NUMBER="${PR_NUMBER:?set PR_NUMBER to the reviewed pull request}"
+REVIEWED_SHA="${REVIEWED_SHA:?set REVIEWED_SHA to its reviewed full commit SHA}"
+[[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+[[ "${REVIEWED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+
+git init vexcalibur
+cd vexcalibur
+git remote add origin https://github.com/vexcalibur-dev/vexcalibur.git
+git fetch --depth=1 origin \
+  "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/reviewed-pr"
+test "$(git rev-parse refs/remotes/origin/reviewed-pr)" = "${REVIEWED_SHA}"
+git checkout --detach "${REVIEWED_SHA}"
+uv sync --frozen
+uv run --frozen vexcalibur generate --help | grep -- --execution-report
+```
+
+The final command must print the option. Use the schema and validator from that
+same checkout, and run the remaining commands from the repository root.
 
 ## Generate both files
 
@@ -83,8 +121,8 @@ The validator uses three exit statuses:
 - `0`: the report, document binding, and policy passed.
 - `1`: validation passed, but the exploitable-count policy rejected the report.
 - `2`: command usage, file integrity, JSON, schema, or document validation
-  failed. Expected failures print one concise error to standard error without a
-  traceback.
+  failed. Validation failures print one concise error to standard error without
+  a traceback. Command-usage failures use `argparse`'s usage and error output.
 
 Set the limit to zero when your workflow must reject every exploitable finding:
 
@@ -105,13 +143,14 @@ execution report rejected: exploitable count 1 exceeds maximum 0
 The validator applies policy to the object it already validated. It does not
 open or parse the report a second time.
 
-The validator is the tested example from this checkout. It opens the report,
-schema, and document in nonblocking mode, checks each opened descriptor, and
-rejects symbolic links and special files. It rejects an opened document larger
-than 25 MiB before reading and hashing it, even though the schema carries the
-same maximum. It accepts only the reviewed schema bytes from the same checkout;
-a changed or substituted schema is rejected before JSON Schema evaluation.
-Schema references cannot trigger network requests.
+The validator is the tested example from this checkout. It first requires
+exact Python integers because JSON Schema treats values such as `1.0` as
+integers when they have no fractional part. It then opens the report, schema,
+and document in nonblocking mode, checks each opened descriptor, and rejects
+symbolic links and special files. It rejects an opened document larger than
+25 MiB before reading and hashing it. It accepts only the reviewed schema bytes
+from the same checkout; a changed or substituted schema is rejected before
+JSON Schema evaluation. Schema references cannot trigger network requests.
 
 ## Keep the trust boundary explicit
 

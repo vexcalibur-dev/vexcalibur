@@ -32,7 +32,7 @@ from vexcalibur.document import (
     vex_document_from_findings,
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
-from vexcalibur.render_budget import RenderInputBudget
+from vexcalibur.render_budget import enforce_builtin_render_input_budget
 
 VexRenderError = _render.VexRenderError
 
@@ -65,16 +65,11 @@ class CycloneDxJsonRenderer:
         timestamp: datetime | None = None,
     ) -> str:
         """Adapt provider findings and return CycloneDX 1.6 VEX JSON."""
-        if type(self) is CycloneDxJsonRenderer:
-            budget = RenderInputBudget()
-            referenced: set[str] = set()
-            for finding in findings:
-                budget.add_finding(finding)
-                referenced.add(finding.component_ref)
-            for component in components:
-                budget.add_component_reference()
-                if component.ref in referenced:
-                    budget.add_component(component, purl_copies=2)
+        enforce_builtin_render_input_budget(
+            components=components,
+            findings=findings,
+            component_purl_copies=2,
+        )
         return self.render_document(
             document=vex_document_from_findings(components=components, findings=findings),
             timestamp=timestamp,

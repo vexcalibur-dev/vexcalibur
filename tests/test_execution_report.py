@@ -263,6 +263,22 @@ def test_execution_report_matches_the_published_json_schema(
     Draft202012Validator(schema).validate(json.loads(report.to_json()))
 
 
+def test_json_schema_integer_semantics_are_narrowed_by_public_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schema = json.loads(EXECUTION_REPORT_SCHEMA_PATH.read_text(encoding="utf-8"))
+    document = _report(monkeypatch).to_dict()
+    document["schema_version"] = 1.0
+    Draft202012Validator(schema).validate(document)
+
+    serialized = f"{json.dumps(document, sort_keys=True, separators=(',', ':'))}\n"
+    with pytest.raises(
+        GenerationExecutionReportParseError,
+        match="schema_version must be an integer",
+    ):
+        parse_generation_execution_report(serialized)
+
+
 def test_execution_report_schema_enums_exactly_match_schema_v1_categories(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

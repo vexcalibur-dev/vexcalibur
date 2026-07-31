@@ -70,19 +70,16 @@ def _remove_matching_destination(
 
 
 def _close_descriptor(descriptor: int) -> None:
-    failure: BaseException | None = None
-    for _ in range(2):
-        try:
-            _close_descriptor_retryable(descriptor)
-            return
-        except BaseException as exc:
-            failure = exc
-    if failure is not None:
-        raise failure
+    _close_descriptor_retryable(descriptor)
 
 
 def _close_descriptor_retryable(descriptor: int) -> None:
-    """Release an owned descriptor without relying on its number after close."""
+    """Release a disowned descriptor without retrying its numeric value.
+
+    Callers that retain ownership state must clear that state before calling.
+    An asynchronous interruption may leak a descriptor, but no later cleanup
+    may close a different resource that reused the same number.
+    """
     try:
         os.fstat(descriptor)
     except OSError:

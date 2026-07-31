@@ -65,22 +65,28 @@ document.
 
 The file is canonical minified JSON with one trailing newline. Object key
 order is stable, but consumers should use JSON keys rather than byte positions.
-The [JSON Schema](../execution-report-v1.schema.json) is the machine-readable
-contract. It uses JSON Schema Draft 2020-12 and rejects unknown properties.
+The [JSON Schema](../execution-report-v1.schema.json) is the structural
+machine-readable contract. It uses JSON Schema Draft 2020-12 and rejects
+unknown properties. JSON Schema treats a number such as `1.0` as an integer
+when it has no fractional part, but Vexcalibur's canonical report contract
+requires an integer JSON token. Use
+`parse_generation_execution_report` or the tested
+[consumer validator](../examples/validate_execution_report.py) to apply those
+exact-type checks before schema validation.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema_version` | integer | Exactly `1`. The report schema changes independently of the package version. |
+| `schema_version` | exact integer token | Exactly `1`. Booleans and decimal forms such as `1.0` are rejected. The report schema changes independently of the package version. |
 | `command` | string | Exactly `generate`. |
 | `vexcalibur_version` | string | Installed Vexcalibur distribution version loaded by the process. It must match package metadata; an editable Git checkout must also identify its current `HEAD`. The value has 1–128 characters from `[0-9A-Za-z.!+_-]`, with an alphanumeric first character. |
 | `inventory_source` | string | One inventory category from the table below. |
 | `finding_source` | string | One finding category from the table below. |
 | `output_format` | string | `cyclonedx`, `openvex`, `csaf`, or `custom`. |
-| `component_count` | integer from 0 through 10,000,000 | Normalized components sent to the finding source. |
-| `finding_count` | integer from 0 through 10,000,000 | Normalized findings sent to the renderer. |
-| `analysis_state_counts` | object | Positive counts through 10,000,000, keyed by `resolved`, `exploitable`, `in_triage`, `false_positive`, or `not_affected`. States with zero findings are omitted. |
+| `component_count` | exact integer token from 0 through 10,000,000 | Normalized components sent to the finding source. |
+| `finding_count` | exact integer token from 0 through 10,000,000 | Normalized findings sent to the renderer. |
+| `analysis_state_counts` | object | Exact positive integer tokens through 10,000,000, keyed by `resolved`, `exploitable`, `in_triage`, `false_positive`, or `not_affected`. States with zero findings are omitted. |
 | `document.sha256` | string | 64-character lowercase hexadecimal SHA-256 digest of the exact rendered UTF-8 document. |
-| `document.bytes` | integer from 0 through 26,214,400 | Length of the exact rendered document in UTF-8 bytes. The maximum is the 25 MiB generation limit. |
+| `document.bytes` | exact integer token from 0 through 26,214,400 | Length of the exact rendered document in UTF-8 bytes. The maximum is the 25 MiB generation limit. |
 
 `component_count` is not the number of raw entries in an SBOM.
 `finding_count` is not a severity threshold, policy decision, or proof that the
@@ -172,10 +178,16 @@ directory flush makes the command fail. Vexcalibur removes an unpublished
 temporary file when it can, but callers must not treat leftover private
 temporary files as completed reports.
 
-If the command is interrupted after report publication but before successful
-finalization, Vexcalibur removes the report when the path still names the file
-it published. The document may remain. A concurrent replacement at the report
-path is left alone.
+If Python handles an interruption, including `SIGINT`, after report publication
+but before successful finalization, Vexcalibur removes the report when the path
+still names the file it published. The document may remain. A concurrent
+replacement at the report path is left alone.
+
+Abrupt termination does not run that cleanup. `SIGKILL` always stops the
+process immediately, and the default `SIGTERM` handler also bypasses Python
+unwinding. Either signal can leave a report that was already published even
+though the process did not exit successfully. Consumers must require exit
+status `0` and validate the report against the document.
 
 A parent-directory change stops the operation instead of redirecting either
 write. The parent must already exist and must be readable, writable, and

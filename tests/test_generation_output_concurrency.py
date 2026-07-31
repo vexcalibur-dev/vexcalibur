@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -463,6 +464,68 @@ def test_killed_transaction_releases_locks_without_publishing_report(
     output = output_path.read_bytes()
     report = json.loads(report_path.read_bytes())
     assert output == b'{"message":"second"}\n'
+    assert report["document"] == {
+        "bytes": len(output),
+        "sha256": hashlib.sha256(output).hexdigest(),
+    }
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_sigint_after_report_publication_removes_report_and_releases_locks(
+    tmp_path: Path,
+) -> None:
+    result_directory = tmp_path / "result"
+    result_directory.mkdir()
+    output_path = result_directory / "vex.json"
+    report_path = result_directory / "execution-report.json"
+    pause_marker = tmp_path / "report-published"
+    release_marker = tmp_path / "never-release"
+    helper = Path(__file__).parent / "integration" / "publish_generation_transaction.py"
+
+    def command(message: str, *, pause_after_report: bool = False) -> list[str]:
+        return [
+            sys.executable,
+            str(helper),
+            str(output_path),
+            str(report_path),
+            message,
+            str(pause_marker) if pause_after_report else "-",
+            str(release_marker) if pause_after_report else "-",
+            "-",
+            "report" if pause_after_report else "output",
+        ]
+
+    interrupted = subprocess.Popen(  # noqa: S603
+        command("interrupted", pause_after_report=True),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_path(pause_marker)
+        assert report_path.exists()
+        interrupted.send_signal(signal.SIGINT)
+        interrupted_stdout, interrupted_stderr = interrupted.communicate(timeout=5)
+    finally:
+        if interrupted.poll() is None:
+            interrupted.kill()
+            interrupted.wait(timeout=5)
+
+    assert interrupted.returncode != 0, (interrupted_stdout, interrupted_stderr)
+    assert output_path.read_bytes() == b'{"message":"interrupted"}\n'
+    assert not report_path.exists()
+
+    subsequent = subprocess.run(  # noqa: S603
+        command("subsequent"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert subsequent.returncode == 0, (subsequent.stdout, subsequent.stderr)
+    output = output_path.read_bytes()
+    report = json.loads(report_path.read_bytes())
+    assert output == b'{"message":"subsequent"}\n'
     assert report["document"] == {
         "bytes": len(output),
         "sha256": hashlib.sha256(output).hexdigest(),

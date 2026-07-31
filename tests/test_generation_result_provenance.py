@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, get_args, get_origin, get_type_hints
+from typing import Literal, get_type_hints
 
 import pytest
 from packageurl import PackageURL
@@ -29,11 +29,7 @@ from vexcalibur.generate import (
     generate_vex_from_sbom_result,
     generate_vex_from_source_result,
 )
-from vexcalibur.generation_result import (
-    ExecutionReportFindingSourceDeclaration,
-    ExecutionReportOutputFormatDeclaration,
-)
-from vexcalibur.generation_selection import select_finding_source
+from vexcalibur.generation_selection import finding_source_category
 from vexcalibur.github_sbom import GithubSbomClient
 from vexcalibur.openvex import OpenVexJsonRenderer
 from vexcalibur.sources.local import LocalFindingsSource
@@ -262,7 +258,7 @@ def test_builtin_renderer_subclass_does_not_inherit_report_category() -> None:
         result.execution_report()
 
 
-def test_builtin_renderer_subclass_can_declare_custom_report_category() -> None:
+def test_builtin_renderer_subclass_cannot_self_declare_report_category() -> None:
     class CustomCycloneDxRenderer(CycloneDxJsonRenderer):
         def execution_report_output_format(
             self,
@@ -280,43 +276,13 @@ def test_builtin_renderer_subclass_can_declare_custom_report_category() -> None:
         renderer=CustomCycloneDxRenderer(),
     )
 
-    assert result.execution_context == GenerationExecutionContext(
-        inventory_source=InventorySourceCategory.CUSTOM,
-        finding_source=FindingSourceCategory.CUSTOM,
-        output_format=ExecutionReportOutputFormat.CUSTOM,
-    )
+    assert result.execution_context is None
 
 
 def test_execution_report_annotation_resolves_at_runtime() -> None:
     hints = get_type_hints(GenerationResult.execution_report)
 
     assert hints["return"].__name__ == "GenerationExecutionReport"
-
-
-@pytest.mark.parametrize(
-    ("protocol", "field", "custom_value"),
-    (
-        (
-            ExecutionReportFindingSourceDeclaration,
-            "execution_report_finding_source",
-            FindingSourceCategory.CUSTOM,
-        ),
-        (
-            ExecutionReportOutputFormatDeclaration,
-            "execution_report_output_format",
-            ExecutionReportOutputFormat.CUSTOM,
-        ),
-    ),
-)
-def test_extension_protocols_only_accept_custom_categories(
-    protocol: type[object],
-    field: str,
-    custom_value: object,
-) -> None:
-    annotation = get_type_hints(getattr(protocol, field))["return"]
-
-    assert get_origin(annotation) is Literal
-    assert get_args(annotation) == (custom_value,)
 
 
 @pytest.mark.parametrize(
@@ -407,9 +373,9 @@ def test_exact_builtin_osv_source_retains_endpoint_category(
     osv_base_url: str,
     expected_finding_source: FindingSourceCategory,
 ) -> None:
-    selection = select_finding_source(OsvSource(osv_base_url=osv_base_url))
+    category = finding_source_category(OsvSource(osv_base_url=osv_base_url))
 
-    assert selection.report_category is expected_finding_source
+    assert category is expected_finding_source
 
 
 @pytest.mark.parametrize(
@@ -420,7 +386,7 @@ def test_exact_builtin_osv_source_retains_endpoint_category(
     ),
 )
 def test_injected_exact_osv_client_is_always_custom(client_url: str) -> None:
-    selection = select_finding_source(
+    category = finding_source_category(
         OsvSource(
             client=OsvClient(base_url=client_url),
             osv_base_url=client_url,
@@ -428,7 +394,7 @@ def test_injected_exact_osv_client_is_always_custom(client_url: str) -> None:
         )
     )
 
-    assert selection.report_category is FindingSourceCategory.CUSTOM
+    assert category is FindingSourceCategory.CUSTOM
 
 
 @pytest.mark.parametrize(
@@ -543,6 +509,11 @@ def test_github_source_does_not_apply_builtin_osv_policy_to_subclass() -> None:
         github_client=FakeGithubSbomClient(),
         source=source,
         timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+        execution_context=GenerationExecutionContext(
+            inventory_source=InventorySourceCategory.CUSTOM,
+            finding_source=FindingSourceCategory.CUSTOM,
+            output_format=ExecutionReportOutputFormat.CYCLONEDX,
+        ),
     )
 
     assert result.execution_context == GenerationExecutionContext(
@@ -552,7 +523,7 @@ def test_github_source_does_not_apply_builtin_osv_policy_to_subclass() -> None:
     )
 
 
-def test_github_source_validates_extension_declaration_before_loading_inventory() -> None:
+def test_github_source_does_not_inspect_extension_metadata_before_loading_inventory() -> None:
     loads: list[str] = []
 
     class InvalidDeclaredSource(FakeVulnerabilitySource):
@@ -562,19 +533,19 @@ def test_github_source_validates_extension_declaration_before_loading_inventory(
     class RecordingGithubSbomClient:
         def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
             loads.append(repository)
-            return ()
+            return (_component(),)
 
-    with pytest.raises(ValueError, match=r"FindingSourceCategory\.CUSTOM"):
-        generate_vex_from_github_source_result(
-            repository="vexcalibur-dev/vexcalibur",
-            github_client=RecordingGithubSbomClient(),
-            source=InvalidDeclaredSource(()),
-        )
+    result = generate_vex_from_github_source_result(
+        repository="vexcalibur-dev/vexcalibur",
+        github_client=RecordingGithubSbomClient(),
+        source=InvalidDeclaredSource(()),
+    )
 
-    assert loads == []
+    assert loads == ["vexcalibur-dev/vexcalibur"]
+    assert result.execution_context is None
 
 
-def test_github_source_validates_extension_before_constructing_client() -> None:
+def test_github_source_does_not_inspect_extension_metadata_before_client_factory() -> None:
     factory_calls = 0
 
     class InvalidDeclaredSource(FakeVulnerabilitySource):
@@ -586,14 +557,14 @@ def test_github_source_validates_extension_before_constructing_client() -> None:
         factory_calls += 1
         return FakeGithubSbomClient()
 
-    with pytest.raises(ValueError, match=r"FindingSourceCategory\.CUSTOM"):
-        generate_vex_from_github_source_result(
-            repository="vexcalibur-dev/vexcalibur",
-            github_client_factory=create_client,
-            source=InvalidDeclaredSource(()),
-        )
+    result = generate_vex_from_github_source_result(
+        repository="vexcalibur-dev/vexcalibur",
+        github_client_factory=create_client,
+        source=InvalidDeclaredSource(()),
+    )
 
-    assert factory_calls == 0
+    assert factory_calls == 1
+    assert result.execution_context is None
 
 
 def test_github_source_constructs_a_client_factory_once() -> None:
@@ -704,6 +675,11 @@ def test_builtin_github_client_retains_github_inventory_category(
     result = generate_vex_from_github_source_result(
         repository="vexcalibur-dev/vexcalibur",
         source=EmptySource(),
+        execution_context=GenerationExecutionContext(
+            inventory_source=InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH,
+            finding_source=FindingSourceCategory.CUSTOM,
+            output_format=ExecutionReportOutputFormat.CYCLONEDX,
+        ),
     )
 
     assert result.execution_context is not None

@@ -182,9 +182,10 @@ Replace both `path/to` values with files in your repository. A passing
 success signal.
 
 The Action and package are separate trust decisions. To update either pin, use
-the Action release's
-[compatibility declaration](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
-to select a pair tested together.
+the Action release's compatibility declaration, pinned here to immutable
+Action commit `80c930ee228c2757a4aadb51ce29a79c5066d6ca`, to select a package
+version and Action commit tested together:
+[compatibility declaration](https://github.com/vexcalibur-dev/vexcalibur-action/blob/80c930ee228c2757a4aadb51ce29a79c5066d6ca/docs/reference/compatibility.md)
 
 ## Read XML input
 

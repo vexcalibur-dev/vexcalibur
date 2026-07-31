@@ -15,7 +15,6 @@ from typing import Literal, TypedDict, TypeVar, cast
 import vexcalibur
 from vexcalibur.domain import (
     ComponentIdentity,
-    ExecutionReportFindingSourceDeclaration,
     VexAnalysisState,
     VulnerabilityFinding,
 )
@@ -28,10 +27,7 @@ from vexcalibur.generation_context import (
 from vexcalibur.generation_snapshot import GenerationInputSnapshot
 from vexcalibur.json_boundary import StrictJsonError, strict_json_loads
 from vexcalibur.limits import MAX_GENERATED_DOCUMENT_BYTES
-from vexcalibur.render import (
-    ExecutionReportOutputFormatDeclaration,
-    VexRenderError,
-)
+from vexcalibur.render import VexRenderError
 from vexcalibur.version_identity import (
     SourceVersionIdentityError,
     verify_source_checkout_version,
@@ -42,9 +38,7 @@ __all__ = [
     "MAX_EXECUTION_REPORT_BYTES",
     "MAX_EXECUTION_REPORT_COUNT",
     "MAX_GENERATED_DOCUMENT_BYTES",
-    "ExecutionReportFindingSourceDeclaration",
     "ExecutionReportOutputFormat",
-    "ExecutionReportOutputFormatDeclaration",
     "FindingSourceCategory",
     "GeneratedDocumentMetadata",
     "GeneratedDocumentMetadataDict",

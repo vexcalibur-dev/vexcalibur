@@ -248,6 +248,12 @@ pair. Read the
 | Execution report requested on Windows | `1` | `Could not prepare generate outputs:` |
 | Execution report construction failure | `1` | `Could not create execution report:` |
 | Execution report write failure | `1` | `Could not write execution report` |
+| Output finalization or cleanup failure | `1` | `Could not finalize generate outputs:` |
+
+A finalization failure can leave the VEX document in place. Vexcalibur removes
+its published report when it can, but a cleanup failure makes either
+destination indeterminate. Treat the operation as failed and inspect both paths
+before reusing the directory.
 
 ### Resource limits
 

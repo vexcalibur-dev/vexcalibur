@@ -399,6 +399,11 @@ def test_generation_snapshots_stateful_findings_before_rendering() -> None:
         source=StatefulSource(),
         timestamp=None,
         renderer=RecordingRenderer(),
+        execution_context=GenerationExecutionContext(
+            inventory_source=InventorySourceCategory.CUSTOM,
+            finding_source=FindingSourceCategory.CUSTOM,
+            output_format=ExecutionReportOutputFormat.CUSTOM,
+        ),
     )
 
     assert rendered_states == [VexAnalysisState.EXPLOITABLE]

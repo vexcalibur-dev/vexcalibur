@@ -386,8 +386,10 @@ class BoundFileDestination:
         """Close the retained parent directory descriptor."""
         if getattr(self, "_closed", True):
             return
-        _close_descriptor_retryable(self._parent_descriptor)
+        descriptor = self._parent_descriptor
+        object.__setattr__(self, "_parent_descriptor", -1)
         object.__setattr__(self, "_closed", True)
+        _close_descriptor_retryable(descriptor)
 
     def __copy__(self) -> BoundFileDestination:
         raise TypeError("bound file destinations cannot be copied")

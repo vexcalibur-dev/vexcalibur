@@ -309,36 +309,32 @@ def test_result_generation_preserves_renderer_exception_identity() -> None:
     assert captured.value is failure
 
 
-@pytest.mark.parametrize("declaration", ["source", "renderer"])
-def test_result_generation_preserves_declaration_exception_identity(
-    declaration: str,
-) -> None:
-    failure = SentinelExtensionError(f"{declaration} declaration failed")
+def test_result_generation_does_not_invoke_extension_report_metadata() -> None:
+    metadata_calls: list[str] = []
 
     class FailingSource(FakeVulnerabilitySource):
         def execution_report_finding_source(
             self,
         ) -> Literal[FindingSourceCategory.CUSTOM]:
-            raise failure
+            metadata_calls.append("source")
+            raise AssertionError("source report metadata must not run")
 
     class FailingRenderer(CustomRenderer):
         def execution_report_output_format(
             self,
         ) -> Literal[ExecutionReportOutputFormat.CUSTOM]:
-            raise failure
+            metadata_calls.append("renderer")
+            raise AssertionError("renderer report metadata must not run")
 
-    source = FailingSource(()) if declaration == "source" else FakeVulnerabilitySource(())
-    renderer = FailingRenderer() if declaration == "renderer" else CustomRenderer()
+    result = generate_vex_from_components_result(
+        components=(_component(),),
+        source=FailingSource(()),
+        timestamp=None,
+        renderer=FailingRenderer(),
+    )
 
-    with pytest.raises(SentinelExtensionError) as captured:
-        generate_vex_from_components_result(
-            components=(_component(),),
-            source=source,
-            timestamp=None,
-            renderer=renderer,
-        )
-
-    assert captured.value is failure
+    assert metadata_calls == []
+    assert result.execution_context is None
 
 
 def test_github_result_generation_preserves_loader_exception_identity() -> None:
@@ -455,136 +451,40 @@ def test_direct_components_cannot_claim_builtin_inventory_provenance() -> None:
         )
 
 
-def test_custom_source_can_declare_its_report_category() -> None:
+def test_custom_report_metadata_methods_are_ignored() -> None:
     class CategorizedSource(FakeVulnerabilitySource):
         def execution_report_finding_source(
             self,
         ) -> Literal[FindingSourceCategory.CUSTOM]:
             return FindingSourceCategory.CUSTOM
 
-    result = generate_vex_from_source_result(
+    class CategorizedRenderer(CustomRenderer):
+        def execution_report_output_format(
+            self,
+        ) -> Literal[ExecutionReportOutputFormat.CUSTOM]:
+            return ExecutionReportOutputFormat.CUSTOM
+
+    result_without_context = generate_vex_from_source_result(
         input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
         source=CategorizedSource(()),
+        renderer=CategorizedRenderer(),
     )
 
-    assert result.execution_context == GenerationExecutionContext(
+    assert result_without_context.execution_context is None
+
+    context = GenerationExecutionContext(
         inventory_source=InventorySourceCategory.SBOM_FILE,
         finding_source=FindingSourceCategory.CUSTOM,
-        output_format=ExecutionReportOutputFormat.CYCLONEDX,
+        output_format=ExecutionReportOutputFormat.CUSTOM,
     )
-
-
-@pytest.mark.parametrize("declaration", ("custom", None))
-def test_custom_source_rejects_mistyped_report_category(declaration: object) -> None:
-    class MistypedSource(FakeVulnerabilitySource):
-        def execution_report_finding_source(self) -> object:
-            return declaration
-
-    with pytest.raises(TypeError, match="must be a FindingSourceCategory"):
-        generate_vex_from_source_result(
-            input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
-            source=MistypedSource(()),
-        )
-
-
-@pytest.mark.parametrize("declaration", ("custom", None))
-def test_custom_renderer_rejects_mistyped_report_category(declaration: object) -> None:
-    class MistypedRenderer(CustomRenderer):
-        def execution_report_output_format(self) -> object:
-            return declaration
-
-    with pytest.raises(TypeError, match="must be an ExecutionReportOutputFormat"):
-        generate_vex_from_components_result(
-            components=(_component(),),
-            source=LocalFindingsSource(path=FINDINGS_ROOT / "all-analysis-states.json"),
-            timestamp=None,
-            renderer=MistypedRenderer(),
-        )
-
-
-@pytest.mark.parametrize(
-    "declaration",
-    tuple(
-        category
-        for category in FindingSourceCategory
-        if category is not FindingSourceCategory.CUSTOM
-    ),
-)
-def test_custom_source_cannot_declare_a_builtin_report_category(
-    declaration: FindingSourceCategory,
-) -> None:
-    class ImpersonatingSource(FakeVulnerabilitySource):
-        def execution_report_finding_source(self) -> FindingSourceCategory:
-            return declaration
-
-    with pytest.raises(ValueError, match=r"FindingSourceCategory\.CUSTOM"):
-        generate_vex_from_source_result(
-            input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
-            source=ImpersonatingSource(()),
-        )
-
-
-@pytest.mark.parametrize(
-    "declaration",
-    tuple(
-        category
-        for category in ExecutionReportOutputFormat
-        if category is not ExecutionReportOutputFormat.CUSTOM
-    ),
-)
-def test_custom_renderer_cannot_declare_a_builtin_report_category(
-    declaration: ExecutionReportOutputFormat,
-) -> None:
-    class ImpersonatingRenderer(CustomRenderer):
-        def execution_report_output_format(self) -> ExecutionReportOutputFormat:
-            return declaration
-
-    with pytest.raises(ValueError, match=r"ExecutionReportOutputFormat\.CUSTOM"):
-        generate_vex_from_components_result(
-            components=(_component(),),
-            source=LocalFindingsSource(path=FINDINGS_ROOT / "all-analysis-states.json"),
-            timestamp=None,
-            renderer=ImpersonatingRenderer(),
-        )
-
-
-def test_custom_source_cannot_use_private_capability_to_claim_builtin_category() -> None:
-    class ForgedBuiltinSource(FakeVulnerabilitySource):
-        def _vexcalibur_execution_report_finding_source(
-            self,
-        ) -> FindingSourceCategory:
-            return FindingSourceCategory.PUBLIC_OSV
-
-        def execution_report_finding_source(
-            self,
-        ) -> Literal[FindingSourceCategory.CUSTOM]:
-            return FindingSourceCategory.CUSTOM
-
-    result = generate_vex_from_source_result(
+    result_with_context = generate_vex_from_source_result(
         input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
-        source=ForgedBuiltinSource(()),
+        source=CategorizedSource(()),
+        renderer=CategorizedRenderer(),
+        execution_context=context,
     )
 
-    assert result.execution_context is not None
-    assert result.execution_context.finding_source is FindingSourceCategory.CUSTOM
-
-
-def test_custom_renderer_cannot_use_private_capability_to_claim_builtin_format() -> None:
-    class ForgedBuiltinRenderer(CustomRenderer):
-        def _vexcalibur_execution_report_output_format(
-            self,
-        ) -> ExecutionReportOutputFormat:
-            return ExecutionReportOutputFormat.CSAF
-
-    result = generate_vex_from_components_result(
-        components=load_cyclonedx_sbom(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
-        source=LocalFindingsSource(path=FINDINGS_ROOT / "all-analysis-states.json"),
-        timestamp=None,
-        renderer=ForgedBuiltinRenderer(),
-    )
-
-    assert result.execution_context is not None
-    assert result.execution_context.output_format is ExecutionReportOutputFormat.CUSTOM
+    assert result_with_context.execution_context is context
 
 
 @pytest.mark.parametrize(

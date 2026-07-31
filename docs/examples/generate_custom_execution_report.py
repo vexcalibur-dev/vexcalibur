@@ -2,28 +2,20 @@
 """Generate an execution report for custom Python source and renderer types."""
 
 from datetime import datetime
-from typing import Literal
 
 from packageurl import PackageURL
 
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
 from vexcalibur.generate import generate_vex_from_components_result
 from vexcalibur.generation_result import (
-    ExecutionReportFindingSourceDeclaration,
     ExecutionReportOutputFormat,
-    ExecutionReportOutputFormatDeclaration,
     FindingSourceCategory,
     GenerationExecutionContext,
     InventorySourceCategory,
 )
 
 
-class CustomSource(ExecutionReportFindingSourceDeclaration):
-    def execution_report_finding_source(
-        self,
-    ) -> Literal[FindingSourceCategory.CUSTOM]:
-        return FindingSourceCategory.CUSTOM
-
+class CustomSource:
     def findings_for_components(
         self,
         components: tuple[ComponentIdentity, ...],
@@ -31,12 +23,7 @@ class CustomSource(ExecutionReportFindingSourceDeclaration):
         return ()
 
 
-class CustomRenderer(ExecutionReportOutputFormatDeclaration):
-    def execution_report_output_format(
-        self,
-    ) -> Literal[ExecutionReportOutputFormat.CUSTOM]:
-        return ExecutionReportOutputFormat.CUSTOM
-
+class CustomRenderer:
     def render(
         self,
         *,

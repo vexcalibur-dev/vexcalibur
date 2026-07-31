@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.archive_fixtures import pax_record, write_extension_tar_gzip
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "verify-dist-metadata.py"
 WRAPPER = REPO_ROOT / "scripts" / "run-dist-metadata-verifier.sh"
@@ -163,6 +165,20 @@ def test_verifier_accepts_matching_wheel_and_sdist(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert result.stdout == ""
     assert result.stderr == ""
+
+
+def test_verifier_rejects_solaris_pax_sdist_path_rewrite(tmp_path: Path) -> None:
+    write_wheel(tmp_path)
+    write_extension_tar_gzip(
+        tmp_path / "vexcalibur-0.1.0.tar.gz",
+        extension_type=b"X",
+        extension_payload=pax_record("path", "vexcalibur-0.1.0/PKG-INFO"),
+    )
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert "unsupported pax metadata key" in result.stderr.lower()
 
 
 def test_verifier_writes_github_output(tmp_path: Path) -> None:

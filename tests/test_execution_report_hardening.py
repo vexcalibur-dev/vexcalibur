@@ -13,6 +13,7 @@ import pytest
 import vexcalibur
 import vexcalibur.execution_report_destination as destination_module
 import vexcalibur.execution_report_locks as lock_module
+import vexcalibur.execution_report_staging as staging_module
 from vexcalibur.execution_report_destination import (
     BoundFileDestination,
     BoundFileDestinationError,
@@ -121,6 +122,95 @@ def test_parent_directory_leaf_rejection_retains_no_descriptors() -> None:
 
     assert len(retained_errors) == 25
     assert len(tuple(descriptor_directory.iterdir())) == initial_descriptors
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_interrupted_destination_close_never_closes_reused_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    owned_descriptor = destination._parent_descriptor
+    replacement: list[int] = []
+    real_close = os.close
+
+    def close_then_reuse(descriptor: int) -> None:
+        if descriptor != owned_descriptor:
+            destination_module._close_descriptor_retryable(descriptor)
+            return
+        real_close(descriptor)
+        replacement.append(os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY))
+        assert replacement[-1] == owned_descriptor
+        raise KeyboardInterrupt("synthetic post-close interruption")
+
+    monkeypatch.setattr(
+        destination_module,
+        "_close_descriptor_retryable",
+        close_then_reuse,
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt, match="post-close interruption"):
+            destination.close()
+
+        assert destination.closed
+        assert destination._parent_descriptor == -1
+        destination.close()
+        os.fstat(replacement[0])
+    finally:
+        for descriptor in replacement:
+            real_close(descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+@pytest.mark.parametrize("owner_kind", ("staged", "rollback"))
+def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
+    owner_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    manager = destination.stage_bytes(b"report")
+    staged = manager.__enter__()
+    owner = staged if owner_kind == "staged" else staged._prepare_rollback()
+    attribute = "temporary_fd" if owner_kind == "staged" else "published_fd"
+    owned_descriptor = getattr(owner, attribute)
+    replacement: list[int] = []
+    real_release = staging_module._close_descriptor_retryable
+    real_close = os.close
+
+    def close_then_reuse(descriptor: int) -> None:
+        if descriptor != owned_descriptor:
+            real_release(descriptor)
+            return
+        real_close(descriptor)
+        replacement.append(os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY))
+        assert replacement[-1] == owned_descriptor
+        raise KeyboardInterrupt("synthetic post-close interruption")
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        close_then_reuse,
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt, match="post-close interruption"):
+            owner.close()
+
+        assert getattr(owner, attribute) == -1
+        owner.close()
+        os.fstat(replacement[0])
+    finally:
+        monkeypatch.setattr(
+            staging_module,
+            "_close_descriptor_retryable",
+            real_release,
+        )
+        if owner_kind == "rollback":
+            owner.close()
+        manager.__exit__(None, None, None)
+        destination.close()
+        for descriptor in replacement:
+            real_close(descriptor)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

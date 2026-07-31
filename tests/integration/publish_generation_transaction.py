@@ -26,6 +26,7 @@ def main() -> None:
     pause_marker = _optional_path(sys.argv[4])
     release_marker = _optional_path(sys.argv[5])
     lock_observation = _optional_path(sys.argv[6])
+    pause_target = sys.argv[7] if len(sys.argv) > 7 else "output"
 
     if lock_observation is not None:
         _observe_first_lock_attempt(lock_observation)
@@ -36,8 +37,8 @@ def main() -> None:
         protected_paths=(),
     ) as transaction:
         if pause_marker is not None and release_marker is not None:
-            _pause_after_output_commit(
-                output_path=output_path,
+            _pause_after_selected_commit(
+                selected_path=output_path if pause_target == "output" else report_path,
                 pause_marker=pause_marker,
                 release_marker=release_marker,
             )
@@ -81,9 +82,9 @@ def _observe_first_lock_attempt(observation: Path) -> None:
     fcntl.flock = observe
 
 
-def _pause_after_output_commit(
+def _pause_after_selected_commit(
     *,
-    output_path: Path,
+    selected_path: Path,
     pause_marker: Path,
     release_marker: Path,
 ) -> None:
@@ -95,7 +96,7 @@ def _pause_after_output_commit(
         destination_lock_held: bool = False,
     ) -> None:
         real_commit(staged, destination_lock_held=destination_lock_held)
-        if staged.destination.requested_path != output_path:
+        if staged.destination.requested_path != selected_path:
             return
         pause_marker.write_text("paused", encoding="utf-8")
         deadline = time.monotonic() + 10

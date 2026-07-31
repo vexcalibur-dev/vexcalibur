@@ -13,6 +13,8 @@ from scripts.archive_limits import (
     preflight_zip_member_count,
 )
 
+from tests.archive_fixtures import pax_record, write_extension_tar_gzip
+
 
 def test_zip_preflight_counts_central_directory_members_independently(
     tmp_path: Path,
@@ -193,6 +195,102 @@ def test_tar_preflight_rejects_pax_keys_that_override_member_identity(
         archive.addfile(member, BytesIO(payload))
 
     with pytest.raises(ArchivePreflightError, match="unsupported PAX metadata key"):
+        preflight_tar_gzip_stream(
+            archive_path,
+            artifact="test tar",
+            maximum_members=10,
+            maximum_file_bytes=1024,
+        )
+
+
+def test_tar_preflight_accepts_bounded_solaris_pax_mtime(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "solaris-pax.tar.gz"
+    write_extension_tar_gzip(
+        archive_path,
+        extension_type=b"X",
+        extension_payload=pax_record("mtime", "1700000000.123456"),
+    )
+
+    preflight_tar_gzip_stream(
+        archive_path,
+        artifact="test tar",
+        maximum_members=10,
+        maximum_file_bytes=1024,
+    )
+
+
+def test_tar_preflight_rejects_oversized_solaris_pax_metadata(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "oversized-solaris-pax.tar.gz"
+    write_extension_tar_gzip(
+        archive_path,
+        extension_type=b"X",
+        extension_payload=pax_record("mtime", "1" * (2 * 1024 * 1024)),
+    )
+
+    with pytest.raises(ArchivePreflightError, match="PAX metadata exceeds"):
+        preflight_tar_gzip_stream(
+            archive_path,
+            artifact="test tar",
+            maximum_members=10,
+            maximum_file_bytes=1024,
+        )
+
+
+@pytest.mark.parametrize("key", ("path", "size"))
+def test_tar_preflight_rejects_solaris_pax_member_rewrites(
+    tmp_path: Path,
+    key: str,
+) -> None:
+    archive_path = tmp_path / f"solaris-pax-{key}.tar.gz"
+    write_extension_tar_gzip(
+        archive_path,
+        extension_type=b"X",
+        extension_payload=pax_record(key, "different"),
+    )
+
+    with pytest.raises(ArchivePreflightError, match="unsupported PAX metadata key"):
+        preflight_tar_gzip_stream(
+            archive_path,
+            artifact="test tar",
+            maximum_members=10,
+            maximum_file_bytes=1024,
+        )
+
+
+def test_tar_preflight_rejects_too_many_solaris_pax_records(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "many-solaris-pax-records.tar.gz"
+    write_extension_tar_gzip(
+        archive_path,
+        extension_type=b"X",
+        extension_payload=pax_record("mtime", "1") * 10_001,
+    )
+
+    with pytest.raises(ArchivePreflightError, match="too many PAX metadata records"):
+        preflight_tar_gzip_stream(
+            archive_path,
+            artifact="test tar",
+            maximum_members=10,
+            maximum_file_bytes=1024,
+        )
+
+
+def test_tar_preflight_rejects_sparse_extension_headers(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "sparse.tar.gz"
+    write_extension_tar_gzip(
+        archive_path,
+        extension_type=b"S",
+        extension_payload=b"",
+    )
+
+    with pytest.raises(ArchivePreflightError, match="unsupported tar extension header"):
         preflight_tar_gzip_stream(
             archive_path,
             artifact="test tar",

@@ -1,20 +1,15 @@
-"""Typed source and renderer selections with report-safe provenance."""
+"""Internal report classification for exact built-in sources and renderers."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from vexcalibur.csaf import Csaf20VexJsonRenderer
-from vexcalibur.domain import (
-    VulnerabilitySource,
-    execution_report_finding_source,
-)
+from vexcalibur.domain import VulnerabilitySource
 from vexcalibur.generation_context import (
     ExecutionReportOutputFormat,
     FindingSourceCategory,
 )
 from vexcalibur.openvex import OpenVexJsonRenderer
-from vexcalibur.render import VexRenderer, execution_report_output_format
+from vexcalibur.render import VexRenderer
 from vexcalibur.sources.local import LocalFindingsSource
 from vexcalibur.sources.osv import (
     OsvSource,
@@ -23,50 +18,36 @@ from vexcalibur.sources.osv import (
 from vexcalibur.vex import CycloneDxJsonRenderer
 
 
-@dataclass(frozen=True)
-class SelectedFindingSource:
-    """One finding source and the provenance it may place in a report."""
-
-    source: VulnerabilitySource
-    report_category: FindingSourceCategory | None
-
-
-@dataclass(frozen=True)
-class SelectedRenderer:
-    """One renderer and the output category it may place in a report."""
-
-    renderer: VexRenderer
-    report_format: ExecutionReportOutputFormat | None
-
-
-def select_finding_source(source: VulnerabilitySource) -> SelectedFindingSource:
-    """Classify exact built-ins while reserving custom declarations for extensions."""
+def finding_source_category(
+    source: VulnerabilitySource,
+) -> FindingSourceCategory | None:
+    """Return report provenance only for an exact built-in source."""
     source_type = type(source)
-    category: FindingSourceCategory | None
     if source_type is LocalFindingsSource:
-        category = FindingSourceCategory.LOCAL_FILE
-    elif source_type is OsvSource:
+        return FindingSourceCategory.LOCAL_FILE
+    if source_type is OsvSource:
         assert isinstance(source, OsvSource)
-        category = _osv_source_category(source)
-    else:
-        category = execution_report_finding_source(source)
-    return SelectedFindingSource(source=source, report_category=category)
+        return _osv_source_category(source)
+    return None
 
 
-def select_renderer(renderer: VexRenderer | None) -> SelectedRenderer:
-    """Select the default renderer and classify exact built-in implementations."""
-    selected = CycloneDxJsonRenderer() if renderer is None else renderer
-    renderer_type = type(selected)
-    output_format: ExecutionReportOutputFormat | None
+def select_renderer(renderer: VexRenderer | None) -> VexRenderer:
+    """Return the requested renderer or the built-in default."""
+    return CycloneDxJsonRenderer() if renderer is None else renderer
+
+
+def renderer_output_format(
+    renderer: VexRenderer,
+) -> ExecutionReportOutputFormat | None:
+    """Return report provenance only for an exact built-in renderer."""
+    renderer_type = type(renderer)
     if renderer_type is CycloneDxJsonRenderer:
-        output_format = ExecutionReportOutputFormat.CYCLONEDX
-    elif renderer_type is OpenVexJsonRenderer:
-        output_format = ExecutionReportOutputFormat.OPENVEX
-    elif renderer_type is Csaf20VexJsonRenderer:
-        output_format = ExecutionReportOutputFormat.CSAF
-    else:
-        output_format = execution_report_output_format(selected)
-    return SelectedRenderer(renderer=selected, report_format=output_format)
+        return ExecutionReportOutputFormat.CYCLONEDX
+    if renderer_type is OpenVexJsonRenderer:
+        return ExecutionReportOutputFormat.OPENVEX
+    if renderer_type is Csaf20VexJsonRenderer:
+        return ExecutionReportOutputFormat.CSAF
+    return None
 
 
 def _osv_source_category(source: OsvSource) -> FindingSourceCategory:

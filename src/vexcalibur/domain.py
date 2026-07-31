@@ -5,11 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Literal, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from packageurl import PackageURL
-
-from vexcalibur.generation_context import FindingSourceCategory
 
 DEFAULT_ANALYSIS_DETAIL = (
     "Detected by vulnerability source; manual exploitability analysis required."
@@ -100,40 +98,11 @@ class VulnerabilitySource(Protocol):
 
 
 @runtime_checkable
-class ExecutionReportFindingSourceDeclaration(Protocol):
-    """Report-provenance capability for a custom finding source."""
-
-    def execution_report_finding_source(
-        self,
-    ) -> Literal[FindingSourceCategory.CUSTOM]:
-        """Return the custom finding-source report category."""
-
-
-@runtime_checkable
 class GenerationSourcePreflight(Protocol):
     """Source policy checks that must run before loading remote inventory."""
 
     def validate_before_inventory_load(self) -> None:
         """Validate source policy without making a request."""
-
-
-def execution_report_finding_source(
-    source: VulnerabilitySource,
-) -> FindingSourceCategory | None:
-    """Resolve a custom source's declared execution-report provenance."""
-    if not isinstance(source, ExecutionReportFindingSourceDeclaration):
-        return None
-    category = source.execution_report_finding_source()
-    if not isinstance(category, FindingSourceCategory):
-        raise TypeError(
-            f"{type(source).__name__} execution report category must be a FindingSourceCategory"
-        )
-    if category is not FindingSourceCategory.CUSTOM:
-        raise ValueError(
-            f"{type(source).__name__} execution report category must be "
-            "FindingSourceCategory.CUSTOM"
-        )
-    return category
 
 
 def validate_source_before_inventory_load(source: VulnerabilitySource) -> None:

@@ -16,6 +16,42 @@ _PURL_UNRESERVED_CHARACTERS = frozenset(
 )
 
 
+def enforce_builtin_render_input_budget(
+    *,
+    components: tuple[ComponentIdentity, ...],
+    findings: tuple[VulnerabilityFinding, ...],
+    component_purl_copies: int,
+    finding_component_purl_copies: int = 0,
+    additional_text: tuple[str | None, ...] = (),
+) -> None:
+    """Bound normalized inputs before a built-in renderer allocates its document."""
+    budget = RenderInputBudget()
+    referenced: set[str] = set()
+    for finding in findings:
+        budget.add_finding(finding)
+        referenced.add(finding.component_ref)
+
+    components_by_ref: dict[str, ComponentIdentity] = {}
+    for component in components:
+        budget.add_component_reference()
+        if component.ref not in referenced:
+            continue
+        components_by_ref[component.ref] = component
+        budget.add_component(component, purl_copies=component_purl_copies)
+
+    if finding_component_purl_copies:
+        for finding in findings:
+            referenced_component = components_by_ref.get(finding.component_ref)
+            if referenced_component is not None:
+                budget.add_package_url(
+                    referenced_component,
+                    copies=finding_component_purl_copies,
+                )
+
+    for value in additional_text:
+        budget.add_text(value)
+
+
 class RenderInputBudget:
     """Bound caller-controlled text before a built-in renderer allocates its graph."""
 

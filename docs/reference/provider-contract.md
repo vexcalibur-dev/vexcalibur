@@ -13,22 +13,13 @@ in the embedding's package and implements the same public protocol.
 A source implements `vexcalibur.domain.VulnerabilitySource`:
 
 ```python
-from typing import Literal
-
 from vexcalibur.domain import (
     ComponentIdentity,
-    ExecutionReportFindingSourceDeclaration,
     VulnerabilityFinding,
 )
-from vexcalibur.generation_result import FindingSourceCategory
 
 
-class ExampleSource(ExecutionReportFindingSourceDeclaration):
-    def execution_report_finding_source(
-        self,
-    ) -> Literal[FindingSourceCategory.CUSTOM]:
-        return FindingSourceCategory.CUSTOM
-
+class ExampleSource:
     def findings_for_components(
         self,
         components: tuple[ComponentIdentity, ...],
@@ -43,16 +34,14 @@ See the tested [custom generation
 example](../examples/generate_custom_execution_report.py) for a provider that
 returns no findings and prints a custom execution report.
 
-`execution_report_finding_source` is optional. Implement it when the provider
-supports generation execution reports but does not match a built-in source
-category. Vexcalibur records `custom` without exposing the provider name or
-endpoint. If the provider omits the method, callers must supply a complete
-`GenerationExecutionContext` before they request a report.
+Custom providers cannot assign their own report category. The caller must pass
+a complete `GenerationExecutionContext` with
+`FindingSourceCategory.CUSTOM` before it requests a report. Vexcalibur records
+`custom` without exposing the provider name or endpoint.
 
-Custom providers can return only `FindingSourceCategory.CUSTOM`. Vexcalibur
-reserves `local_file`, `public_osv`, and `custom_osv` for its built-in source
-implementations. An injected OSV client is an extension and therefore records
-`custom`, regardless of the endpoint it contacts.
+Vexcalibur reserves `local_file`, `public_osv`, and `custom_osv` for exact
+built-in source implementations. An injected OSV client is an extension and
+therefore records `custom`, regardless of the endpoint it contacts.
 
 ## Component identity
 

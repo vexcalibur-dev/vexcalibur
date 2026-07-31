@@ -238,8 +238,8 @@ class StagedFileWrite:
 
     def _close_owned_descriptor(self, attribute: str) -> None:
         descriptor = getattr(self, attribute)
-        _close_descriptor_retryable(descriptor)
         object.__setattr__(self, attribute, -1)
+        _close_descriptor_retryable(descriptor)
 
     def __copy__(self) -> StagedFileWrite:
         raise TypeError("staged file writes cannot be copied")
@@ -338,8 +338,8 @@ class PublishedFileRollback:
 
     def _close_owned_descriptor(self, attribute: str) -> None:
         descriptor = getattr(self, attribute)
-        _close_descriptor_retryable(descriptor)
         object.__setattr__(self, attribute, -1)
+        _close_descriptor_retryable(descriptor)
 
     def __copy__(self) -> PublishedFileRollback:
         raise TypeError("published rollback handles cannot be copied")
