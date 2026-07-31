@@ -92,6 +92,7 @@ class GenerationOutputTransaction:
         "_closed",
         "_consumed",
         "_discard_report_on_close",
+        "_pending_report_rollback",
         "_report_rollback",
         "output_destination",
         "output_path",
@@ -117,6 +118,7 @@ class GenerationOutputTransaction:
         self._consumed = False
         self._closed = False
         self._discard_report_on_close = False
+        self._pending_report_rollback: PublishedFileRollback | None = None
         self._report_rollback: PublishedFileRollback | None = None
 
     @classmethod
@@ -344,14 +346,9 @@ class GenerationOutputTransaction:
         try:
             self._verify_report_still_distinct()
             rollback = staged_report._prepare_rollback()
-            try:
-                self._report_rollback = rollback
-            except BaseException as failure:
-                try:
-                    rollback.close()
-                except BaseException as cleanup_failure:
-                    _retain_cleanup_failures(failure, (cleanup_failure,))
-                raise
+            object.__setattr__(self, "_pending_report_rollback", rollback)
+            self._report_rollback = rollback
+            object.__setattr__(self, "_pending_report_rollback", None)
             object.__setattr__(self, "_discard_report_on_close", True)
             staged_report.commit(destination_lock_held=True)
             object.__setattr__(self, "_discard_report_on_close", False)
@@ -366,7 +363,12 @@ class GenerationOutputTransaction:
         failure: BaseException,
     ) -> tuple[BaseException, TracebackType | None, BaseException | None]:
         cleanup_failure: BaseException | None = None
-        if self._report_rollback is not None:
+        if self._pending_report_rollback is not None:
+            try:
+                self._release_pending_report_rollback()
+            except BaseException as exc:
+                cleanup_failure = exc
+        elif self._report_rollback is not None:
             object.__setattr__(self, "_discard_report_on_close", True)
             try:
                 self._discard_published_report()
@@ -404,6 +406,11 @@ class GenerationOutputTransaction:
         if self.closed:
             return
         failure: BaseException | None = None
+        if self._pending_report_rollback is not None:
+            try:
+                self._release_pending_report_rollback()
+            except BaseException as exc:
+                failure = exc
         for destination in (self.output_destination, self.report_destination):
             if destination is None:
                 continue
@@ -413,13 +420,17 @@ class GenerationOutputTransaction:
                 if failure is None:
                     failure = exc
                 object.__setattr__(self, "_discard_report_on_close", True)
-        if not self._discard_report_on_close and failure is None:
+        if (
+            self._pending_report_rollback is None
+            and not self._discard_report_on_close
+            and failure is None
+        ):
             try:
                 self._release_report_rollback()
             except BaseException as exc:
                 failure = exc
                 object.__setattr__(self, "_discard_report_on_close", True)
-        if self._discard_report_on_close:
+        if self._pending_report_rollback is None and self._discard_report_on_close:
             try:
                 self._discard_published_report()
             except BaseException as exc:
@@ -432,6 +443,18 @@ class GenerationOutputTransaction:
                 raise GenerationOutputCleanupError(str(failure)) from failure
             raise failure
         object.__setattr__(self, "_closed", True)
+
+    def _release_pending_report_rollback(self) -> None:
+        rollback = self._pending_report_rollback
+        if rollback is None:
+            return
+        try:
+            rollback.close()
+        finally:
+            if rollback.closed:
+                object.__setattr__(self, "_pending_report_rollback", None)
+                if self._report_rollback is rollback:
+                    object.__setattr__(self, "_report_rollback", None)
 
     def abort(self) -> None:
         """Remove a published report, then close every retained descriptor."""

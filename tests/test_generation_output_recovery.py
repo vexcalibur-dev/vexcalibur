@@ -207,8 +207,88 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
     assert interrupted
     assert len(prepared_rollbacks) == 1
     assert prepared_rollbacks[0].closed
+    assert transaction._pending_report_rollback is None
     assert output_path.exists()
     assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_rollback_handoff_cleanup_failure_retains_retryable_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    real_setattr = GenerationOutputTransaction.__setattr__
+    real_prepare_rollback = staging_module.StagedFileWrite._prepare_rollback
+    real_close = staging_module.PublishedFileRollback.close
+    prepared_rollbacks: list[staging_module.PublishedFileRollback] = []
+
+    def capture_prepared_rollback(
+        staged: staging_module.StagedFileWrite,
+    ) -> staging_module.PublishedFileRollback:
+        rollback = real_prepare_rollback(staged)
+        prepared_rollbacks.append(rollback)
+        return rollback
+
+    def interrupt_rollback_handoff(
+        target: GenerationOutputTransaction,
+        name: str,
+        value: object,
+    ) -> None:
+        if name == "_report_rollback" and value is not None:
+            raise KeyboardInterrupt("synthetic rollback handoff cancellation")
+        real_setattr(target, name, value)
+
+    def fail_rollback_close(rollback: staging_module.PublishedFileRollback) -> None:
+        raise OSError("synthetic rollback close failure")
+
+    monkeypatch.setattr(
+        staging_module.StagedFileWrite,
+        "_prepare_rollback",
+        capture_prepared_rollback,
+    )
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "__setattr__",
+        interrupt_rollback_handoff,
+    )
+    monkeypatch.setattr(
+        staging_module.PublishedFileRollback,
+        "close",
+        fail_rollback_close,
+    )
+
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="synthetic rollback handoff cancellation",
+    ) as captured:
+        transaction.commit(
+            _generation_result(monkeypatch),
+            binary_stdout=None,
+        )
+
+    assert len(prepared_rollbacks) == 1
+    rollback = prepared_rollbacks[0]
+    assert transaction._pending_report_rollback is rollback
+    assert not rollback.closed
+    assert str(captured.value.vexcalibur_cleanup_failures[0]) == (  # type: ignore[attr-defined]
+        "synthetic rollback close failure"
+    )
+    assert output_path.exists()
+    assert not report_path.exists()
+
+    monkeypatch.setattr(staging_module.PublishedFileRollback, "close", real_close)
+    transaction.abort()
+
+    assert rollback.closed
+    assert transaction._pending_report_rollback is None
+    assert transaction._report_rollback is None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
