@@ -29,9 +29,11 @@ def _retain_cleanup_failures(
         isinstance(failure, BaseException) for failure in retained
     ):
         retained = ()
-    merged = list(retained)
-    for failure in failures:
-        if all(failure is not existing for existing in merged):
+    merged: list[BaseException] = []
+    for failure in (*retained, *failures):
+        if failure is not primary and all(failure is not existing for existing in merged):
             merged.append(failure)
     if merged:
         primary.__dict__["vexcalibur_cleanup_failures"] = tuple(merged)
+    else:
+        primary.__dict__.pop("vexcalibur_cleanup_failures", None)
