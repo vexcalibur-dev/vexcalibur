@@ -36,27 +36,32 @@ the required read access and run the complete check again.
 
 The checker requires these default-branch controls:
 
-| Repository | Strict GitHub Actions checks |
+| Repository | Required checks and source binding |
 | --- | --- |
-| `vexcalibur` | `CI result`, `Analyze Python`, `dependency-review`, `pre-commit` |
-| `vexcalibur-action` | `CI result`, `Analyze (actions)`, `Analyze (python)` |
-| `vexcalibur-orb` | `Quality`, `Analyze (actions)`, `Analyze (python)` |
-| `.github` | `Validate workflow templates`, `Smoke Python security commands`, `Analyze (actions)` |
+| `vexcalibur` | `Analyze Python`, `CI result`, `Scorecard`, `dependency-review`, and `pre-commit` from GitHub Actions (`15368`) |
+| `vexcalibur-action` | `CI result`, `Dependency Review`, and `OpenSSF Scorecard` from GitHub Actions (`15368`); `CodeQL` from GitHub Advanced Security (`57789`); `pre-commit.ci - pr` with no source binding |
+| `vexcalibur-orb` | `Quality` and `Scorecard` from GitHub Actions (`15368`); `CodeQL` from GitHub Advanced Security (`57789`); `lint-pack` and `test-deploy` from CircleCI (`18001`); `pre-commit.ci - pr` with no source binding |
+| `.github` | `Smoke Python security commands` and `Validate workflow templates` from GitHub Actions (`15368`); `CodeQL` from GitHub Advanced Security (`57789`) |
 
-Every repository's default branch must remain `main`. Every check is bound to
-the GitHub Actions App integration, not merely to a matching status name. Each
-active ruleset applies to the default branch, requires a pull request, resolves
-review threads, prevents deletion and non-fast-forward updates, and uses strict
-required checks. The rulesets have no branch bypass actors. They allow zero
-required approvals so a solo maintainer can merge a passing pull request
-without fabricating an independent reviewer. Changing that tradeoff requires an
-explicit policy review.
+Every repository's default branch must remain `main`. The checker compares
+each numeric integration ID with the expected owner, not only the check name.
+GitHub does not bind `pre-commit.ci - pr` to an expected source in the Action
+and Orb rulesets, so the checker can require only its exact name. A same-name
+status from another actor with write access may satisfy that requirement. This
+accepted risk is tracked in [issue #144](https://github.com/vexcalibur-dev/vexcalibur/issues/144).
+A new name-only check, a newly supplied ID, a duplicate, or a different
+integration is drift until this policy is reviewed and updated.
+
+Each active ruleset applies to the default branch, requires a pull request,
+resolves review threads, prevents deletion and non-fast-forward updates, and
+uses strict required checks. Only squash merging is allowed. The rulesets have
+no branch bypass actors. They allow zero required approvals so a solo
+maintainer can merge a passing pull request without fabricating an independent
+reviewer. Changing that tradeoff requires an explicit policy review.
 
 Core, Action, and Orb each have two active `refs/tags/v*` rulesets:
 
-- a creation rule permits only the Vexcalibur release integration for core and
-  Action. Orb uses the organization administrator as its explicit publishing
-  path until its CircleCI publishing identity is configured.
+- a creation rule permits only the Vexcalibur release integration.
 - a separate update-and-deletion rule has no bypass, so an existing release tag
   is immutable even for the actor allowed to create it.
 
@@ -91,16 +96,21 @@ controls, not a claim of independent approval.
 
 ## Controls that still need external administration
 
-The checker records the current safe baseline; it does not claim every desired
-control is complete. Core and Action still use one long-lived automation App
-key. GitHub rejects the built-in Actions integration as a tag-ruleset bypass
-actor, so removing that key without a separately scoped App or credential broker
-would weaken restricted `v*` tag creation. The checker confirms that the App is
-unsuspended and has only contents-write plus metadata-read permission. It also
-records the current, undesirably broad `all`-repositories installation selection;
-narrowing that scope requires an intentional checker and documentation update.
-The private-key lifecycle is not API-readable and remains tracked with the App
-scope as a release-governance finding.
+The checker records the current baseline; it does not claim every desired
+control is complete. Core, Action, and Orb use one long-lived automation App
+key. A compromise can therefore create a first release tag in any of those
+repositories where the key is available, although the no-bypass rules prevent
+later tag updates or deletion. GitHub rejects the built-in Actions integration
+as a tag-ruleset bypass actor, so removing the App without a separately scoped
+identity or credential broker would weaken restricted `v*` tag creation.
+
+The checker confirms that the App is unsuspended and has administration-read,
+contents-write, and metadata-read permission. Administration read lets release
+automation inspect repository rules without changing them. The checker also
+records the current `all`-repositories installation selection. Narrowing the
+installation and giving each release path its own identity remains tracked in
+[issue #101](https://github.com/vexcalibur-dev/vexcalibur/issues/101). The
+private-key lifecycle is not API-readable.
 
 Future releases are immutable, but release notes and assets created before that
 organization policy remain legacy-mutable; their tag refs are protected. The
