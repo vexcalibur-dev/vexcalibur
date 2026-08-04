@@ -16,6 +16,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_VALIDATION_WORKFLOW = ROOT / ".github" / "workflows" / "release-validation.yml"
 PYPI_WORKFLOW = ROOT / ".github" / "workflows" / "pypi.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+SCORECARD_WORKFLOW = ROOT / ".github" / "workflows" / "scorecard.yml"
 RELEASE_EVIDENCE = ROOT / "scripts" / "release_evidence.py"
 PYPI_SELECTOR = ROOT / "scripts" / "select-pypi-release-files.py"
 
@@ -148,10 +149,79 @@ def _pypi_text() -> str:
     return PYPI_WORKFLOW.read_text(encoding="utf-8")
 
 
+def _scorecard_text() -> str:
+    return SCORECARD_WORKFLOW.read_text(encoding="utf-8")
+
+
+def _yaml_key_values(text: str, key: str) -> list[str]:
+    key_pattern = rf"(?:{re.escape(key)}|'{re.escape(key)}'|\"{re.escape(key)}\")"
+    return re.findall(rf"(?m)^[ ]*{key_pattern}[ ]*:[ ]*(.*?)[ ]*$", text)
+
+
+def _named_workflow_step(text: str, name: str) -> tuple[int, str]:
+    marker = f"      - name: {name}\n"
+    assert text.count(marker) == 1
+    start = text.index(marker)
+    end = text.find("      - name: ", start + len(marker))
+    return start, text[start:] if end == -1 else text[start:end]
+
+
 def _workflow_call_outputs(text: str) -> set[str]:
     start = text.index("    outputs:\n")
     end = text.index("\npermissions:\n", start)
     return set(re.findall(r"(?m)^      ([a-z][a-z0-9-]*):\n", text[start:end]))
+
+
+def test_scorecard_pr_check_does_not_require_sarif_write() -> None:
+    text = _scorecard_text()
+    events = """on:
+  branch_protection_rule:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+"""
+    event_start = text.index("on:\n")
+    event_end = text.index("\npermissions:", event_start)
+    analyze_start, analyze = _named_workflow_step(text, "Run OpenSSF Scorecard")
+    upload_start, upload = _named_workflow_step(text, "Upload Scorecard SARIF")
+    scorecard_uses = re.findall(
+        r"(?m)^        uses:[ ]*(ossf/scorecard-action@[^ ]+)(?:[ ]+#.*)?$",
+        analyze,
+    )
+    upload_uses = re.findall(
+        r"(?m)^        uses:[ ]*(github/codeql-action/upload-sarif@[^ ]+)"
+        r"(?:[ ]+#.*)?$",
+        upload,
+    )
+
+    assert text[event_start:event_end] == events
+    assert all(
+        re.fullmatch(r"[ ]*(?:- )?[A-Za-z][A-Za-z0-9_-]*:.*", line)
+        for line in text.splitlines()
+        if line
+    )
+    assert not re.search(r"(?m):[ ]*[|>][+-]?[0-9]?[ ]*(?:#.*)?$", text)
+    assert "\\" not in text
+    assert "{" not in text and "}" not in text
+    assert all(line.count('"') % 2 == 0 for line in text.splitlines())
+    assert all(line.count("'") % 2 == 0 for line in text.splitlines())
+    assert _yaml_key_values(text, "if") == ["github.event_name != 'pull_request'"]
+    assert not _yaml_key_values(text, "continue-on-error")
+    assert not _yaml_key_values(analyze, "if")
+    assert not _yaml_key_values(analyze, "continue-on-error")
+    assert not _yaml_key_values(analyze, "run")
+    assert text.count("ossf/scorecard-action@") == 1
+    assert len(scorecard_uses) == 1
+    assert re.fullmatch(r"ossf/scorecard-action@[0-9a-f]{40}", scorecard_uses[0])
+    assert _yaml_key_values(upload, "if") == ["github.event_name != 'pull_request'"]
+    assert text.count("github/codeql-action/upload-sarif@") == 1
+    assert len(upload_uses) == 1
+    assert re.fullmatch(r"github/codeql-action/upload-sarif@[0-9a-f]{40}", upload_uses[0])
+    assert analyze_start < upload_start
 
 
 def test_release_note_scanner_is_credentialless_and_isolated() -> None:

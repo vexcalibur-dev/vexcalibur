@@ -18,7 +18,7 @@
           {
             "type": "pull_request",
             "parameters": {
-              "allowed_merge_methods": ["squash", "rebase"],
+              "allowed_merge_methods": ["squash"],
               "require_code_owner_review": false,
               "require_last_push_approval": false,
               "required_approving_review_count": 0,
@@ -33,6 +33,7 @@
               "required_status_checks": [
                 {"context": "CI result", "integration_id": 15368},
                 {"context": "Analyze Python", "integration_id": 15368},
+                {"context": "Scorecard", "integration_id": 15368},
                 {"context": "dependency-review", "integration_id": 15368},
                 {"context": "pre-commit", "integration_id": 15368}
               ]
@@ -87,7 +88,7 @@
           {
             "type": "pull_request",
             "parameters": {
-              "allowed_merge_methods": ["squash", "rebase"],
+              "allowed_merge_methods": ["squash"],
               "require_code_owner_review": false,
               "require_last_push_approval": false,
               "required_approving_review_count": 0,
@@ -101,8 +102,10 @@
               "strict_required_status_checks_policy": true,
               "required_status_checks": [
                 {"context": "CI result", "integration_id": 15368},
-                {"context": "Analyze (actions)", "integration_id": 15368},
-                {"context": "Analyze (python)", "integration_id": 15368}
+                {"context": "CodeQL", "integration_id": 57789},
+                {"context": "Dependency Review", "integration_id": 15368},
+                {"context": "OpenSSF Scorecard", "integration_id": 15368},
+                {"context": "pre-commit.ci - pr"}
               ]
             }
           }
@@ -155,7 +158,7 @@
           {
             "type": "pull_request",
             "parameters": {
-              "allowed_merge_methods": ["squash", "rebase"],
+              "allowed_merge_methods": ["squash"],
               "require_code_owner_review": false,
               "require_last_push_approval": false,
               "required_approving_review_count": 0,
@@ -169,8 +172,11 @@
               "strict_required_status_checks_policy": true,
               "required_status_checks": [
                 {"context": "Quality", "integration_id": 15368},
-                {"context": "Analyze (actions)", "integration_id": 15368},
-                {"context": "Analyze (python)", "integration_id": 15368}
+                {"context": "CodeQL", "integration_id": 57789},
+                {"context": "Scorecard", "integration_id": 15368},
+                {"context": "lint-pack", "integration_id": 18001},
+                {"context": "pre-commit.ci - pr"},
+                {"context": "test-deploy", "integration_id": 18001}
               ]
             }
           }
@@ -181,7 +187,7 @@
         "target": "tag",
         "enforcement": "active",
         "bypass_actors": [
-          {"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}
+          {"actor_id": 4250150, "actor_type": "Integration", "bypass_mode": "always"}
         ],
         "conditions": {
           "ref_name": {
@@ -223,7 +229,7 @@
           {
             "type": "pull_request",
             "parameters": {
-              "allowed_merge_methods": ["squash", "rebase"],
+              "allowed_merge_methods": ["squash"],
               "require_code_owner_review": false,
               "require_last_push_approval": false,
               "required_approving_review_count": 0,
@@ -238,7 +244,7 @@
               "required_status_checks": [
                 {"context": "Validate workflow templates", "integration_id": 15368},
                 {"context": "Smoke Python security commands", "integration_id": 15368},
-                {"context": "Analyze (actions)", "integration_id": 15368}
+                {"context": "CodeQL", "integration_id": 57789}
               ]
             }
           }
@@ -258,6 +264,7 @@
         "target_type": "Organization",
         "repository_selection": "all",
         "permissions": {
+          "administration": "read",
           "contents": "write",
           "metadata": "read"
         },
