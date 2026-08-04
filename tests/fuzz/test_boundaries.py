@@ -31,6 +31,7 @@ CORPUS_EXPECTATIONS: dict[str, tuple[str, str | None]] = {
     "osv/valid-get.json": ("accepted", None),
     "osv/valid-gzip-query.json": ("accepted", None),
     "sbom/forbidden-entity.xml": ("rejected", "SbomError"),
+    "sbom/non-string-spec-version.json": ("rejected", "SbomError"),
     "sbom/valid-json.json": ("accepted", None),
     "sbom/valid-xml.xml": ("accepted", None),
 }
