@@ -11,12 +11,17 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 
 ## Automation targets
 
-- [GitHub Actions](https://github.com/vexcalibur-dev/vexcalibur-action) uses the released companion Action to run Vexcalibur in a workflow.
-- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) has a development preview of the companion orb. It does not have a production registry release yet.
+- [GitHub Actions](https://github.com/vexcalibur-dev/vexcalibur-action) uses the
+  released companion Action to run Vexcalibur in a workflow.
+- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) has a development
+  preview of the companion orb. It does not have a production registry release
+  yet.
 
-Read the integration repository before choosing a release pin. Its
-compatibility and release documentation describes the package versions it has
-tested and whether the integration is ready for production use.
+Follow **Find the latest tested pair** in the GitHub Action's [compatibility
+reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
+to resolve its latest immutable release to an exact commit and tested Vexcalibur
+package. CircleCI production publication is tracked in
+[vexcalibur-orb#22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22).
 
 ## Tutorials
 

@@ -4,7 +4,7 @@ Vexcalibur has published releases and supports the workflows in this manual. It 
 
 Pin exact package and released integration versions in automation. Do not use a mutable branch or development integration reference for a production workflow.
 
-## Published in version 0.3.1
+## Available now
 
 - CycloneDX JSON and XML SBOM input for versions 1.4, 1.5, and 1.6
 - GitHub Dependency Graph SBOM input through `--github-repo OWNER/REPO`
@@ -28,7 +28,7 @@ secrets, CodeQL, OpenSSF Scorecard, and a bounded weekly Atheris campaign.
 
 OpenVEX goldens pass the pinned official schema and `go-vex` parser.
 
-## Self-release evidence added after version 0.3.1
+## Release integrity
 
 Repository tooling can build a deterministic local schema-1 bundle and an
 immutable-publication schema-2 bundle from the exact commit, locked reference
@@ -45,10 +45,9 @@ statically until a real release. The initial production review makes zero
 assertions; a separate synthetic `in_triage` fixture exercises CycloneDX,
 OpenVEX, and CSAF equivalence.
 
-This is maintainer and release tooling added after 0.3.1, not a new package
-API. Read [Why Vexcalibur publishes evidence about
-itself](self-release-evidence.md) for its trust, isolation, and recovery
-boundaries.
+This is maintainer and release tooling, not a package API. Read [Why
+Vexcalibur publishes evidence about itself](self-release-evidence.md) for its
+trust, isolation, and recovery boundaries.
 
 ## CSAF conformance
 

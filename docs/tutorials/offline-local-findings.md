@@ -8,7 +8,7 @@ You need:
 
 - Git.
 - Python 3.10 or newer.
-- `uv` 0.11.17.
+- The `uv` version recorded in `.tool-versions`.
 - A POSIX-style shell.
 
 Clone the source and enter its root:

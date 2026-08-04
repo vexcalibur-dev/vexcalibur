@@ -157,8 +157,10 @@ Use recovery only for an existing annotated release tag created by the
 automation contract. The dispatch itself must run from `main`; the workflow's
 resolver rejects every other Git ref. With a recent authenticated GitHub CLI:
 
+Replace `vX.Y.Z` below with the exact existing release tag you are recovering:
+
 ```bash
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=vX.Y.Z
 
 gh auth status --active --hostname github.com
 gh workflow run release.yml \
@@ -233,10 +235,11 @@ subset, checks the compact JSON filename contract and every digest again,
 re-resolves the immutable release, then invokes the pinned PyPI publisher.
 
 If the GitHub release event was missed or a PyPI upload stopped after one file,
-dispatch `PyPI` from the exact release tag and supply the same tag as input:
+dispatch `PyPI` from the exact release tag and supply the same tag as input.
+Replace `vX.Y.Z` with that tag:
 
 ```bash
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=vX.Y.Z
 gh workflow run pypi.yml \
   --repo vexcalibur-dev/vexcalibur \
   --ref "$RELEASE_TAG" \
@@ -253,12 +256,12 @@ successful no-op.
 Run this from a Vexcalibur checkout after both workflows succeed. It requires a
 recent authenticated GitHub CLI, Git with the release tag available, GNU
 `sha256sum`, `jq`, uv, and Python 3. The temporary directories must be new so
-stale files cannot satisfy a check:
+stale files cannot satisfy a check. Replace `vX.Y.Z` with the published tag:
 
 ```bash
 set -euo pipefail
 
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=vX.Y.Z
 RELEASE_VERSION=${RELEASE_TAG#v}
 REPOSITORY=vexcalibur-dev/vexcalibur
 RELEASE_ASSETS="$(mktemp -d)"
@@ -439,11 +442,12 @@ replaced.
    useful reason. Open the public [Vexcalibur project page on
    PyPI](https://pypi.org/project/vexcalibur/), select the affected version from
    its release history, and confirm that the version is visibly marked as yanked
-   and displays that reason. Also require every file in the version-specific
-   JSON response to report `yanked: true`:
+   and displays that reason. Replace `X.Y.Z` below with the affected release
+   number. Also require every file in the version-specific JSON response to
+   report `yanked: true`:
 
    ```bash
-   RELEASE_VERSION=0.4.0
+   RELEASE_VERSION=X.Y.Z
    python - "$RELEASE_VERSION" <<'PY'
    import json
    import sys

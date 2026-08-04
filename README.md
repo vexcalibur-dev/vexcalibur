@@ -32,12 +32,19 @@ runs Vexcalibur in GitHub Actions and has immutable releases. The
 [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) provides a
 development preview of the same command-line workflow. It does not have a
 production registry release yet, so don't use its preview reference in a
-production pipeline. Each integration repository documents its inputs,
-tested package pairing, and release status.
+production pipeline. Follow **Find the latest tested pair** in the Action's
+[compatibility
+reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
+to resolve its latest immutable release to an exact commit and tested Vexcalibur
+package. CircleCI production publication is tracked in
+[vexcalibur-orb#22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22).
 
 ## Install a release
 
-Create an environment and pin the package version:
+Choose the exact release you reviewed on
+[PyPI](https://pypi.org/project/vexcalibur/#history) or
+[GitHub](https://github.com/vexcalibur-dev/vexcalibur/releases), then replace
+`X.Y.Z` below with that release number:
 
 ```bash
 python -m venv .venv
@@ -45,9 +52,6 @@ python -m venv .venv
 .venv/bin/vexcalibur --help
 ```
 
-Replace `X.Y.Z` with the exact release you reviewed on
-[PyPI](https://pypi.org/project/vexcalibur/#history) or
-[GitHub](https://github.com/vexcalibur-dev/vexcalibur/releases).
 On Windows, use `.venv\Scripts\python` and `.venv\Scripts\vexcalibur`.
 
 ## Try local generation

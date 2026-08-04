@@ -133,16 +133,21 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-The companion action accepts the same command arguments:
+The companion Action accepts the same command arguments. Run **Find the latest
+tested pair** from its [compatibility
+reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
+to obtain an Action tag, its exact commit, and the tested package requirement.
+Replace `ACTION_COMMIT_SHA`, `ACTION_TAG`, and `PACKAGE_SPEC` below with those
+three values:
 
 ```yaml
 permissions:
   contents: read
 
 steps:
-  - uses: vexcalibur-dev/vexcalibur-action@6a028a18b4b7fc15cd5e83056e0013ed0928a483 # v0.2.0
+  - uses: vexcalibur-dev/vexcalibur-action@ACTION_COMMIT_SHA # ACTION_TAG
     with:
-      package-spec: vexcalibur==0.2.0
+      package-spec: PACKAGE_SPEC
       args: |
         generate
         --github-repo
