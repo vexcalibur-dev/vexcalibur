@@ -133,16 +133,30 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-The companion action accepts the same command arguments:
+The companion Action accepts the same command arguments. Run **Find the latest
+tested pair** from its [compatibility
+reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
+to obtain an Action tag, its exact commit, and the tested package requirement.
+Replace `ACTION_COMMIT_SHA`, `ACTION_TAG`, and `PACKAGE_SPEC` below with those
+three values. This production example also expects a reviewed, complete pip
+constraints file at `.github/vexcalibur-constraints.txt`; the file keeps
+transitive package versions stable between runs. The Action's [input
+reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/action.md)
+defines the constraints path and installation behavior.
 
 ```yaml
 permissions:
   contents: read
 
 steps:
-  - uses: vexcalibur-dev/vexcalibur-action@6a028a18b4b7fc15cd5e83056e0013ed0928a483 # v0.2.0
+  - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
     with:
-      package-spec: vexcalibur==0.2.0
+      persist-credentials: false
+
+  - uses: vexcalibur-dev/vexcalibur-action@ACTION_COMMIT_SHA # ACTION_TAG
+    with:
+      package-spec: PACKAGE_SPEC
+      constraints-file: ${{ github.workspace }}/.github/vexcalibur-constraints.txt
       args: |
         generate
         --github-repo

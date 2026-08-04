@@ -8,7 +8,7 @@ You need:
 
 - Git.
 - Python 3.10 or newer.
-- `uv` 0.11.17.
+- `uv`.
 - A POSIX-style shell.
 
 Clone the source and enter its root:
@@ -17,6 +17,9 @@ Clone the source and enter its root:
 git clone https://github.com/vexcalibur-dev/vexcalibur.git
 cd vexcalibur
 ```
+
+The checkout's `.tool-versions` records the tested `uv` version. Activate that
+version with your version manager before you continue.
 
 Install the locked dependencies:
 

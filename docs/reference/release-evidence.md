@@ -312,10 +312,11 @@ uv run --frozen python scripts/release_evidence.py verify-bundle \
   --bundle-dir build/release-evidence
 ```
 
-Verify a schema-2 publication bundle against an exact tag and commit:
+Verify a schema-2 publication bundle against an exact tag and commit. Replace
+`vX.Y.Z` with the release tag under review:
 
 ```bash
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=vX.Y.Z
 git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
 RELEASE_SHA="$(git rev-parse --verify "$RELEASE_TAG^{commit}")"
 

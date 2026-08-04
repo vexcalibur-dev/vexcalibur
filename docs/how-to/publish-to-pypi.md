@@ -157,17 +157,34 @@ Use recovery only for an existing annotated release tag created by the
 automation contract. The dispatch itself must run from `main`; the workflow's
 resolver rejects every other Git ref. With a recent authenticated GitHub CLI:
 
+Replace `vX.Y.Z` below with the exact existing release tag you are recovering:
+
 ```bash
-RELEASE_TAG=v0.4.0
+set -euo pipefail
+
+RELEASE_TAG=vX.Y.Z
 
 gh auth status --active --hostname github.com
-gh workflow run release.yml \
+RUN_URL="$(
+  gh workflow run release.yml \
+    --repo vexcalibur-dev/vexcalibur \
+    --ref main \
+    -f recovery-tag="$RELEASE_TAG"
+)"
+if [[ "$RUN_URL" =~ /actions/runs/([0-9]+)$ ]]; then
+  RUN_ID="${BASH_REMATCH[1]}"
+else
+  printf 'could not read workflow run ID from %s\n' "$RUN_URL" >&2
+  exit 1
+fi
+gh run watch "$RUN_ID" \
   --repo vexcalibur-dev/vexcalibur \
-  --ref main \
-  -f recovery-tag="$RELEASE_TAG"
+  --exit-status
 ```
 
-Leave `version` empty and inspect every reconciliation message. GitHub Release
+Leave `version` empty and inspect every reconciliation message. The watch must
+end with a successful conclusion. Success means the release is immutable and
+the workflow has verified every expected asset and attestation. GitHub Release
 recovery deliberately uses `--ref main`; the later PyPI recovery dispatch uses
 the exact release tag as both `--ref` and `release-tag`.
 
@@ -233,32 +250,49 @@ subset, checks the compact JSON filename contract and every digest again,
 re-resolves the immutable release, then invokes the pinned PyPI publisher.
 
 If the GitHub release event was missed or a PyPI upload stopped after one file,
-dispatch `PyPI` from the exact release tag and supply the same tag as input:
+dispatch `PyPI` from the exact release tag and supply the same tag as input.
+Replace `vX.Y.Z` with that tag:
 
 ```bash
-RELEASE_TAG=v0.4.0
-gh workflow run pypi.yml \
+set -euo pipefail
+
+RELEASE_TAG=vX.Y.Z
+RUN_URL="$(
+  gh workflow run pypi.yml \
+    --repo vexcalibur-dev/vexcalibur \
+    --ref "$RELEASE_TAG" \
+    -f release-tag="$RELEASE_TAG"
+)"
+if [[ "$RUN_URL" =~ /actions/runs/([0-9]+)$ ]]; then
+  RUN_ID="${BASH_REMATCH[1]}"
+else
+  printf 'could not read workflow run ID from %s\n' "$RUN_URL" >&2
+  exit 1
+fi
+gh run watch "$RUN_ID" \
   --repo vexcalibur-dev/vexcalibur \
-  --ref "$RELEASE_TAG" \
-  -f release-tag="$RELEASE_TAG"
+  --exit-status
 ```
 
 The workflow rejects a dispatch whose Git ref and `release-tag` differ. This
 binding is also what satisfies the `pypi` environment's `v*` tag deployment
 policy. Publishing both files already present at the expected hashes is a
-successful no-op.
+successful no-op. The watch must end successfully before verification. On an
+already complete release, the selector reports that no distribution files need
+publication; after an interrupted upload, the PyPI release contains both files
+at their expected hashes.
 
 ## Verify the release
 
 Run this from a Vexcalibur checkout after both workflows succeed. It requires a
 recent authenticated GitHub CLI, Git with the release tag available, GNU
 `sha256sum`, `jq`, uv, and Python 3. The temporary directories must be new so
-stale files cannot satisfy a check:
+stale files cannot satisfy a check. Replace `vX.Y.Z` with the published tag:
 
 ```bash
 set -euo pipefail
 
-RELEASE_TAG=v0.4.0
+RELEASE_TAG=vX.Y.Z
 RELEASE_VERSION=${RELEASE_TAG#v}
 REPOSITORY=vexcalibur-dev/vexcalibur
 RELEASE_ASSETS="$(mktemp -d)"
@@ -439,11 +473,12 @@ replaced.
    useful reason. Open the public [Vexcalibur project page on
    PyPI](https://pypi.org/project/vexcalibur/), select the affected version from
    its release history, and confirm that the version is visibly marked as yanked
-   and displays that reason. Also require every file in the version-specific
-   JSON response to report `yanked: true`:
+   and displays that reason. Replace `X.Y.Z` below with the affected release
+   number. Also require every file in the version-specific JSON response to
+   report `yanked: true`:
 
    ```bash
-   RELEASE_VERSION=0.4.0
+   RELEASE_VERSION=X.Y.Z
    python - "$RELEASE_VERSION" <<'PY'
    import json
    import sys
