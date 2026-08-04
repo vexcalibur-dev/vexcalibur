@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
+import textwrap
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
@@ -30,6 +36,108 @@ def _step(job: str, name: str) -> str:
     match = re.search(pattern, job)
     assert match is not None, f"workflow job has no {name!r} step"
     return match.group(0)
+
+
+def _step_script(step: str) -> str:
+    marker = "        run: |\n"
+    assert marker in step
+    return textwrap.dedent(step.partition(marker)[2])
+
+
+def _run_create_release_step(
+    tmp_path: Path,
+    *,
+    graphql_responses: list[object],
+    create_exit: int = 0,
+    rest_release_id: int = 123,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    runner_temp = tmp_path / "runner"
+    notes_path = runner_temp / "release-notes" / "vexcalibur-release-notes.md"
+    notes_path.parent.mkdir(parents=True)
+    notes_path.write_text("reviewed release notes\n", encoding="utf-8")
+    github_output = tmp_path / "github-output"
+    github_output.touch()
+    gh_test_dir = tmp_path / "gh-test"
+    gh_test_dir.mkdir()
+    for index, response in enumerate(graphql_responses, start=1):
+        (gh_test_dir / f"graphql-{index}.json").write_text(
+            json.dumps(response),
+            encoding="utf-8",
+        )
+    (gh_test_dir / "release.json").write_text(
+        json.dumps(
+            {
+                "id": rest_release_id,
+                "tag_name": "v1.2.3",
+                "target_commitish": "a" * 40,
+                "name": "v1.2.3",
+                "body": "reviewed release notes\n",
+                "draft": True,
+                "prerelease": False,
+                "immutable": False,
+                "author": {"login": "automation[bot]"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${GH_TEST_DIR}/calls"
+if [[ "$1" == "api" && "${2:-}" == "graphql" ]]; then
+  count=0
+  if [[ -f "${GH_TEST_DIR}/query-count" ]]; then
+    count="$(cat "${GH_TEST_DIR}/query-count")"
+  fi
+  count=$((count + 1))
+  printf '%s\n' "${count}" > "${GH_TEST_DIR}/query-count"
+  response="${GH_TEST_DIR}/graphql-${count}.json"
+  [[ -f "${response}" ]] || exit 98
+  cat "${response}"
+  exit 0
+fi
+if [[ "$1" == "api" && "${2:-}" == repos/*/releases/123 ]]; then
+  cat "${GH_TEST_DIR}/release.json"
+  exit 0
+fi
+if [[ "$1" == "release" && "${2:-}" == "create" ]]; then
+  [[ " $* " == *" --verify-tag "* ]] || exit 97
+  exit "${GH_CREATE_EXIT}"
+fi
+exit 96
+""",
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o755)
+
+    step = _step(_job(_workflow_text(), "publish-release"), "Create GitHub Release")
+    completed = subprocess.run(  # noqa: S603 - reviewed workflow with a test-owned gh stub
+        ["/bin/bash", "-c", _step_script(step)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(runner_temp),
+            "GITHUB_REPOSITORY": "vexcalibur-dev/vexcalibur",
+            "GITHUB_OUTPUT": str(github_output),
+            "RELEASE_TAG": "v1.2.3",
+            "RELEASE_SHA": "a" * 40,
+            "APP_SLUG": "automation",
+            "GH_TOKEN": "test-token",  # pragma: allowlist secret
+            "GH_TEST_DIR": str(gh_test_dir),
+            "GH_CREATE_EXIT": str(create_exit),
+        },
+    )
+    calls_path = gh_test_dir / "calls"
+    calls = calls_path.read_text(encoding="utf-8") if calls_path.exists() else ""
+    return completed, calls
 
 
 def _validation_text() -> str:
@@ -84,7 +192,7 @@ def test_publisher_verifies_the_scanned_artifact_before_minting_token() -> None:
     assert "GENERATED_NOTES_SHA256" in publish
     assert "SCANNED_NOTES_SHA256" in publish
     assert "sha256sum" in publish
-    assert '--notes-file "${RUNNER_TEMP}/release-notes/' in publish
+    assert '--notes-file "${notes_path}"' in publish
 
 
 def test_release_notes_keep_one_digest_across_all_jobs() -> None:
@@ -406,9 +514,16 @@ def test_release_state_machine_allows_only_exact_draft_or_immutable_published_st
     reconcile = _step(publish, "Reconcile exact release assets")
     immutable = _step(publish, "Publish immutable GitHub Release")
 
+    assert "release(tagName:$tag){databaseId}" in create
+    assert "data.repository.release == null" in create
+    assert "GitHub returned a malformed release query." in create
+    assert 'releases/${release_id}"' in create
     assert "--draft" in create
     assert "--verify-tag" in create
     assert "--target" in create
+    assert '--notes-file "${notes_path}"' in create
+    assert "resolve_release_by_tag || resolve_status=$?" in create
+    assert "releases/tags/${RELEASE_TAG}" not in create
     assert ".draft == true and (.immutable == false or .immutable == null)" in create
     assert ".draft == false and .immutable == true" in create
     assert ".prerelease == false" in create
@@ -427,6 +542,96 @@ def test_release_state_machine_allows_only_exact_draft_or_immutable_published_st
     assert ".immutable == true" in immutable
     assert "GitHub Release did not reach the exact immutable published state" in immutable
     assert "Published immutable release asset" in immutable
+
+
+def test_release_resolver_recovers_an_existing_draft_without_creating(
+    tmp_path: Path,
+) -> None:
+    completed, calls = _run_create_release_step(
+        tmp_path,
+        graphql_responses=[
+            {"data": {"repository": {"release": {"databaseId": 123}}}},
+        ],
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "release create" not in calls
+
+
+def test_release_resolver_creates_only_after_an_exact_null_lookup(
+    tmp_path: Path,
+) -> None:
+    completed, calls = _run_create_release_step(
+        tmp_path,
+        graphql_responses=[
+            {"data": {"repository": {"release": None}}},
+            {"data": {"repository": {"release": {"databaseId": 123}}}},
+        ],
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "release create v1.2.3" in calls
+    assert "--verify-tag" in calls
+    assert calls.count("api graphql") == 2
+
+
+def test_release_resolver_rejects_rest_identity_mismatch(tmp_path: Path) -> None:
+    completed, calls = _run_create_release_step(
+        tmp_path,
+        graphql_responses=[
+            {"data": {"repository": {"release": {"databaseId": 123}}}},
+        ],
+        rest_release_id=456,
+    )
+
+    assert completed.returncode != 0
+    assert "release create" not in calls
+    assert "does not match its resolved ID" in completed.stderr
+
+
+def test_release_resolver_accepts_a_concurrent_create_only_after_exact_resolution(
+    tmp_path: Path,
+) -> None:
+    completed, calls = _run_create_release_step(
+        tmp_path,
+        graphql_responses=[
+            {"data": {"repository": {"release": None}}},
+            {"data": {"repository": {"release": {"databaseId": 123}}}},
+        ],
+        create_exit=1,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "release create v1.2.3" in calls
+    assert calls.count("api graphql") == 2
+
+
+@pytest.mark.parametrize(
+    "malformed_response",
+    (
+        {},
+        {"data": {}},
+        {"data": {"repository": {}}},
+        {"data": {"repository": {"release": {}}}},
+        {"data": {"repository": {"release": {"databaseId": "123"}}}},
+        {
+            "data": {"repository": {"release": None}},
+            "errors": [{"message": "partial response"}],
+        },
+    ),
+)
+def test_release_resolver_rejects_malformed_graphql_before_create(
+    tmp_path: Path,
+    malformed_response: object,
+) -> None:
+    completed, calls = _run_create_release_step(
+        tmp_path,
+        graphql_responses=[malformed_response],
+    )
+
+    assert completed.returncode != 0
+    assert "release create" not in calls
+    assert "malformed release query" in completed.stderr
 
 
 def test_all_untrusted_assets_and_notes_are_verified_before_write_token() -> None:

@@ -184,6 +184,11 @@ runs the digest and secret-scan boundary again, and requires any existing draft
 or release body to match those exact bytes. Do not edit either the tag or draft
 body to repair a mismatch.
 
+GitHub's REST release-by-tag endpoint omits drafts. The workflow therefore uses
+the GraphQL `release(tagName:)` lookup, then reads the exact release by its
+numeric ID. A null lookup permits draft creation; a malformed response stops
+recovery.
+
 If the exact release is already published and immutable, recovery is
 idempotent: it reconstructs and rechecks the protected notes, verifies every
 asset, and repeats the immutable/attestation checks.

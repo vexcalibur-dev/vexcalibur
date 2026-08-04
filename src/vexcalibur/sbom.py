@@ -203,6 +203,9 @@ def _validate_cyclonedx_json_shape(raw_bom: Any, *, path: Path) -> None:
         msg = f"SBOM {path} must have bomFormat 'CycloneDX'"
         raise SbomError(msg)
     spec_version = raw_bom.get("specVersion")
+    if not isinstance(spec_version, str):
+        msg = f"SBOM {path} field 'specVersion' must be a string"
+        raise SbomError(msg)
     if spec_version not in SUPPORTED_CYCLONEDX_JSON_VERSIONS:
         supported_versions = ", ".join(sorted(SUPPORTED_CYCLONEDX_JSON_VERSIONS))
         msg = (
