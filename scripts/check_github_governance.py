@@ -19,23 +19,46 @@ BRANCH_RULESET_NAME = "protected main (PR + CI)"
 TAG_CREATION_RULESET_NAME = "restricted release tag creation"
 TAG_IMMUTABILITY_RULESET_NAME = "immutable release tags"
 GITHUB_ACTIONS_INTEGRATION_ID = 15368
+CODEQL_INTEGRATION_ID = 57789
+CIRCLECI_INTEGRATION_ID = 18001
 RELEASE_AUTOMATION_INTEGRATION_ID = 4250150
 
-REQUIRED_CHECKS: dict[str, tuple[str, ...]] = {
-    "vexcalibur": ("Analyze Python", "CI result", "dependency-review", "pre-commit"),
-    "vexcalibur-action": ("Analyze (actions)", "Analyze (python)", "CI result"),
-    "vexcalibur-orb": ("Analyze (actions)", "Analyze (python)", "Quality"),
+RequiredStatusCheck = tuple[str, int | None]
+
+REQUIRED_CHECKS: dict[str, tuple[RequiredStatusCheck, ...]] = {
+    "vexcalibur": (
+        ("Analyze Python", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("CI result", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("Scorecard", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("dependency-review", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("pre-commit", GITHUB_ACTIONS_INTEGRATION_ID),
+    ),
+    "vexcalibur-action": (
+        ("CI result", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("CodeQL", CODEQL_INTEGRATION_ID),
+        ("Dependency Review", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("OpenSSF Scorecard", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("pre-commit.ci - pr", None),
+    ),
+    "vexcalibur-orb": (
+        ("CodeQL", CODEQL_INTEGRATION_ID),
+        ("Quality", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("Scorecard", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("lint-pack", CIRCLECI_INTEGRATION_ID),
+        ("pre-commit.ci - pr", None),
+        ("test-deploy", CIRCLECI_INTEGRATION_ID),
+    ),
     ".github": (
-        "Analyze (actions)",
-        "Smoke Python security commands",
-        "Validate workflow templates",
+        ("CodeQL", CODEQL_INTEGRATION_ID),
+        ("Smoke Python security commands", GITHUB_ACTIONS_INTEGRATION_ID),
+        ("Validate workflow templates", GITHUB_ACTIONS_INTEGRATION_ID),
     ),
 }
 
 TAG_CREATION_BYPASSES: dict[str, tuple[tuple[object, str, str], ...]] = {
     "vexcalibur": ((RELEASE_AUTOMATION_INTEGRATION_ID, "Integration", "always"),),
     "vexcalibur-action": ((RELEASE_AUTOMATION_INTEGRATION_ID, "Integration", "always"),),
-    "vexcalibur-orb": ((None, "OrganizationAdmin", "always"),),
+    "vexcalibur-orb": ((RELEASE_AUTOMATION_INTEGRATION_ID, "Integration", "always"),),
 }
 
 DEFAULT_CODEQL_REPOSITORIES = ("vexcalibur-action", "vexcalibur-orb", ".github")
@@ -339,14 +362,14 @@ def _validate_release_automation_installation(
         errors,
         "release automation App permissions",
         _mapping_value(installation, "permissions"),
-        {"contents": "write", "metadata": "read"},
+        {"administration": "read", "contents": "write", "metadata": "read"},
     )
 
 
 def _validate_branch_ruleset(
     repository: str,
     ruleset: JsonObject,
-    required_checks: tuple[str, ...],
+    required_checks: tuple[RequiredStatusCheck, ...],
     errors: list[str],
 ) -> None:
     label = f"{repository} default-branch ruleset"
@@ -369,7 +392,7 @@ def _validate_branch_ruleset(
     )
     pull_request = _single_rule_parameters(rules, "pull_request")
     expected_pull_request = {
-        "allowed_merge_methods": ("rebase", "squash"),
+        "allowed_merge_methods": ("squash",),
         "require_code_owner_review": False,
         "require_last_push_approval": False,
         "required_approving_review_count": 0,
@@ -395,7 +418,7 @@ def _validate_branch_ruleset(
         True,
     )
     expected_status_checks = tuple(
-        (context, GITHUB_ACTIONS_INTEGRATION_ID) for context in sorted(required_checks)
+        sorted(required_checks, key=lambda item: (item[0], _stable(item[1])))
     )
     _expect(
         errors,
@@ -610,15 +633,19 @@ def _ref_condition(ruleset: JsonObject) -> tuple[tuple[str, ...], tuple[str, ...
     return (_string_tuple(ref_name.get("include")), _string_tuple(ref_name.get("exclude")))
 
 
-def _status_checks(parameters: JsonObject) -> tuple[tuple[str, object], ...]:
-    checks: list[tuple[str, object]] = []
+def _status_checks(parameters: JsonObject) -> tuple[RequiredStatusCheck, ...]:
+    checks: list[RequiredStatusCheck] = []
     for check in _mapping_sequence(parameters.get("required_status_checks")):
         context = check.get("context")
-        integration_id = check.get("integration_id")
         if not isinstance(context, str):
             raise GovernanceReadError("required status check omitted a string context")
-        if not isinstance(integration_id, int) or isinstance(integration_id, bool):
-            raise GovernanceReadError("required status check omitted a numeric integration id")
+        if "integration_id" not in check:
+            integration_id: int | None = None
+        else:
+            integration_id_value = check.get("integration_id")
+            if not isinstance(integration_id_value, int) or isinstance(integration_id_value, bool):
+                raise GovernanceReadError("required status check has a malformed integration id")
+            integration_id = integration_id_value
         checks.append((context, integration_id))
     return tuple(sorted(checks, key=lambda item: (item[0], _stable(item[1]))))
 

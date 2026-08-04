@@ -29,10 +29,10 @@ inventory, direct CLI, pinned Action, and fresh-finalizer boundaries. No App
 token or PyPI OIDC permission exists in that path.
 
 The `CI result` job combines all ordinary required results into the status
-selected by the protected `main` ruleset. CodeQL, dependency review, and
-pre-commit are separate required checks with strict up-to-date enforcement. See
-[Verify GitHub governance](github-governance.md) for the organization-wide
-policy and drift checks.
+selected by the protected `main` ruleset. `Analyze Python`, `dependency-review`,
+`Scorecard`, and `pre-commit` are separate required checks with strict
+up-to-date enforcement. See [Verify GitHub governance](github-governance.md)
+for the organization-wide policy and drift checks.
 
 ## Reproduce important gates
 
