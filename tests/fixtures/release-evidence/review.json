@@ -6,7 +6,7 @@
   "reviewed_by": "Automated conformance fixture",
   "inventory": {
     "path": "uv.lock",
-    "sha256": "ede5f835723e5bf1:3b7160fbb20e7408:7f7c5dea3b1e18ee:3bbc86168549ca92",
+    "sha256": "8b512f9967d21f3f:0d667cadeacdd387:078d7d3eebe87499:3d377472d47786a4",
     "coverage": "cross-platform-reference-runtime"
   },
   "findings": {
