@@ -13,16 +13,16 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 
 - [GitHub Actions](https://github.com/vexcalibur-dev/vexcalibur-action) uses the
   released companion Action to run Vexcalibur in a workflow.
-- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) has a mutable,
-  inspection-only preview. Do not import it into a project with environment
-  variables, contexts, private source, or other credentials.
+- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) documents its
+  current release status in the Orb README. Treat any development reference as
+  mutable and inspection-only. Do not import one into a project with
+  environment variables, contexts, private source, or other credentials.
 
 The GitHub Action's [compatibility
 reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
-explains how to resolve its latest tested commit and Vexcalibur package.
-The Orb README owns its current release status; production publication is
-tracked in
-[vexcalibur-orb#22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22).
+explains how to resolve its latest tested commit and Vexcalibur package. [Orb
+issue #22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) records
+the App-backed production automation plan.
 
 ## Tutorials
 

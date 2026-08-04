@@ -19,9 +19,10 @@ Pin exact package and released integration versions in automation. Do not use a 
 - a released companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
 
 The companion [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb)
-has a mutable preview for interface inspection. Do not import it into a project
-with environment variables, contexts, private source, or other credentials.
-Its README holds the current release status and restrictions.
+README holds its current release status and supported references. Treat any
+development reference as mutable and inspection-only. Do not import one into a
+project with environment variables, contexts, private source, or other
+credentials.
 
 The repository runs its Python, package, documentation, and deterministic
 parser-property gates on every change. Supply-chain checks cover dependencies,

@@ -35,12 +35,13 @@ reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/re
 explains the legacy releases and shows how to resolve the latest tested Action
 commit and Vexcalibur package.
 
-The [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) has only a
-mutable development preview. Use it to inspect the interface. Do not import it
-into a CircleCI project with environment variables, contexts, private source,
-or other credentials. The Orb README owns its current release status and safety
-rules; production publication remains tracked in
-[vexcalibur-orb#22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22).
+The [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) README owns
+its current release status and supported references. Treat any development
+reference as mutable and use it only to inspect the interface. Do not import a
+development reference into a CircleCI project with environment variables,
+contexts, private source, or other credentials. [Orb issue
+#22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) records the
+App-backed production automation plan.
 
 ## Install a release
 
