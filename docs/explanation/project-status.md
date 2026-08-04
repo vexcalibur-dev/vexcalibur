@@ -19,8 +19,9 @@ Pin exact package and released integration versions in automation. Do not use a 
 - a released companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
 
 The companion [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb)
-has a development preview for integration testing. It does not have a
-production registry release yet.
+has a mutable preview for interface inspection. Do not import it into a project
+with environment variables, contexts, private source, or other credentials.
+Its README holds the current release status and restrictions.
 
 The repository runs its Python, package, documentation, and deterministic
 parser-property gates on every change. Supply-chain checks cover dependencies,
@@ -39,11 +40,11 @@ distribution bytes to a flat immutable GitHub Release and then to PyPI through
 Trusted Publishing.
 
 Pull requests exercise the full schema-2 asset-generation and validation graph
-without publication credentials or external publication. They do not perform a
-real GitHub publication or PyPI OIDC exchange; those publisher paths are tested
-statically until a real release. The initial production review makes zero
-assertions; a separate synthetic `in_triage` fixture exercises CycloneDX,
-OpenVEX, and CSAF equivalence.
+without publication credentials or external publication. They validate the
+publisher paths statically. Automated release runs perform the real GitHub
+publication and PyPI OpenID Connect exchange before they report success. The
+initial production review makes zero assertions; a separate synthetic
+`in_triage` fixture exercises CycloneDX, OpenVEX, and CSAF equivalence.
 
 This is maintainer and release tooling, not a package API. Read [Why
 Vexcalibur publishes evidence about itself](self-release-evidence.md) for its

@@ -21,30 +21,33 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 | SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
 | VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile |
-| Automation targets | Released [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action); [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) development preview |
+| Automation targets | Released [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action); [CircleCI orb](#run-in-ci) |
 | Migration | A narrow `vexy` command-line compatibility layer |
 | Python | 3.10–3.14 |
 
 ## Run in CI
 
 The companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
-runs Vexcalibur in GitHub Actions and has immutable releases. The
-[CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) provides a
-development preview of the same command-line workflow. It does not have a
-production registry release yet, so don't use its preview reference in a
-production pipeline. Follow **Find the latest tested pair** in the Action's
+runs Vexcalibur in GitHub Actions. Its release tags are permanent, and the
+current release workflow creates immutable GitHub Releases. The Action's
 [compatibility
 reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
-to resolve its latest immutable release to an exact commit and tested Vexcalibur
-package. CircleCI production publication is tracked in
+explains the legacy releases and shows how to resolve the latest tested Action
+commit and Vexcalibur package.
+
+The [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) has only a
+mutable development preview. Use it to inspect the interface. Do not import it
+into a CircleCI project with environment variables, contexts, private source,
+or other credentials. The Orb README owns its current release status and safety
+rules; production publication remains tracked in
 [vexcalibur-orb#22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22).
 
 ## Install a release
 
-Choose the exact release you reviewed on
-[PyPI](https://pypi.org/project/vexcalibur/#history) or
-[GitHub](https://github.com/vexcalibur-dev/vexcalibur/releases), then replace
-`X.Y.Z` below with that release number:
+Choose an exact release that is available in the
+[PyPI release history](https://pypi.org/project/vexcalibur/#history). Review the
+corresponding [GitHub Release](https://github.com/vexcalibur-dev/vexcalibur/releases),
+then replace `X.Y.Z` below with that release number:
 
 ```bash
 python -m venv .venv

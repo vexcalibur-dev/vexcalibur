@@ -12,9 +12,9 @@ category, and use an absolute namespace URL controlled by that publisher.
 Before you begin:
 
 - Install Git, Python 3.10 or newer, and the `uv` version in `.tool-versions`.
-- Clone this repository and check out the exact release you intend to use. Use
-  the guide from that checkout because the hosted documentation tracks current
-  development.
+- Clone this repository at release `v0.3.0` or newer and check out the exact
+  release you intend to use. Use the guide from that checkout because the
+  hosted documentation tracks current development.
 - Open a Bash-compatible shell in the repository root.
 - Confirm that `/tmp` is writable, or replace the example output path.
 

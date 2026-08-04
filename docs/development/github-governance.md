@@ -117,9 +117,11 @@ organization policy remain legacy-mutable; their tag refs are protected. The
 `pypi` environment has no independent reviewer because the organization
 currently has one maintainer, and its administrator-bypass setting remains
 enabled. Orb publication uses a CircleCI namespace and an `orb-publishing`
-context restricted to the orb project. Before the first immutable registry
-release, maintainers still need to choose the identity allowed to create its
-production tag.
+context restricted to the orb project. Its expression restriction also rejects
+SSH jobs and API-supplied pipeline configuration. The Vexcalibur automation App
+is already the only identity allowed to create an Orb production tag; [Orb
+issue #22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) tracks
+implementing and validating that App-backed release workflow.
 
 ## When to run it
 

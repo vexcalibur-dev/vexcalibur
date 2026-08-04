@@ -160,16 +160,31 @@ resolver rejects every other Git ref. With a recent authenticated GitHub CLI:
 Replace `vX.Y.Z` below with the exact existing release tag you are recovering:
 
 ```bash
+set -euo pipefail
+
 RELEASE_TAG=vX.Y.Z
 
 gh auth status --active --hostname github.com
-gh workflow run release.yml \
+RUN_URL="$(
+  gh workflow run release.yml \
+    --repo vexcalibur-dev/vexcalibur \
+    --ref main \
+    -f recovery-tag="$RELEASE_TAG"
+)"
+if [[ "$RUN_URL" =~ /actions/runs/([0-9]+)$ ]]; then
+  RUN_ID="${BASH_REMATCH[1]}"
+else
+  printf 'could not read workflow run ID from %s\n' "$RUN_URL" >&2
+  exit 1
+fi
+gh run watch "$RUN_ID" \
   --repo vexcalibur-dev/vexcalibur \
-  --ref main \
-  -f recovery-tag="$RELEASE_TAG"
+  --exit-status
 ```
 
-Leave `version` empty and inspect every reconciliation message. GitHub Release
+Leave `version` empty and inspect every reconciliation message. The watch must
+end with a successful conclusion. Success means the release is immutable and
+the workflow has verified every expected asset and attestation. GitHub Release
 recovery deliberately uses `--ref main`; the later PyPI recovery dispatch uses
 the exact release tag as both `--ref` and `release-tag`.
 
@@ -239,17 +254,33 @@ dispatch `PyPI` from the exact release tag and supply the same tag as input.
 Replace `vX.Y.Z` with that tag:
 
 ```bash
+set -euo pipefail
+
 RELEASE_TAG=vX.Y.Z
-gh workflow run pypi.yml \
+RUN_URL="$(
+  gh workflow run pypi.yml \
+    --repo vexcalibur-dev/vexcalibur \
+    --ref "$RELEASE_TAG" \
+    -f release-tag="$RELEASE_TAG"
+)"
+if [[ "$RUN_URL" =~ /actions/runs/([0-9]+)$ ]]; then
+  RUN_ID="${BASH_REMATCH[1]}"
+else
+  printf 'could not read workflow run ID from %s\n' "$RUN_URL" >&2
+  exit 1
+fi
+gh run watch "$RUN_ID" \
   --repo vexcalibur-dev/vexcalibur \
-  --ref "$RELEASE_TAG" \
-  -f release-tag="$RELEASE_TAG"
+  --exit-status
 ```
 
 The workflow rejects a dispatch whose Git ref and `release-tag` differ. This
 binding is also what satisfies the `pypi` environment's `v*` tag deployment
 policy. Publishing both files already present at the expected hashes is a
-successful no-op.
+successful no-op. The watch must end successfully before verification. On an
+already complete release, the selector reports that no distribution files need
+publication; after an interrupted upload, the PyPI release contains both files
+at their expected hashes.
 
 ## Verify the release
 
