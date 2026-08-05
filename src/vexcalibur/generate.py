@@ -617,6 +617,7 @@ def generate_vex_from_github_sbom_result(
         source_url=osv_source_url,
         headers=osv_headers,
     )
+
     def create_github_client() -> GithubSbomClient:
         return GithubSbomClient(
             api_url=github_api_url,
