@@ -36,9 +36,9 @@ and verifies the result.
 Generation
 ----------
 
-All generation functions return serialized JSON as ``str``. CycloneDX 1.6 is
-the default output. Pass ``OpenVexJsonRenderer`` or ``Csaf20VexJsonRenderer``
-to select another format.
+Generation functions without a ``_result`` suffix return serialized JSON as
+``str``. CycloneDX 1.6 is the default output. Pass ``OpenVexJsonRenderer`` or
+``Csaf20VexJsonRenderer`` to select another format.
 
 ``generate_vex_from_source`` and ``generate_vex_from_components`` accept a
 custom ``VulnerabilitySource``. A source receives immutable component values
@@ -56,6 +56,78 @@ output extension contract.
 .. autofunction:: generate_vex_from_github_sbom
 
 .. autofunction:: generate_vex_from_local_findings
+
+Report-aware generation
+-----------------------
+
+Each supported generation path has a ``*_result`` variant. These functions
+return ``GenerationResult`` instead of ``str``. The result retains the exact
+rendered bytes and the normalized values needed to build a versioned execution
+report, so callers do not need to parse VEX output to calculate counts or a
+digest.
+
+``EXECUTION_REPORT_SCHEMA_VERSION`` is the feature-detection constant for this
+contract. Require the exact integer value your application supports. A missing,
+mistyped, or different value means the installed package does not provide that
+report contract.
+
+.. autofunction:: generate_vex_from_components_result
+
+.. autofunction:: generate_vex_from_source_result
+
+.. autofunction:: generate_vex_from_sbom_result
+
+.. autofunction:: generate_vex_from_github_sbom_result
+
+.. autofunction:: generate_vex_from_github_source_result
+
+.. autofunction:: generate_vex_from_local_findings_result
+
+.. autodata:: EXECUTION_REPORT_SCHEMA_VERSION
+
+.. autoclass:: GenerationResult
+   :members:
+
+.. autoclass:: GenerationExecutionContext
+
+.. autoclass:: GenerationSourcePreflight
+   :members:
+
+.. autoclass:: GenerationExecutionReport
+   :members:
+
+.. autoclass:: GeneratedDocumentMetadata
+
+.. autoclass:: GeneratedDocumentMetadataDict
+
+.. autoclass:: GenerationExecutionReportDict
+
+.. autoclass:: InventorySourceCategory
+   :members:
+
+.. autoclass:: FindingSourceCategory
+   :members:
+
+.. autoclass:: ExecutionReportOutputFormat
+   :members:
+
+.. autofunction:: parse_generation_execution_report
+
+The :doc:`execution-report reference <execution-report>` defines the serialized
+fields, category values, size limit, and security boundary. This checked-in
+example writes matching VEX and report bytes without replacing existing files:
+
+.. literalinclude:: ../examples/generate_execution_report.py
+   :language: python
+   :linenos:
+
+Run it from the repository root with a new output directory::
+
+   uv run --frozen python docs/examples/generate_execution_report.py \
+     /tmp/vexcalibur-python-api
+
+Success prints both output paths. The two writes are independent; Python
+embeddings do not receive the CLI's coordinated publication transaction.
 
 SBOM ingest and GitHub
 ----------------------

@@ -12,6 +12,7 @@ import vexcalibur.api as api
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXPECTED_PUBLIC_EXPORTS = (
+    "EXECUTION_REPORT_SCHEMA_VERSION",
     "ComponentIdentity",
     "ComponentVersionError",
     "Csaf20DocumentMetadata",
@@ -20,9 +21,21 @@ EXPECTED_PUBLIC_EXPORTS = (
     "CsafPublisherCategory",
     "CsafRenderError",
     "CycloneDxJsonRenderer",
+    "ExecutionReportOutputFormat",
+    "FindingSourceCategory",
+    "GeneratedDocumentMetadata",
+    "GeneratedDocumentMetadataDict",
+    "GenerationExecutionContext",
+    "GenerationExecutionReport",
+    "GenerationExecutionReportDict",
+    "GenerationExecutionReportParseError",
+    "GenerationReportMetadataError",
+    "GenerationResult",
+    "GenerationSourcePreflight",
     "GithubSbomClientError",
     "GithubSbomConfigurationError",
     "GithubSbomError",
+    "InventorySourceCategory",
     "LocalFindingsError",
     "OpenVexJsonRenderer",
     "OpenVexRenderError",
@@ -39,11 +52,18 @@ EXPECTED_PUBLIC_EXPORTS = (
     "VulnerabilitySourceError",
     "VulnerabilitySourceInputError",
     "generate_vex_from_components",
+    "generate_vex_from_components_result",
     "generate_vex_from_github_sbom",
+    "generate_vex_from_github_sbom_result",
+    "generate_vex_from_github_source_result",
     "generate_vex_from_local_findings",
+    "generate_vex_from_local_findings_result",
     "generate_vex_from_sbom",
+    "generate_vex_from_sbom_result",
     "generate_vex_from_source",
+    "generate_vex_from_source_result",
     "load_cyclonedx_sbom",
+    "parse_generation_execution_report",
 )
 
 
@@ -80,6 +100,23 @@ def test_public_api_pins_enum_names_and_values() -> None:
         "OTHER": "other",
         "USER": "user",
         "VENDOR": "vendor",
+    }
+    assert {member.name: member.value for member in api.InventorySourceCategory} == {
+        "SBOM_FILE": "sbom_file",
+        "GITHUB_DEPENDENCY_GRAPH": "github_dependency_graph",
+        "CUSTOM": "custom",
+    }
+    assert {member.name: member.value for member in api.FindingSourceCategory} == {
+        "LOCAL_FILE": "local_file",
+        "PUBLIC_OSV": "public_osv",
+        "CUSTOM_OSV": "custom_osv",
+        "CUSTOM": "custom",
+    }
+    assert {member.name: member.value for member in api.ExecutionReportOutputFormat} == {
+        "CYCLONEDX": "cyclonedx",
+        "OPENVEX": "openvex",
+        "CSAF": "csaf",
+        "CUSTOM": "custom",
     }
 
 
@@ -134,6 +171,36 @@ def test_public_api_rejects_invalid_osv_headers_before_github_io(monkeypatch) ->
         )
 
     assert github_client_created is False
+
+
+def test_public_api_preflights_custom_source_before_github_auth(monkeypatch) -> None:
+    auth_attempted = False
+
+    def fail_if_auth_attempted(**kwargs: object) -> str:
+        nonlocal auth_attempted
+        auth_attempted = True
+        raise AssertionError(kwargs)
+
+    class RejectingSource:
+        def validate_before_inventory_load(self) -> None:
+            raise api.VulnerabilitySourceInputError("source policy rejected inventory")
+
+        def findings_for_components(
+            self,
+            components: tuple[api.ComponentIdentity, ...],
+        ) -> tuple[api.VulnerabilityFinding, ...]:
+            raise AssertionError(components)
+
+    monkeypatch.setattr("vexcalibur.api._resolve_github_token", fail_if_auth_attempted)
+
+    with pytest.raises(api.SbomError, match="source policy"):
+        api.generate_vex_from_github_source_result(
+            repository="example/project",
+            source=RejectingSource(),
+            use_gh_auth=False,
+        )
+
+    assert auth_attempted is False
 
 
 def test_public_api_resolves_github_auth_and_private_osv_headers(monkeypatch) -> None:
@@ -296,6 +363,25 @@ def test_public_api_generates_vex_from_local_findings() -> None:
     )
 
     assert '"bomFormat": "CycloneDX"' in rendered
+
+
+def test_public_api_generates_and_parses_execution_report() -> None:
+    result = api.generate_vex_from_local_findings_result(
+        input_file=FIXTURES / "sbom" / "cyclonedx-json-simple.json",
+        findings_file=FIXTURES / "findings" / "all-analysis-states.json",
+    )
+
+    assert isinstance(result, api.GenerationResult)
+    assert result.execution_context == api.GenerationExecutionContext(
+        inventory_source=api.InventorySourceCategory.SBOM_FILE,
+        finding_source=api.FindingSourceCategory.LOCAL_FILE,
+        output_format=api.ExecutionReportOutputFormat.CYCLONEDX,
+    )
+    serialized = result.execution_report().to_json()
+    parsed = api.parse_generation_execution_report(serialized)
+
+    assert parsed.schema_version == api.EXECUTION_REPORT_SCHEMA_VERSION
+    assert parsed.document.bytes == len(result.rendered_bytes)
 
 
 def test_public_api_rejects_conflicting_component_versions() -> None:

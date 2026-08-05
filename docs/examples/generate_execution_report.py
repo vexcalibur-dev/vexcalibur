@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from vexcalibur.generate import generate_vex_from_local_findings_result
+from vexcalibur.api import generate_vex_from_local_findings_result
 
 
 def _write_new_private_file(path: Path, content: bytes) -> None:

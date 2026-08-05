@@ -5,13 +5,14 @@ from datetime import datetime
 
 from packageurl import PackageURL
 
-from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
-from vexcalibur.generate import generate_vex_from_components_result
-from vexcalibur.generation_result import (
+from vexcalibur.api import (
+    ComponentIdentity,
     ExecutionReportOutputFormat,
     FindingSourceCategory,
     GenerationExecutionContext,
     InventorySourceCategory,
+    VulnerabilityFinding,
+    generate_vex_from_components_result,
 )
 
 

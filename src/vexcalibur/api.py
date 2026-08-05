@@ -21,6 +21,7 @@ from vexcalibur.csaf import (
 from vexcalibur.domain import (
     ComponentIdentity,
     ComponentVersionError,
+    GenerationSourcePreflight,
     VexAnalysisState,
     VexRemediationCategory,
     VulnerabilityFinding,
@@ -34,19 +35,56 @@ from vexcalibur.generate import (
     generate_vex_from_source,
 )
 from vexcalibur.generate import (
+    generate_vex_from_components_result as _generate_vex_from_components_result,
+)
+from vexcalibur.generate import (
     generate_vex_from_github_sbom as _generate_vex_from_github_sbom,
+)
+from vexcalibur.generate import (
+    generate_vex_from_github_sbom_result as _generate_vex_from_github_sbom_result,
+)
+from vexcalibur.generate import (
+    generate_vex_from_github_source_result as _generate_vex_from_github_source_result,
+)
+from vexcalibur.generate import (
+    generate_vex_from_local_findings_result as _generate_vex_from_local_findings_result,
 )
 from vexcalibur.generate import (
     generate_vex_from_sbom as _generate_vex_from_sbom,
 )
+from vexcalibur.generate import (
+    generate_vex_from_sbom_result as _generate_vex_from_sbom_result,
+)
+from vexcalibur.generate import (
+    generate_vex_from_source_result as _generate_vex_from_source_result,
+)
+from vexcalibur.generation_result import (
+    EXECUTION_REPORT_SCHEMA_VERSION,
+    ExecutionReportOutputFormat,
+    FindingSourceCategory,
+    GeneratedDocumentMetadata,
+    GeneratedDocumentMetadataDict,
+    GenerationExecutionContext,
+    GenerationExecutionReport,
+    GenerationExecutionReportDict,
+    GenerationExecutionReportParseError,
+    GenerationReportMetadataError,
+    GenerationResult,
+    InventorySourceCategory,
+    parse_generation_execution_report,
+)
 from vexcalibur.github_sbom import (
     DEFAULT_GITHUB_API_URL as _DEFAULT_GITHUB_API_URL,
+)
+from vexcalibur.github_sbom import (
+    GithubSbomClient as _GithubSbomClient,
 )
 from vexcalibur.github_sbom import (
     GithubSbomClientError,
     GithubSbomConfigurationError,
     GithubSbomError,
 )
+from vexcalibur.github_sbom import resolve_github_token as _resolve_github_token
 from vexcalibur.openvex import OpenVexJsonRenderer, OpenVexRenderError
 from vexcalibur.render import VexRenderer, VexRenderError
 from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
@@ -106,6 +144,32 @@ def generate_vex_from_sbom(
         osv_source_url=osv_source_url,
         osv_headers=osv_headers,
         renderer=renderer,
+    )
+
+
+def generate_vex_from_sbom_result(
+    *,
+    input_file: _pathlib.Path,
+    timestamp: _datetime.datetime | None = None,
+    osv_base_url: str = _DEFAULT_OSV_API_URL,
+    allow_public_osv: bool = False,
+    osv_source_name: str | None = None,
+    osv_source_url: str | None = None,
+    osv_headers: _Mapping[str, str] | None = None,
+    renderer: VexRenderer | None = None,
+    execution_context: GenerationExecutionContext | None = None,
+) -> GenerationResult:
+    """Generate report-aware VEX from a local CycloneDX SBOM."""
+    return _generate_vex_from_sbom_result(
+        input_file=input_file,
+        timestamp=timestamp,
+        osv_base_url=osv_base_url,
+        allow_public_osv=allow_public_osv,
+        osv_source_name=osv_source_name,
+        osv_source_url=osv_source_url,
+        osv_headers=osv_headers,
+        renderer=renderer,
+        execution_context=execution_context,
     )
 
 
@@ -173,7 +237,127 @@ def generate_vex_from_github_sbom(
     )
 
 
+def generate_vex_from_github_sbom_result(
+    *,
+    repository: str,
+    timestamp: _datetime.datetime | None = None,
+    github_api_url: str = _DEFAULT_GITHUB_API_URL,
+    github_token_env: str | None = None,
+    use_gh_auth: bool = True,
+    osv_base_url: str = _DEFAULT_OSV_API_URL,
+    allow_public_osv: bool = False,
+    osv_source_name: str | None = None,
+    osv_source_url: str | None = None,
+    osv_headers: _Mapping[str, str] | None = None,
+    renderer: VexRenderer | None = None,
+    execution_context: GenerationExecutionContext | None = None,
+) -> GenerationResult:
+    """Generate report-aware VEX from a GitHub Dependency Graph SBOM."""
+    return _generate_vex_from_github_sbom_result(
+        repository=repository,
+        timestamp=timestamp,
+        github_api_url=github_api_url,
+        github_token_env=github_token_env,
+        use_gh_auth=use_gh_auth,
+        osv_base_url=osv_base_url,
+        allow_public_osv=allow_public_osv,
+        osv_source_name=osv_source_name,
+        osv_source_url=osv_source_url,
+        osv_headers=osv_headers,
+        renderer=renderer,
+        execution_context=execution_context,
+    )
+
+
+def generate_vex_from_github_source_result(
+    *,
+    repository: str,
+    source: VulnerabilitySource,
+    timestamp: _datetime.datetime | None = None,
+    github_api_url: str = _DEFAULT_GITHUB_API_URL,
+    github_token_env: str | None = None,
+    use_gh_auth: bool = True,
+    renderer: VexRenderer | None = None,
+    execution_context: GenerationExecutionContext | None = None,
+) -> GenerationResult:
+    """Generate report-aware VEX from GitHub inventory and a custom source."""
+
+    def create_github_client() -> _GithubSbomClient:
+        return _GithubSbomClient(
+            api_url=github_api_url,
+            token=_resolve_github_token(
+                api_url=github_api_url,
+                token_env=github_token_env,
+                allow_gh_cli=use_gh_auth,
+            ),
+        )
+
+    return _generate_vex_from_github_source_result(
+        repository=repository,
+        source=source,
+        timestamp=timestamp,
+        github_client_factory=create_github_client,
+        renderer=renderer,
+        execution_context=execution_context,
+    )
+
+
+def generate_vex_from_source_result(
+    *,
+    input_file: _pathlib.Path,
+    source: VulnerabilitySource,
+    timestamp: _datetime.datetime | None = None,
+    renderer: VexRenderer | None = None,
+    execution_context: GenerationExecutionContext | None = None,
+) -> GenerationResult:
+    """Generate report-aware VEX from a CycloneDX SBOM and custom source."""
+    return _generate_vex_from_source_result(
+        input_file=input_file,
+        source=source,
+        timestamp=timestamp,
+        renderer=renderer,
+        execution_context=execution_context,
+    )
+
+
+def generate_vex_from_components_result(
+    *,
+    components: tuple[ComponentIdentity, ...],
+    source: VulnerabilitySource,
+    timestamp: _datetime.datetime | None = None,
+    renderer: VexRenderer | None = None,
+    execution_context: GenerationExecutionContext | None = None,
+) -> GenerationResult:
+    """Generate report-aware VEX from caller-supplied components and source."""
+    return _generate_vex_from_components_result(
+        components=components,
+        source=source,
+        timestamp=timestamp,
+        renderer=renderer,
+        execution_context=execution_context,
+    )
+
+
+def generate_vex_from_local_findings_result(
+    *,
+    input_file: _pathlib.Path,
+    findings_file: _pathlib.Path,
+    timestamp: _datetime.datetime | None = None,
+    renderer: VexRenderer | None = None,
+    execution_context: GenerationExecutionContext | None = None,
+) -> GenerationResult:
+    """Generate report-aware VEX from local CycloneDX and findings files."""
+    return _generate_vex_from_local_findings_result(
+        input_file=input_file,
+        findings_file=findings_file,
+        timestamp=timestamp,
+        renderer=renderer,
+        execution_context=execution_context,
+    )
+
+
 __all__ = [
+    "EXECUTION_REPORT_SCHEMA_VERSION",
     "ComponentIdentity",
     "ComponentVersionError",
     "Csaf20DocumentMetadata",
@@ -182,9 +366,21 @@ __all__ = [
     "CsafPublisherCategory",
     "CsafRenderError",
     "CycloneDxJsonRenderer",
+    "ExecutionReportOutputFormat",
+    "FindingSourceCategory",
+    "GeneratedDocumentMetadata",
+    "GeneratedDocumentMetadataDict",
+    "GenerationExecutionContext",
+    "GenerationExecutionReport",
+    "GenerationExecutionReportDict",
+    "GenerationExecutionReportParseError",
+    "GenerationReportMetadataError",
+    "GenerationResult",
+    "GenerationSourcePreflight",
     "GithubSbomClientError",
     "GithubSbomConfigurationError",
     "GithubSbomError",
+    "InventorySourceCategory",
     "LocalFindingsError",
     "OpenVexJsonRenderer",
     "OpenVexRenderError",
@@ -201,9 +397,16 @@ __all__ = [
     "VulnerabilitySourceError",
     "VulnerabilitySourceInputError",
     "generate_vex_from_components",
+    "generate_vex_from_components_result",
     "generate_vex_from_github_sbom",
+    "generate_vex_from_github_sbom_result",
+    "generate_vex_from_github_source_result",
     "generate_vex_from_local_findings",
+    "generate_vex_from_local_findings_result",
     "generate_vex_from_sbom",
+    "generate_vex_from_sbom_result",
     "generate_vex_from_source",
+    "generate_vex_from_source_result",
     "load_cyclonedx_sbom",
+    "parse_generation_execution_report",
 ]

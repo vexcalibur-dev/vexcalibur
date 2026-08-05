@@ -2,7 +2,8 @@
 
 A provider turns normalized SBOM components into `VulnerabilityFinding` values. A built-in renderer adapts them into atomic assertions before it writes a format. Neither stage needs the provider's request or storage format.
 
-The Python contract is pre-1.0 and may change between releases.
+The compatibility guarantee for this contract begins with Vexcalibur 1.0.
+Before 1.0, pin an exact release.
 
 This reference covers both first-party sources maintained with Vexcalibur and
 external sources owned by an embedding application. External source code stays
@@ -10,10 +11,10 @@ in the embedding's package and implements the same public protocol.
 
 ## Protocol
 
-A source implements `vexcalibur.domain.VulnerabilitySource`:
+A source implements `vexcalibur.api.VulnerabilitySource`:
 
 ```python
-from vexcalibur.domain import (
+from vexcalibur.api import (
     ComponentIdentity,
     VulnerabilityFinding,
 )
@@ -51,15 +52,16 @@ also implement `GenerationSourcePreflight`:
 ```python
 from dataclasses import dataclass
 
-from vexcalibur.domain import (
+from vexcalibur.api import (
     ComponentIdentity,
+    GenerationSourcePreflight,
     VulnerabilityFinding,
     VulnerabilitySourceInputError,
 )
 
 
 @dataclass(frozen=True)
-class ExampleSource:
+class ExampleSource(GenerationSourcePreflight):
     public_data_sharing_allowed: bool
 
     def validate_before_inventory_load(self) -> None:
