@@ -20,6 +20,7 @@ from vexcalibur.execution_report_destination import (
     BoundFileDestination,
     BoundFileDestinationError,
 )
+from vexcalibur.execution_report_lifecycle import DescriptorOwnership
 from vexcalibur.generation_output import (
     GenerationOutputError,
     GenerationOutputTransaction,
@@ -281,14 +282,11 @@ def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
         with pytest.raises(KeyboardInterrupt, match="post-close interruption"):
             owner.close()
 
-        retained_descriptor = getattr(owner, attribute)
-        if attribute == "parent_fd":
-            assert retained_descriptor >= 0
-            assert retained_descriptor != owned_descriptor
-            os.fstat(retained_descriptor)
-        else:
-            assert retained_descriptor == -1
-        owner.close()
+        assert getattr(owner, attribute) == -1
+        ownership = getattr(owner, f"_{attribute}_ownership")
+        assert ownership is DescriptorOwnership.AMBIGUOUS
+        with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
+            owner.close()
         os.fstat(replacement[0])
     finally:
         monkeypatch.setattr(
@@ -297,8 +295,10 @@ def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
             real_release,
         )
         if owner_kind == "rollback":
-            owner.close()
-        manager.__exit__(None, None, None)
+            manager.__exit__(None, None, None)
+        else:
+            with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
+                manager.__exit__(None, None, None)
         destination.close()
         for descriptor in replacement:
             real_close(descriptor)

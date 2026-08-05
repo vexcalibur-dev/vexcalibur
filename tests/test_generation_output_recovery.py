@@ -13,6 +13,11 @@ import vexcalibur.execution_report_staging as staging_module
 from vexcalibur.execution_report_destination import (
     BoundFileDestination,
 )
+from vexcalibur.execution_report_lifecycle import (
+    DescriptorOwnership,
+    GenerationOutputState,
+    PublishedRollbackState,
+)
 from vexcalibur.generation_output import (
     GenerationOutputCleanupError,
     GenerationOutputError,
@@ -147,7 +152,7 @@ def test_descriptor_exhaustion_after_publication_uses_retained_rollback_lock(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
-def test_rollback_handoff_cancellation_removes_the_published_success_report(
+def test_transaction_owns_rollback_guard_before_descriptor_acquisition(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -158,46 +163,29 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
         report_path=report_path,
         protected_paths=(),
     )
-    real_setattr = GenerationOutputTransaction.__setattr__
-    real_prepare_rollback = staging_module.StagedFileWrite._prepare_rollback
-    prepared_rollbacks: list[staging_module.PublishedFileRollback] = []
+    rollback = transaction._report_rollback
     interrupted = False
 
-    def capture_prepared_rollback(
+    def interrupt_before_descriptor_acquisition(
         staged: staging_module.StagedFileWrite,
+        supplied_rollback: staging_module.PublishedFileRollback | None = None,
     ) -> staging_module.PublishedFileRollback:
-        rollback = real_prepare_rollback(staged)
-        prepared_rollbacks.append(rollback)
-        return rollback
-
-    def interrupt_rollback_handoff(
-        target: GenerationOutputTransaction,
-        name: str,
-        value: object,
-    ) -> None:
         nonlocal interrupted
-        if not interrupted and name == "_report_rollback" and value is not None:
-            interrupted = True
-            raise KeyboardInterrupt("synthetic rollback handoff cancellation")
-        real_setattr(target, name, value)
+        del staged
+        assert supplied_rollback is rollback
+        assert transaction.state is GenerationOutputState.REPORT_GUARDED
+        interrupted = True
+        raise KeyboardInterrupt("synthetic rollback acquisition cancellation")
 
-    monkeypatch.setattr(
-        GenerationOutputTransaction,
-        "__setattr__",
-        interrupt_rollback_handoff,
-    )
     monkeypatch.setattr(
         staging_module.StagedFileWrite,
         "_prepare_rollback",
-        capture_prepared_rollback,
+        interrupt_before_descriptor_acquisition,
     )
 
-    with (
-        transaction,
-        pytest.raises(
-            KeyboardInterrupt,
-            match="synthetic rollback handoff cancellation",
-        ),
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="synthetic rollback acquisition cancellation",
     ):
         transaction.commit(
             _generation_result(monkeypatch),
@@ -205,15 +193,14 @@ def test_rollback_handoff_cancellation_removes_the_published_success_report(
         )
 
     assert interrupted
-    assert len(prepared_rollbacks) == 1
-    assert prepared_rollbacks[0].closed
-    assert transaction._pending_report_rollback is None
+    assert rollback.closed
+    assert transaction.closed
     assert output_path.exists()
     assert not report_path.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
-def test_rollback_handoff_cleanup_failure_retains_retryable_ownership(
+def test_rollback_acquisition_cleanup_failure_retains_transaction_ownership(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -224,26 +211,16 @@ def test_rollback_handoff_cleanup_failure_retains_retryable_ownership(
         report_path=report_path,
         protected_paths=(),
     )
-    real_setattr = GenerationOutputTransaction.__setattr__
-    real_prepare_rollback = staging_module.StagedFileWrite._prepare_rollback
     real_close = staging_module.PublishedFileRollback.close
-    prepared_rollbacks: list[staging_module.PublishedFileRollback] = []
+    rollback = transaction._report_rollback
 
-    def capture_prepared_rollback(
+    def interrupt_before_descriptor_acquisition(
         staged: staging_module.StagedFileWrite,
+        supplied_rollback: staging_module.PublishedFileRollback | None = None,
     ) -> staging_module.PublishedFileRollback:
-        rollback = real_prepare_rollback(staged)
-        prepared_rollbacks.append(rollback)
-        return rollback
-
-    def interrupt_rollback_handoff(
-        target: GenerationOutputTransaction,
-        name: str,
-        value: object,
-    ) -> None:
-        if name == "_report_rollback" and value is not None:
-            raise KeyboardInterrupt("synthetic rollback handoff cancellation")
-        real_setattr(target, name, value)
+        del staged
+        assert supplied_rollback is rollback
+        raise KeyboardInterrupt("synthetic rollback acquisition cancellation")
 
     def fail_rollback_close(rollback: staging_module.PublishedFileRollback) -> None:
         raise OSError("synthetic rollback close failure")
@@ -251,12 +228,7 @@ def test_rollback_handoff_cleanup_failure_retains_retryable_ownership(
     monkeypatch.setattr(
         staging_module.StagedFileWrite,
         "_prepare_rollback",
-        capture_prepared_rollback,
-    )
-    monkeypatch.setattr(
-        GenerationOutputTransaction,
-        "__setattr__",
-        interrupt_rollback_handoff,
+        interrupt_before_descriptor_acquisition,
     )
     monkeypatch.setattr(
         staging_module.PublishedFileRollback,
@@ -266,16 +238,15 @@ def test_rollback_handoff_cleanup_failure_retains_retryable_ownership(
 
     with pytest.raises(
         KeyboardInterrupt,
-        match="synthetic rollback handoff cancellation",
+        match="synthetic rollback acquisition cancellation",
     ) as captured:
         transaction.commit(
             _generation_result(monkeypatch),
             binary_stdout=None,
         )
 
-    assert len(prepared_rollbacks) == 1
-    rollback = prepared_rollbacks[0]
-    assert transaction._pending_report_rollback is rollback
+    assert transaction._report_rollback is rollback
+    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
     assert not rollback.closed
     assert str(captured.value.vexcalibur_cleanup_failures[0]) == (  # type: ignore[attr-defined]
         "synthetic rollback close failure"
@@ -287,8 +258,7 @@ def test_rollback_handoff_cleanup_failure_retains_retryable_ownership(
     transaction.abort()
 
     assert rollback.closed
-    assert transaction._pending_report_rollback is None
-    assert transaction._report_rollback is None
+    assert transaction.closed
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
@@ -364,8 +334,8 @@ def test_rollback_release_cancellation_removes_the_published_success_report(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
-@pytest.mark.parametrize("descriptor_role", ("published_fd", "parent_fd"))
-def test_interrupted_rollback_descriptor_release_preserves_success_report(
+@pytest.mark.parametrize("descriptor_role", ("published_fd", "parent_fd", "lock_fd"))
+def test_interrupted_rollback_descriptor_release_becomes_ambiguous(
     descriptor_role: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -414,12 +384,16 @@ def test_interrupted_rollback_descriptor_release_preserves_success_report(
     assert interrupted
     assert output_path.exists()
     assert report_path.exists()
-    assert transaction._report_rollback is None
+    ownership = getattr(rollback, f"_{descriptor_role}_ownership")
+    assert ownership is DescriptorOwnership.AMBIGUOUS
+    assert getattr(rollback, descriptor_role) == -1
+    assert transaction._report_rollback is rollback
+    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+    assert not transaction.closed
     os.fstat(interrupted_descriptor)
-    transaction.close()
+    with pytest.raises(GenerationOutputCleanupError, match="release is ambiguous"):
+        transaction.close()
     os.close(interrupted_descriptor)
-
-    assert transaction.closed
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
@@ -454,10 +428,14 @@ def test_interruption_after_physical_rollback_release_keeps_success_report(
         close_then_interrupt,
     )
 
-    transaction.close()
+    with pytest.raises(
+        KeyboardInterrupt,
+        match="rollback was already released",
+    ):
+        transaction.close()
 
     assert transaction.closed
-    assert transaction._report_rollback is None
+    assert transaction._report_rollback.closed
     assert output_path.exists()
     assert report_path.exists()
 
@@ -475,7 +453,7 @@ def test_cleanup_retries_a_transient_report_rollback_failure(
         protected_paths=(),
     )
     real_close = destination_module.StagedFileWrite.close
-    real_remove = staging_module._remove_matching_destination
+    real_discard = staging_module.PublishedFileRollback.discard
     cleanup_interrupted = False
     rollback_failed = False
 
@@ -492,12 +470,14 @@ def test_cleanup_retries_a_transient_report_rollback_failure(
             raise KeyboardInterrupt("synthetic cleanup cancellation")
         real_close(staged)
 
-    def fail_first_report_rollback(*args: object, **kwargs: object) -> bool:
+    def fail_first_report_rollback(
+        rollback: staging_module.PublishedFileRollback,
+    ) -> bool:
         nonlocal rollback_failed
         if not rollback_failed:
             rollback_failed = True
             raise OSError("transient rollback failure")
-        return real_remove(*args, **kwargs)
+        return real_discard(rollback)
 
     monkeypatch.setattr(
         destination_module.StagedFileWrite,
@@ -505,8 +485,8 @@ def test_cleanup_retries_a_transient_report_rollback_failure(
         interrupt_output_cleanup,
     )
     monkeypatch.setattr(
-        staging_module,
-        "_remove_matching_destination",
+        staging_module.PublishedFileRollback,
+        "discard",
         fail_first_report_rollback,
     )
 
@@ -567,14 +547,55 @@ def test_abort_preserves_rollback_ownership_after_a_transient_probe_failure(
     assert failed
     assert report_path.exists()
     assert transaction._report_rollback is rollback
-    assert transaction._discard_report_on_close
+    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+    assert rollback.state is PublishedRollbackState.PUBLISHED
     assert not transaction.closed
 
     monkeypatch.setattr(staging_module.os, "fstat", real_fstat)
     transaction.abort()
 
     assert not report_path.exists()
-    assert transaction._report_rollback is None
+    assert rollback.state is PublishedRollbackState.RELEASED
+    assert transaction.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_context_exit_retains_persistent_abort_failure_on_primary_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=tmp_path / "execution-report.json",
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    real_discard = staging_module.PublishedFileRollback.discard
+
+    def fail_discard(rollback: staging_module.PublishedFileRollback) -> bool:
+        del rollback
+        raise OSError("synthetic persistent abort failure")
+
+    monkeypatch.setattr(staging_module.PublishedFileRollback, "discard", fail_discard)
+
+    with (
+        pytest.raises(RuntimeError, match="synthetic primary failure") as captured,
+        transaction,
+    ):
+        raise RuntimeError("synthetic primary failure")
+
+    cleanup_failures = captured.value.vexcalibur_cleanup_failures  # type: ignore[attr-defined]
+    assert len(cleanup_failures) == 1
+    assert str(cleanup_failures[0]) == "could not remove the published execution report"
+    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+    assert not transaction.closed
+
+    monkeypatch.setattr(
+        staging_module.PublishedFileRollback,
+        "discard",
+        real_discard,
+    )
+    transaction.abort()
     assert transaction.closed
 
 
@@ -691,7 +712,7 @@ def test_persistent_report_rollback_failure_remains_retryable(
     output_destination = transaction.output_destination
     assert output_destination is not None
     real_close = BoundFileDestination.close
-    real_remove = staging_module._remove_matching_destination
+    real_discard = staging_module.PublishedFileRollback.discard
     interrupted = False
 
     def interrupt_output_close(destination: BoundFileDestination) -> None:
@@ -703,9 +724,9 @@ def test_persistent_report_rollback_failure_remains_retryable(
 
     monkeypatch.setattr(BoundFileDestination, "close", interrupt_output_close)
     monkeypatch.setattr(
-        staging_module,
-        "_remove_matching_destination",
-        lambda **kwargs: False,
+        staging_module.PublishedFileRollback,
+        "discard",
+        lambda rollback: False,
     )
 
     with pytest.raises(
@@ -715,8 +736,8 @@ def test_persistent_report_rollback_failure_remains_retryable(
         transaction.close()
 
     assert report_path.exists()
-    assert transaction._report_rollback is not None
-    assert transaction._discard_report_on_close
+    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+    assert transaction._report_rollback.state is PublishedRollbackState.PUBLISHED
     assert not transaction.closed
 
     with pytest.raises(
@@ -726,19 +747,18 @@ def test_persistent_report_rollback_failure_remains_retryable(
         transaction.close()
 
     assert report_path.exists()
-    assert transaction._report_rollback is not None
-    assert transaction._discard_report_on_close
+    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+    assert transaction._report_rollback.state is PublishedRollbackState.PUBLISHED
     assert not transaction.closed
 
     monkeypatch.setattr(
-        staging_module,
-        "_remove_matching_destination",
-        real_remove,
+        staging_module.PublishedFileRollback,
+        "discard",
+        real_discard,
     )
     transaction.close()
 
     assert output_path.exists()
     assert not report_path.exists()
-    assert transaction._report_rollback is None
-    assert not transaction._discard_report_on_close
+    assert transaction._report_rollback.state is PublishedRollbackState.RELEASED
     assert transaction.closed

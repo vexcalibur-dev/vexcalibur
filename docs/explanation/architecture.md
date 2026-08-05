@@ -208,6 +208,29 @@ writes that share a parent, but it also gives every process the same lock
 without relying on locale-sensitive filename normalization. The report remains
 the final success marker.
 
+The writer tracks that work with one transaction state and one rollback guard.
+The guard belongs to the transaction before it acquires any file descriptors,
+so an interrupted acquisition cannot leave a completed report outside the
+transaction's cleanup path.
+
+| State | Destinations and permitted next steps |
+| --- | --- |
+| `PREPARED` | The stale report is gone and the bound destination descriptors remain open. The transaction can start one commit, abort, or close without publishing. |
+| `COMMITTING` | Private files may exist, and the VEX document may be published. The transaction can retain the report rollback guard or move to cleanup after a failure. It does not restore a replaced VEX document. |
+| `REPORT_GUARDED` | The transaction owns the report's identity-bound rollback guard. It can publish the report and enter `COMMITTED`, or enter `ABORT_REQUIRED` and remove only the report it published. |
+| `COMMITTED` | The VEX document and report were published in that order. Successful finalization releases the rollback guard; an interruption or cleanup failure moves to `ABORT_REQUIRED`. |
+| `ABORT_REQUIRED` | Cleanup preserves the VEX document, removes the report when its identity still matches, and releases every descriptor whose ownership is known. Only successful cleanup enters `CLOSED`. |
+| `CLOSED` | The transaction owns no retryable descriptors and cannot commit again. |
+
+Report removal has a separate durability state. The guard enters
+`PUBLICATION_PENDING` before replacement starts, then enters `PUBLISHED` only
+after the report and its directory entry are flushed. Cleanup enters
+`REMOVAL_PENDING` before it unlinks the report and stays there until the parent
+directory `fsync` succeeds. A retry flushes that directory again even when the
+report path is already absent. If descriptor release becomes ambiguous, the
+writer does not reuse that numeric descriptor or claim that cleanup completed.
+The report may remain, and the command exits unsuccessfully.
+
 The file-output path follows this order:
 
 ```text

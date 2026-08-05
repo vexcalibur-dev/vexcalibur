@@ -17,6 +17,10 @@ from vexcalibur.execution_report_destination import (
     BoundFileDestination,
     BoundFileDestinationError,
 )
+from vexcalibur.execution_report_lifecycle import (
+    DescriptorOwnership,
+    PublishedRollbackState,
+)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
@@ -36,7 +40,7 @@ def test_retained_rollback_holds_inode_and_locks_identity_checked_removal(
     assert published.st_dev == path.stat().st_dev
     assert published.st_ino == path.stat().st_ino
     lock_held = False
-    real_remove = staging_module._remove_matching_destination
+    real_unlink = staging_module.os.unlink
 
     @contextmanager
     def observe_lock(lock_fd: int) -> Iterator[None]:
@@ -48,14 +52,20 @@ def test_retained_rollback_holds_inode_and_locks_identity_checked_removal(
         finally:
             lock_held = False
 
-    def observe_remove(**kwargs: object) -> bool:
+    def observe_unlink(
+        name: str | bytes,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
         assert lock_held
-        expected = kwargs["expected"]
-        assert isinstance(expected, os.stat_result)
+        assert dir_fd == rollback.parent_fd
+        assert name == rollback.name
+        expected = rollback.expected
+        assert expected is not None
         retained = os.fstat(rollback.published_fd)
         assert expected.st_dev == retained.st_dev
         assert expected.st_ino == retained.st_ino
-        return real_remove(**kwargs)  # type: ignore[arg-type]
+        real_unlink(name, dir_fd=dir_fd)
 
     monkeypatch.setattr(
         staging_module.lock_module,
@@ -63,14 +73,97 @@ def test_retained_rollback_holds_inode_and_locks_identity_checked_removal(
         observe_lock,
     )
     monkeypatch.setattr(
-        staging_module,
-        "_remove_matching_destination",
-        observe_remove,
+        staging_module.os,
+        "unlink",
+        observe_unlink,
     )
 
     assert rollback.discard()
     assert not path.exists()
     rollback.close()
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_rollback_retries_parent_fsync_after_successful_unlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+
+    with destination.stage_bytes(b"private report") as staged:
+        rollback = staged._prepare_rollback()
+        staged.commit()
+
+    real_fsync = staging_module.os.fsync
+    fsync_calls = 0
+
+    def fail_first_parent_fsync(descriptor: int) -> None:
+        nonlocal fsync_calls
+        if descriptor == rollback.parent_fd:
+            fsync_calls += 1
+            if fsync_calls == 1:
+                raise OSError("synthetic directory fsync failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(staging_module.os, "fsync", fail_first_parent_fsync)
+
+    assert rollback.discard() is False
+    assert not path.exists()
+    assert rollback.state is PublishedRollbackState.REMOVAL_PENDING
+
+    assert rollback.discard()
+    assert fsync_calls == 2
+    assert rollback.state is PublishedRollbackState.DISCARDED
+    rollback.close()
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_guard_flushes_parent_after_staged_rollback_loses_fsync_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    scope = destination.stage_bytes(b"private report")
+    staged = scope.__enter__()
+    rollback = staged._prepare_rollback()
+    rollback.begin_publication()
+    real_fsync = staging_module.os.fsync
+    parent_identity = os.fstat(staged.parent_fd)
+    parent_fsync_calls = 0
+
+    def fail_commit_and_staged_rollback_fsync(descriptor: int) -> None:
+        nonlocal parent_fsync_calls
+        candidate = os.fstat(descriptor)
+        if (
+            candidate.st_dev == parent_identity.st_dev
+            and candidate.st_ino == parent_identity.st_ino
+        ):
+            parent_fsync_calls += 1
+            if parent_fsync_calls <= 2:
+                raise OSError("synthetic directory fsync failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(
+        staging_module.os,
+        "fsync",
+        fail_commit_and_staged_rollback_fsync,
+    )
+
+    with pytest.raises(BoundFileDestinationError, match="directory fsync failure"):
+        staged.commit()
+
+    assert not path.exists()
+    assert rollback.state is PublishedRollbackState.PUBLICATION_PENDING
+    assert rollback.discard()
+    assert parent_fsync_calls == 3
+    assert rollback.state is PublishedRollbackState.DISCARDED
+
+    rollback.close()
+    scope.__exit__(None, None, None)
     destination.close()
 
 
@@ -114,20 +207,18 @@ def test_discarded_rollback_remains_idempotent_after_partial_close(
         rollback.close()
 
     assert rollback.published_fd == -1
-    retained_parent_descriptor = rollback.parent_fd
-    assert retained_parent_descriptor >= 0
-    assert retained_parent_descriptor != parent_descriptor
+    assert rollback._published_fd_ownership is DescriptorOwnership.RELEASED
+    assert rollback.parent_fd == -1
+    assert rollback._parent_fd_ownership is DescriptorOwnership.AMBIGUOUS
+    assert rollback.state is PublishedRollbackState.DISCARDED
     assert rollback.discard()
     with pytest.raises(OSError):
         os.fstat(published_descriptor)
     os.fstat(parent_descriptor)
-    os.fstat(retained_parent_descriptor)
 
-    rollback.close()
-    assert rollback.closed
-    os.fstat(parent_descriptor)
-    with pytest.raises(OSError):
-        os.fstat(retained_parent_descriptor)
+    with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
+        rollback.close()
+    assert not rollback.closed
     os.close(parent_descriptor)
     destination.close()
 
@@ -565,14 +656,16 @@ def test_destination_close_completes_when_interrupted_after_physical_close(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
-def test_staged_close_disowns_ambiguous_descriptor_before_release(
+@pytest.mark.parametrize("descriptor_role", ("temporary_fd", "parent_fd"))
+def test_staged_close_records_ambiguous_descriptor_release(
+    descriptor_role: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     destination = BoundFileDestination.prepare(tmp_path / "report.json")
     scope = destination.stage_bytes(b"private report")
     staged = scope.__enter__()
-    parent_descriptor = staged.parent_fd
+    interrupted_descriptor = getattr(staged, descriptor_role)
     real_dup2 = filesystem_module.os.dup2
     interrupted = False
 
@@ -583,31 +676,26 @@ def test_staged_close_disowns_ambiguous_descriptor_before_release(
         inheritable: bool = True,
     ) -> int:
         nonlocal interrupted
-        if candidate == parent_descriptor and not interrupted:
+        if candidate == interrupted_descriptor and not interrupted:
             interrupted = True
-            raise KeyboardInterrupt("parent close interrupted")
+            raise KeyboardInterrupt(f"{descriptor_role} close interrupted")
         return real_dup2(source, candidate, inheritable=inheritable)
 
     monkeypatch.setattr(filesystem_module.os, "dup2", interrupt_parent_transfer)
 
-    with pytest.raises(KeyboardInterrupt, match="parent close interrupted"):
+    with pytest.raises(KeyboardInterrupt, match=rf"{descriptor_role} close interrupted"):
         staged.close()
 
-    assert staged.temporary_fd == -1
-    retained_parent_descriptor = staged.parent_fd
-    assert retained_parent_descriptor >= 0
-    assert retained_parent_descriptor != parent_descriptor
+    assert getattr(staged, descriptor_role) == -1
+    ownership = getattr(staged, f"_{descriptor_role}_ownership")
+    assert ownership is DescriptorOwnership.AMBIGUOUS
     assert not staged.closed
-    assert stat.S_ISDIR(os.fstat(retained_parent_descriptor).st_mode)
-    os.fstat(parent_descriptor)
 
-    scope.__exit__(None, None, None)
-    assert staged.closed
-    assert staged.parent_fd == -1
-    os.fstat(parent_descriptor)
-    with pytest.raises(OSError):
-        os.fstat(retained_parent_descriptor)
-    os.close(parent_descriptor)
+    with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
+        staged.close()
+    with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
+        scope.__exit__(None, None, None)
+    os.close(interrupted_descriptor)
     destination.close()
 
 

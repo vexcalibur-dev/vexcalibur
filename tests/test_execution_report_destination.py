@@ -666,45 +666,48 @@ def test_interrupted_rollback_retries_without_losing_cleanup_state(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
-def test_cancellation_during_rollback_handoff_closes_the_retained_descriptor(
+def test_cancellation_during_rollback_acquisition_closes_retained_descriptors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = tmp_path / "execution-report.json"
     destination = BoundFileDestination.prepare(path)
-    observed_descriptors: list[int] = []
+    real_create = staging_module.PublishedFileRollback._create.__func__
+    real_dup = staging_module.os.dup
+    observed_rollbacks: list[staging_module.PublishedFileRollback] = []
+    duplicate_calls = 0
 
-    def cancel_handoff(
+    def observe_guard(
         cls: type[staging_module.PublishedFileRollback],
-        *,
-        expected: os.stat_result,
-        lock_fd: int,
-        parent_fd: int,
-        published_fd: int,
-        name: str | bytes,
     ) -> staging_module.PublishedFileRollback:
-        del cls, expected, name
-        observed_descriptors.extend((lock_fd, parent_fd, published_fd))
-        raise KeyboardInterrupt("rollback handoff interrupted")
+        rollback = real_create(cls)
+        observed_rollbacks.append(rollback)
+        return rollback
+
+    def cancel_second_duplicate(descriptor: int) -> int:
+        nonlocal duplicate_calls
+        duplicate_calls += 1
+        if duplicate_calls == 2:
+            raise KeyboardInterrupt("rollback acquisition interrupted")
+        return real_dup(descriptor)
 
     monkeypatch.setattr(
         staging_module.PublishedFileRollback,
         "_create",
-        classmethod(cancel_handoff),
+        classmethod(observe_guard),
     )
+    monkeypatch.setattr(staging_module.os, "dup", cancel_second_duplicate)
 
     with destination.stage_bytes(b"private report") as staged:
         staged.commit()
         with pytest.raises(
             KeyboardInterrupt,
-            match="rollback handoff interrupted",
+            match="rollback acquisition interrupted",
         ):
             staged.retain_rollback()
 
-    assert len(observed_descriptors) == 3
-    for descriptor in observed_descriptors:
-        with pytest.raises(OSError):
-            os.fstat(descriptor)
+    assert len(observed_rollbacks) == 1
+    assert observed_rollbacks[0].closed
     assert path.read_bytes() == b"private report"
     destination.close()
     path.unlink()

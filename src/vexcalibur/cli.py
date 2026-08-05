@@ -1,7 +1,6 @@
 """Command-line entrypoint for Vexcalibur."""
 
 import sys
-from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, BinaryIO, cast
 
@@ -389,10 +388,14 @@ def generate(
         except GenerationOutputError as exc:
             typer.echo(f"Could not finalize generate outputs: {exc}", err=True)
             raise typer.Exit(code=1) from exc
-    except BaseException:
+    except BaseException as failure:
         if output_transaction is not None:
-            with suppress(BaseException):
-                output_transaction.abort()
+            cleanup_failure = output_transaction.abort_after(failure)
+            if cleanup_failure is not None:
+                typer.echo(
+                    f"Could not finalize generate outputs: {cleanup_failure}",
+                    err=True,
+                )
         raise
 
 

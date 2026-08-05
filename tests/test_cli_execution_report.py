@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 import vexcalibur.execution_report_destination as destination_module
+import vexcalibur.execution_report_staging as staging_module
 import vexcalibur.generate_command as generate_command
 from vexcalibur import cli
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
@@ -118,6 +119,55 @@ def test_cli_interruption_after_commit_removes_the_success_report(
     assert isinstance(result.exception, SystemExit)
     assert output_path.exists()
     assert not report_path.exists()
+
+
+def test_cli_reports_persistent_abort_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    real_commit = GenerationOutputTransaction.commit
+
+    def commit_then_interrupt(
+        transaction: GenerationOutputTransaction,
+        result: GenerationResult,
+        *,
+        binary_stdout: io.BufferedIOBase | None = None,
+    ) -> None:
+        real_commit(transaction, result, binary_stdout=binary_stdout)
+        raise KeyboardInterrupt("post-commit interruption")
+
+    def fail_discard(rollback: staging_module.PublishedFileRollback) -> bool:
+        del rollback
+        raise OSError("synthetic persistent abort failure")
+
+    monkeypatch.setattr(GenerationOutputTransaction, "commit", commit_then_interrupt)
+    monkeypatch.setattr(staging_module.PublishedFileRollback, "discard", fail_discard)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 130
+    expected_error = (
+        "Could not finalize generate outputs: could not remove the published execution report"
+    )
+    assert expected_error in result.output
+    assert "Traceback" not in result.output
+    assert output_path.exists()
+    assert report_path.exists()
 
 
 def test_cli_reports_finalization_failure_without_a_traceback(

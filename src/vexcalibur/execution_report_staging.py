@@ -23,6 +23,11 @@ from vexcalibur.execution_report_filesystem import (
     _require_private_regular_file,
     _same_identity,
 )
+from vexcalibur.execution_report_lifecycle import (
+    DescriptorOwnership,
+    PublishedRollbackState,
+    require_published_rollback_transition,
+)
 
 
 class _StagingDestination(Protocol):
@@ -45,27 +50,36 @@ _STAGED_FILE_WRITE_TOKEN = object()
 
 
 def _close_owned_descriptor(owner: object, attribute: str) -> None:
+    ownership_attribute = f"_{attribute}_ownership"
+    ownership = getattr(owner, ownership_attribute)
+    if ownership is DescriptorOwnership.RELEASED:
+        return
+    if ownership is DescriptorOwnership.AMBIGUOUS:
+        raise BoundFileDestinationError(
+            f"{attribute.removesuffix('_fd').replace('_', ' ')} descriptor release is ambiguous"
+        )
     descriptor = getattr(owner, attribute)
-    backup_descriptor = -1
-    if attribute == "parent_fd" and descriptor >= 0:
-        backup_descriptor = os.dup(descriptor)
-    object.__setattr__(owner, attribute, -1)
+    if descriptor < 0:
+        raise RuntimeError(f"owned {attribute} has no descriptor")
     try:
         outcome = _close_descriptor_retryable(descriptor)
     except BaseException:
-        if backup_descriptor >= 0:
-            object.__setattr__(owner, attribute, backup_descriptor)
+        object.__setattr__(owner, attribute, -1)
+        object.__setattr__(owner, ownership_attribute, DescriptorOwnership.AMBIGUOUS)
         raise
+    if outcome.released:
+        object.__setattr__(owner, attribute, -1)
+        object.__setattr__(owner, ownership_attribute, DescriptorOwnership.RELEASED)
+        return
     if outcome.unchanged:
-        object.__setattr__(owner, attribute, descriptor)
-        _close_descriptor(backup_descriptor)
+        if outcome.failure is not None:
+            raise outcome.failure
+        raise RuntimeError("descriptor release returned unchanged without a failure")
+    object.__setattr__(owner, attribute, -1)
+    object.__setattr__(owner, ownership_attribute, DescriptorOwnership.AMBIGUOUS)
     if outcome.failure is not None:
-        if not outcome.unchanged and backup_descriptor >= 0:
-            object.__setattr__(owner, attribute, backup_descriptor)
         raise outcome.failure
-    if not outcome.released:
-        raise RuntimeError("descriptor release returned no final state")
-    _close_descriptor(backup_descriptor)
+    raise RuntimeError("descriptor release returned an ambiguous final state")
 
 
 class StagedFileWrite:
@@ -74,7 +88,9 @@ class StagedFileWrite:
     __slots__ = (
         "_closed",
         "_committed",
+        "_parent_fd_ownership",
         "_retain_publication",
+        "_temporary_fd_ownership",
         "destination",
         "parent_fd",
         "temporary_fd",
@@ -102,6 +118,8 @@ class StagedFileWrite:
         self._committed = False
         self._closed = False
         self._retain_publication = False
+        self._parent_fd_ownership = DescriptorOwnership.OWNED
+        self._temporary_fd_ownership = DescriptorOwnership.OWNED
 
     @classmethod
     def _create(
@@ -211,37 +229,25 @@ class StagedFileWrite:
         """Retain an independent handle that can remove this publication."""
         if not self.committed or not self._retain_publication:
             raise BoundFileDestinationError("staged file is not published")
-        return self._prepare_rollback()
+        rollback = PublishedFileRollback._create()
+        retained = self._prepare_rollback(rollback)
+        retained.begin_publication()
+        retained.publication_succeeded()
+        return retained
 
-    def _prepare_rollback(self) -> PublishedFileRollback:
+    def _prepare_rollback(
+        self,
+        rollback: PublishedFileRollback | None = None,
+    ) -> PublishedFileRollback:
         """Retain rollback ownership before the staged file is published."""
-        lock_fd = -1
-        parent_fd = -1
-        published_fd = -1
-        try:
-            lock_fd = lock_module._open_private_destination_lock(self.parent_fd)
-            parent_fd = os.dup(self.parent_fd)
-            published_fd = os.dup(self.temporary_fd)
-            return PublishedFileRollback._create(
-                expected=self.temporary_stat,
-                lock_fd=lock_fd,
-                parent_fd=parent_fd,
-                published_fd=published_fd,
-                name=self.destination._name_bytes,
-            )
-        except BaseException as exc:
-            try:
-                try:
-                    _close_descriptor(published_fd)
-                finally:
-                    _close_descriptor(parent_fd)
-            finally:
-                _close_descriptor(lock_fd)
-            if isinstance(exc, OSError):
-                raise BoundFileDestinationError(
-                    "could not retain the published file rollback handle"
-                ) from exc
-            raise
+        retained = PublishedFileRollback._create() if rollback is None else rollback
+        retained._arm(
+            expected=self.temporary_stat,
+            parent_fd=self.parent_fd,
+            published_fd=self.temporary_fd,
+            name=self.destination._name_bytes,
+        )
+        return retained
 
     def _rollback_publication(self) -> bool:
         if not self.committed:
@@ -268,9 +274,26 @@ class StagedFileWrite:
                     expected=expected,
                 ):
                     raise BoundFileDestinationError("could not remove the unpublished staged file")
-        _close_owned_descriptor(self, "temporary_fd")
-        _close_owned_descriptor(self, "parent_fd")
-        object.__setattr__(self, "_closed", True)
+        failures: list[BaseException] = []
+        try:
+            _close_owned_descriptor(self, "temporary_fd")
+        except BaseException as exc:
+            failures.append(exc)
+        if self._temporary_fd_ownership is not DescriptorOwnership.OWNED:
+            try:
+                _close_owned_descriptor(self, "parent_fd")
+            except BaseException as exc:
+                failures.append(exc)
+        if (
+            self._temporary_fd_ownership is DescriptorOwnership.RELEASED
+            and self._parent_fd_ownership is DescriptorOwnership.RELEASED
+        ):
+            object.__setattr__(self, "_closed", True)
+        if failures:
+            primary = failures[0]
+            if len(failures) > 1:
+                _retain_cleanup_failures(primary, tuple(failures[1:]))
+            raise primary
 
     def __copy__(self) -> StagedFileWrite:
         raise TypeError("staged file writes cannot be copied")
@@ -305,8 +328,10 @@ class PublishedFileRollback:
     """Independent identity-bound handle for removing one published file."""
 
     __slots__ = (
-        "_closed",
-        "_discarded",
+        "_lock_fd_ownership",
+        "_parent_fd_ownership",
+        "_published_fd_ownership",
+        "_state",
         "expected",
         "lock_fd",
         "name",
@@ -317,62 +342,144 @@ class PublishedFileRollback:
     def __init__(
         self,
         construction_token: object,
+    ) -> None:
+        if construction_token is not _PUBLISHED_FILE_ROLLBACK_TOKEN:
+            raise TypeError("published rollback handles require a staged file")
+        self.expected: os.stat_result | None = None
+        self.lock_fd = -1
+        self.parent_fd = -1
+        self.published_fd = -1
+        self.name: str | bytes = b""
+        self._lock_fd_ownership = DescriptorOwnership.RELEASED
+        self._parent_fd_ownership = DescriptorOwnership.RELEASED
+        self._published_fd_ownership = DescriptorOwnership.RELEASED
+        self._state = PublishedRollbackState.UNARMED
+
+    @classmethod
+    def _create(cls) -> PublishedFileRollback:
+        return cls(_PUBLISHED_FILE_ROLLBACK_TOKEN)
+
+    @property
+    def state(self) -> PublishedRollbackState:
+        """Return the rollback guard's current lifecycle state."""
+        return self._state
+
+    def _transition(self, target: PublishedRollbackState) -> None:
+        object.__setattr__(
+            self,
+            "_state",
+            require_published_rollback_transition(self._state, target),
+        )
+
+    def _arm(
+        self,
         *,
         expected: os.stat_result,
-        lock_fd: int,
         parent_fd: int,
         published_fd: int,
         name: str | bytes,
     ) -> None:
-        if construction_token is not _PUBLISHED_FILE_ROLLBACK_TOKEN:
-            raise TypeError("published rollback handles require a staged file")
-        self.expected = expected
-        self.lock_fd = lock_fd
-        self.parent_fd = parent_fd
-        self.published_fd = published_fd
-        self.name = name
-        self._closed = False
-        self._discarded = False
-
-    @classmethod
-    def _create(
-        cls,
-        *,
-        expected: os.stat_result,
-        lock_fd: int,
-        parent_fd: int,
-        published_fd: int,
-        name: str | bytes,
-    ) -> PublishedFileRollback:
-        return cls(
-            _PUBLISHED_FILE_ROLLBACK_TOKEN,
-            expected=expected,
-            lock_fd=lock_fd,
-            parent_fd=parent_fd,
-            published_fd=published_fd,
-            name=name,
-        )
+        """Acquire rollback descriptors after a transaction owns this guard."""
+        self._transition(PublishedRollbackState.ARMING)
+        object.__setattr__(self, "expected", expected)
+        object.__setattr__(self, "name", name)
+        try:
+            lock_fd = lock_module._open_private_destination_lock(parent_fd)
+            object.__setattr__(self, "lock_fd", lock_fd)
+            object.__setattr__(self, "_lock_fd_ownership", DescriptorOwnership.OWNED)
+            retained_parent_fd = os.dup(parent_fd)
+            object.__setattr__(self, "parent_fd", retained_parent_fd)
+            object.__setattr__(self, "_parent_fd_ownership", DescriptorOwnership.OWNED)
+            retained_published_fd = os.dup(published_fd)
+            object.__setattr__(self, "published_fd", retained_published_fd)
+            object.__setattr__(
+                self,
+                "_published_fd_ownership",
+                DescriptorOwnership.OWNED,
+            )
+        except BaseException as exc:
+            cleanup_failure: BaseException | None = None
+            try:
+                self.close()
+            except BaseException as cleanup_exc:
+                cleanup_failure = cleanup_exc
+            if cleanup_failure is not None:
+                _retain_cleanup_failures(exc, (cleanup_failure,))
+            if isinstance(exc, OSError):
+                raise BoundFileDestinationError(
+                    "could not retain the published file rollback handle"
+                ) from exc
+            raise
+        self._transition(PublishedRollbackState.ARMED)
 
     def discard(self) -> bool:
         """Remove the publication only if it still has the retained identity."""
-        if self._discarded:
+        if self._state is PublishedRollbackState.DISCARDED:
             return True
         if not self.can_discard:
             return False
+        expected = self.expected
+        if expected is None:
+            raise RuntimeError("armed rollback guard has no expected identity")
         with lock_module._exclusive_open_lock(self.lock_fd):
-            removed = _remove_matching_destination(
-                parent_fd=self.parent_fd,
-                name=self.name,
-                expected=self.expected,
-            )
-        if removed:
-            object.__setattr__(self, "_discarded", True)
-        return removed
+            if self._state in {
+                PublishedRollbackState.ARMED,
+                PublishedRollbackState.PUBLISHED,
+            }:
+                try:
+                    actual = os.stat(
+                        self.name,
+                        dir_fd=self.parent_fd,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    self._transition(PublishedRollbackState.DISCARDED)
+                    return True
+                except OSError:
+                    return False
+                if not _same_identity(actual, expected):
+                    self._transition(PublishedRollbackState.DISCARDED)
+                    return True
+                self._transition(PublishedRollbackState.REMOVAL_PENDING)
+            elif self._state is PublishedRollbackState.PUBLICATION_PENDING:
+                self._transition(PublishedRollbackState.REMOVAL_PENDING)
+
+            try:
+                actual = os.stat(
+                    self.name,
+                    dir_fd=self.parent_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                pass
+            except OSError:
+                return False
+            else:
+                if _same_identity(actual, expected):
+                    try:
+                        os.unlink(self.name, dir_fd=self.parent_fd)
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        return False
+            try:
+                os.fsync(self.parent_fd)
+            except OSError:
+                return False
+            self._transition(PublishedRollbackState.DISCARDED)
+            return True
 
     @property
     def can_discard(self) -> bool:
         """Return whether the retained descriptor still pins the publication."""
-        if self._closed:
+        if self._state not in {
+            PublishedRollbackState.ARMED,
+            PublishedRollbackState.PUBLICATION_PENDING,
+            PublishedRollbackState.PUBLISHED,
+            PublishedRollbackState.REMOVAL_PENDING,
+        }:
+            return False
+        if self._published_fd_ownership is not DescriptorOwnership.OWNED:
             return False
         try:
             retained = os.fstat(self.published_fd)
@@ -382,21 +489,46 @@ class PublishedFileRollback:
             raise BoundFileDestinationError(
                 "could not inspect the published execution report"
             ) from exc
-        return _same_identity(retained, self.expected)
+        expected = self.expected
+        return expected is not None and _same_identity(retained, expected)
+
+    def begin_publication(self) -> None:
+        """Record a publication attempt before the replace operation starts."""
+        self._transition(PublishedRollbackState.PUBLICATION_PENDING)
+
+    def publication_succeeded(self) -> None:
+        """Record that the guarded file was published and flushed."""
+        self._transition(PublishedRollbackState.PUBLISHED)
 
     def close(self) -> None:
         """Release the retained file and directory descriptors."""
-        if self._closed:
+        if self._state is PublishedRollbackState.RELEASED:
             return
-        _close_owned_descriptor(self, "published_fd")
-        _close_owned_descriptor(self, "parent_fd")
-        _close_owned_descriptor(self, "lock_fd")
-        object.__setattr__(self, "_closed", True)
+        failures: list[BaseException] = []
+        for attribute in ("published_fd", "parent_fd", "lock_fd"):
+            try:
+                _close_owned_descriptor(self, attribute)
+            except BaseException as exc:
+                failures.append(exc)
+
+        ownerships = (
+            self._published_fd_ownership,
+            self._parent_fd_ownership,
+            self._lock_fd_ownership,
+        )
+        if all(ownership is DescriptorOwnership.RELEASED for ownership in ownerships):
+            self._transition(PublishedRollbackState.RELEASED)
+
+        if failures:
+            primary = failures[0]
+            if len(failures) > 1:
+                _retain_cleanup_failures(primary, tuple(failures[1:]))
+            raise primary
 
     @property
     def closed(self) -> bool:
-        """Return whether both retained descriptors were released."""
-        return self._closed
+        """Return whether every retained descriptor was released."""
+        return self._state is PublishedRollbackState.RELEASED
 
     def __copy__(self) -> PublishedFileRollback:
         raise TypeError("published rollback handles cannot be copied")
