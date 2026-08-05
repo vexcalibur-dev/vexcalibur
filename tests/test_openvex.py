@@ -141,7 +141,9 @@ def test_openvex_document_renderer_rejects_conflicting_product_version() -> None
     )
 
     with pytest.raises(OpenVexRenderError, match="conflicting version identity"):
-        OpenVexJsonRenderer(author="Vexcalibur Test Maintainers").render_document(document=document)
+        OpenVexJsonRenderer(author="Vexcalibur Test Maintainers")._render_document(
+            document=document
+        )
 
 
 def test_openvex_compatibility_renderer_adapts_then_delegates() -> None:
@@ -150,7 +152,7 @@ def test_openvex_compatibility_renderer_adapts_then_delegates() -> None:
     received: dict[str, object] = {}
 
     class RecordingRenderer(OpenVexJsonRenderer):
-        def render_document(
+        def _render_document(
             self,
             *,
             document: VexDocument,

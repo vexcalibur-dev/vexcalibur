@@ -38,6 +38,7 @@ def main() -> None:
     vexcalibur = _console_script(bin_dir, "vexcalibur")
     vexy = _console_script(bin_dir, "vexy")
     _assert_installed_version()
+    _assert_installed_api()
 
     _expect(
         [str(vexcalibur), "--help"],
@@ -226,6 +227,31 @@ def _assert_installed_version() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+
+def _assert_installed_api() -> None:
+    """Import and exercise the supported facade from the installed wheel."""
+    from vexcalibur import api
+
+    required_names = {
+        "ComponentIdentity",
+        "VexRenderer",
+        "VulnerabilitySource",
+        "generate_vex_from_local_findings",
+    }
+    missing_names = required_names.difference(api.__all__)
+    if missing_names:
+        print(
+            f"Installed Python API is missing supported names: {sorted(missing_names)}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    rendered = api.generate_vex_from_local_findings(
+        input_file=FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml",
+        findings_file=FIXTURE_ROOT / "findings" / "all-analysis-states.json",
+    )
+    _assert_generated_vex_shape(rendered)
 
 
 def _expect(

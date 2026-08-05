@@ -2,14 +2,20 @@
 
 A provider turns normalized SBOM components into `VulnerabilityFinding` values. A built-in renderer adapts them into atomic assertions before it writes a format. Neither stage needs the provider's request or storage format.
 
-The Python contract is pre-1.0 and may change between releases.
+The compatibility guarantee for this contract begins with Vexcalibur 1.0.
+Before 1.0, pin an exact release.
 
 ## Protocol
 
-A source implements `vexcalibur.domain.VulnerabilitySource`:
+A source implements `vexcalibur.api.VulnerabilitySource`. This complete local
+example reports one reviewed finding when the matching package is present:
 
 ```python
-from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
+from vexcalibur.api import (
+    ComponentIdentity,
+    VexAnalysisState,
+    VulnerabilityFinding,
+)
 
 
 class ExampleSource:
@@ -17,7 +23,20 @@ class ExampleSource:
         self,
         components: tuple[ComponentIdentity, ...],
     ) -> tuple[VulnerabilityFinding, ...]:
-        ...
+        return tuple(
+            VulnerabilityFinding(
+                id="CVE-2026-0001",
+                source_name="Example Security Review",
+                source_url="https://security.example.test/CVE-2026-0001",
+                component_ref=component.ref,
+                purl=component.purl.to_string(),
+                analysis_state=VexAnalysisState.NOT_AFFECTED,
+                analysis_detail="The affected feature is disabled.",
+                impact_statement="The affected feature is disabled.",
+            )
+            for component in components
+            if component.purl.to_string() == "pkg:pypi/example@1.0.0"
+        )
 ```
 
 The method receives the complete normalized component tuple and returns zero or more immutable findings.
@@ -105,7 +124,9 @@ An offline source should not create a network client. It should define limits fo
 
 ## Implementation shape
 
-Provider code belongs under `vexcalibur.sources`.
+First-party provider code belongs under `vexcalibur.sources`. External
+applications and packages must keep providers in their own package namespace;
+the `vexcalibur` namespace is reserved for this distribution.
 
 1. Validate configuration before I/O.
 2. Map `ComponentIdentity` values to provider queries or lookup keys.

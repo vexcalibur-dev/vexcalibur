@@ -57,7 +57,15 @@ class OpenVexRenderError(VexRenderError):
 
 @dataclass(frozen=True)
 class OpenVexJsonRenderer:
-    """Render OpenVEX 0.2.0 JSON for one document author."""
+    """Render OpenVEX 0.2.0 JSON for one document author.
+
+    Attributes:
+        author: Document author identifier. OpenVEX recommends an IRI.
+        role: Optional human-readable author role.
+
+    Raises:
+        OpenVexRenderError: Author metadata is invalid.
+    """
 
     author: str
     role: str | None = None
@@ -74,17 +82,29 @@ class OpenVexJsonRenderer:
         findings: tuple[VulnerabilityFinding, ...],
         timestamp: datetime | None = None,
     ) -> str:
-        """Adapt provider findings and return OpenVEX 0.2.0 JSON."""
+        """Adapt provider findings and return OpenVEX 0.2.0 JSON.
+
+        Args:
+            components: Components available to the document.
+            findings: Findings associated with those components.
+            timestamp: Document timestamp, or ``None`` to use current UTC.
+
+        Returns:
+            Serialized OpenVEX 0.2.0 JSON.
+
+        Raises:
+            OpenVexRenderError: The values cannot form a valid document.
+        """
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:
             raise OpenVexRenderError(str(exc)) from exc
-        return self.render_document(
+        return self._render_document(
             document=document,
             timestamp=timestamp,
         )
 
-    def render_document(
+    def _render_document(
         self,
         *,
         document: VexDocument,

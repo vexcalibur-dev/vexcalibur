@@ -79,7 +79,19 @@ class SbomError(ValueError):
 
 
 def load_cyclonedx_sbom(path: Path) -> tuple[ComponentIdentity, ...]:
-    """Load supported component identities from a CycloneDX JSON or XML SBOM."""
+    """Load supported component identities from a CycloneDX JSON or XML SBOM.
+
+    Args:
+        path: Regular file containing a supported CycloneDX document.
+
+    Returns:
+        Immutable component identities sorted by package URL and reference.
+        Components without package URLs are omitted.
+
+    Raises:
+        SbomError: The file is unreadable, oversized, malformed, unsupported,
+            or contains unsafe or contradictory component data.
+    """
     raw_content = _read_sbom_bytes(path)
     if _looks_like_xml(raw_content):
         return _component_identities_from_bom(

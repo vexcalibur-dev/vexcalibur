@@ -94,6 +94,10 @@ Keep provider code in `sources/`. A provider returns domain findings and does no
 
 Keep format-specific mapping inside its renderer. Do not silently treat source update times as statement revision times or analysis prose as remediation guidance.
 
+`vexcalibur.api` is the supported Python facade. Public examples and external
+consumer tests must import through it. Other modules are implementation details
+unless that facade re-exports a name.
+
 ## Public data policy
 
 Public vulnerability services fail closed.

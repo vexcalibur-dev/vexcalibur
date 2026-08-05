@@ -65,7 +65,7 @@ release-evidence-check: csaf-validator-install ## Check deterministic zero and a
 	scripts/check-release-evidence.sh
 
 lint: ## Run ruff checks
-	$(UV) run --frozen ruff check src tests scripts/*.py docs/conf.py
+	$(UV) run --frozen ruff check src tests scripts/*.py docs/conf.py docs/examples/*.py
 
 workflow-lint: ## Lint GitHub Actions workflows and shell scripts
 	$(SHELLCHECK) --version >/dev/null
@@ -73,8 +73,8 @@ workflow-lint: ## Lint GitHub Actions workflows and shell scripts
 	$(SHELLCHECK) scripts/*.sh
 
 format: ## Format source and tests
-	$(UV) run --frozen ruff format src tests scripts/*.py docs/conf.py
-	$(UV) run --frozen ruff check --fix src tests scripts/*.py docs/conf.py
+	$(UV) run --frozen ruff format src tests scripts/*.py docs/conf.py docs/examples/*.py
+	$(UV) run --frozen ruff check --fix src tests scripts/*.py docs/conf.py docs/examples/*.py
 
 typecheck: ## Run mypy
 	$(UV) run --frozen mypy src
