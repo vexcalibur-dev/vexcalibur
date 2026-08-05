@@ -102,6 +102,51 @@ report contract.
 
 .. autoclass:: GenerationExecutionReportDict
 
+The typed dictionaries expose these required fields:
+
+.. list-table:: Execution-report dictionary fields
+   :header-rows: 1
+
+   * - Type
+     - Field
+     - Value
+   * - ``GeneratedDocumentMetadataDict``
+     - ``sha256``
+     - Lowercase SHA-256 digest text for the exact UTF-8 document bytes
+   * - ``GeneratedDocumentMetadataDict``
+     - ``bytes``
+     - UTF-8 document byte count as an integer
+   * - ``GenerationExecutionReportDict``
+     - ``schema_version``
+     - Report schema integer
+   * - ``GenerationExecutionReportDict``
+     - ``command``
+     - Literal ``generate``
+   * - ``GenerationExecutionReportDict``
+     - ``vexcalibur_version``
+     - Installed package version text
+   * - ``GenerationExecutionReportDict``
+     - ``inventory_source``
+     - Serialized ``InventorySourceCategory`` value
+   * - ``GenerationExecutionReportDict``
+     - ``finding_source``
+     - Serialized ``FindingSourceCategory`` value
+   * - ``GenerationExecutionReportDict``
+     - ``output_format``
+     - Serialized ``ExecutionReportOutputFormat`` value
+   * - ``GenerationExecutionReportDict``
+     - ``component_count``
+     - Normalized component count as an integer
+   * - ``GenerationExecutionReportDict``
+     - ``finding_count``
+     - Normalized finding count as an integer
+   * - ``GenerationExecutionReportDict``
+     - ``analysis_state_counts``
+     - Mapping from serialized analysis-state values to positive integer counts
+   * - ``GenerationExecutionReportDict``
+     - ``document``
+     - ``GeneratedDocumentMetadataDict`` value
+
 .. autoclass:: InventorySourceCategory
    :members:
 
@@ -233,6 +278,39 @@ Enumeration values
    * - Enum
      - Member
      - Serialized value
+   * - ``InventorySourceCategory``
+     - ``SBOM_FILE``
+     - ``sbom_file``
+   * - ``InventorySourceCategory``
+     - ``GITHUB_DEPENDENCY_GRAPH``
+     - ``github_dependency_graph``
+   * - ``InventorySourceCategory``
+     - ``CUSTOM``
+     - ``custom``
+   * - ``FindingSourceCategory``
+     - ``LOCAL_FILE``
+     - ``local_file``
+   * - ``FindingSourceCategory``
+     - ``PUBLIC_OSV``
+     - ``public_osv``
+   * - ``FindingSourceCategory``
+     - ``CUSTOM_OSV``
+     - ``custom_osv``
+   * - ``FindingSourceCategory``
+     - ``CUSTOM``
+     - ``custom``
+   * - ``ExecutionReportOutputFormat``
+     - ``CYCLONEDX``
+     - ``cyclonedx``
+   * - ``ExecutionReportOutputFormat``
+     - ``OPENVEX``
+     - ``openvex``
+   * - ``ExecutionReportOutputFormat``
+     - ``CSAF``
+     - ``csaf``
+   * - ``ExecutionReportOutputFormat``
+     - ``CUSTOM``
+     - ``custom``
    * - ``VexAnalysisState``
      - ``RESOLVED``
      - ``resolved``
@@ -301,11 +379,19 @@ classes support broader boundaries:
   renderers raise its ``OpenVexRenderError`` or ``CsafRenderError`` subclasses.
 * ``ComponentVersionError`` reports contradictory explicit and package URL
   versions when an application constructs ``ComponentIdentity`` directly.
+* ``GenerationReportMetadataError`` means package metadata cannot prove which
+  Vexcalibur code produced a report.
+* ``GenerationExecutionReportParseError`` rejects oversized, malformed,
+  noncanonical, or schema-incompatible report bytes.
 
 The API does not wrap unexpected exceptions raised by custom providers or
 renderers. Their implementations own those failures.
 
 .. autoexception:: ComponentVersionError
+
+.. autoexception:: GenerationReportMetadataError
+
+.. autoexception:: GenerationExecutionReportParseError
 
 .. autoexception:: SbomError
 

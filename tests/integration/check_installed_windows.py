@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -72,6 +73,32 @@ def main() -> None:
         if "Traceback" in rejected_output:
             _fail("failed report request emitted a traceback", rejected)
 
+        malformed_sbom = Path(directory) / "malformed-sbom.json"
+        malformed_findings = Path(directory) / "malformed-findings.json"
+        malformed_sbom.write_bytes(b"not an SBOM")
+        malformed_findings.write_bytes(b"not findings")
+        rejected_malformed = _run(
+            [
+                str(executable),
+                "generate",
+                str(malformed_sbom),
+                "--findings-file",
+                str(malformed_findings),
+                "--offline",
+                "--output",
+                str(output_path),
+                "--execution-report",
+                str(report_path),
+            ]
+        )
+        if rejected_malformed.returncode != 1:
+            _fail("malformed inputs bypassed the Windows report rejection", rejected_malformed)
+        if output_path.exists() or report_path.read_bytes() != stale_report:
+            _fail("Windows report rejection read or changed malformed inputs", rejected_malformed)
+        malformed_output = f"{rejected_malformed.stdout}\n{rejected_malformed.stderr}"
+        if "not supported on Windows" not in malformed_output:
+            _fail("malformed-input rejection omitted the Windows diagnostic", rejected_malformed)
+
         generated = _run(base_command)
         if generated.returncode != 0:
             _fail("ordinary installed-distribution generation failed", generated)
@@ -83,15 +110,21 @@ def main() -> None:
 
 def verify_python_api_report() -> None:
     """Verify the cross-platform Python API report oracle."""
-    from vexcalibur.generate import generate_vex_from_local_findings_result
-    from vexcalibur.vex import parse_timestamp
+    from vexcalibur.api import (
+        generate_vex_from_local_findings_result,
+        parse_generation_execution_report,
+    )
 
     api_result = generate_vex_from_local_findings_result(
         input_file=FIXTURE_ROOT / "sbom" / "cyclonedx-json-simple.json",
         findings_file=FIXTURE_ROOT / "findings" / "all-analysis-states.json",
-        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+        timestamp=datetime(2026, 6, 23, tzinfo=timezone.utc),
     )
-    report = api_result.execution_report().to_dict()
+    report_value = api_result.execution_report()
+    parsed_report = parse_generation_execution_report(report_value.to_json())
+    if parsed_report != report_value:
+        raise SystemExit("installed Python API report did not round-trip through its parser")
+    report = parsed_report.to_dict()
     document_bytes = api_result.rendered_bytes
     expected_counts = {
         "exploitable": 1,

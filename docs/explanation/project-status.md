@@ -6,7 +6,7 @@ Pin exact package and action versions in automation. Do not use a mutable branch
 
 This manual follows the default branch, so it can describe a capability before
 that capability reaches a package release. Execution reports are one such
-capability: v0.4.2 and earlier do not include them. Check the documentation for
+capability: no release through v0.4.4 includes them. Check the documentation for
 your release and its `vexcalibur generate --help` output before you update
 automation.
 

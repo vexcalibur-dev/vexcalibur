@@ -461,6 +461,7 @@ def test_macos_runs_native_lock_and_concurrency_contracts() -> None:
     assert "scripts/check-execution-report-posix.sh" in invocation
     assert "tests/test_execution_report_destination_locks.py" in contract
     assert "tests/test_generation_output_concurrency.py" in contract
+    assert "tests/test_cli_execution_report_failures.py" in contract
     assert '"${dist_dir}"/*.whl' in contract
     assert '"${dist_dir}"/*.tar.gz' in contract
     assert "VEXCALIBUR_DISTRIBUTION=" in contract

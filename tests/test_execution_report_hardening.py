@@ -146,18 +146,19 @@ def test_interrupted_destination_close_never_closes_reused_descriptor(
         assert replacement[-1] == owned_descriptor
         raise KeyboardInterrupt("synthetic post-close interruption")
 
-    monkeypatch.setattr(
-        destination_module,
-        "_close_descriptor_retryable",
-        close_then_reuse,
-    )
+    monkeypatch.setattr(staging_module, "_close_descriptor_retryable", close_then_reuse)
     try:
         with pytest.raises(KeyboardInterrupt, match="post-close interruption"):
             destination.close()
 
-        assert destination.closed
+        assert not destination.closed
+        assert (
+            destination._parent_descriptor_ownership
+            is DescriptorOwnership.AMBIGUOUS
+        )
         assert destination._parent_descriptor == -1
-        destination.close()
+        with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
+            destination.close()
         os.fstat(replacement[0])
     finally:
         for descriptor in replacement:

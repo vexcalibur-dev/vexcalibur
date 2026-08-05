@@ -56,6 +56,70 @@ def test_symlink_loop_parent_is_a_controlled_destination_error(tmp_path: Path) -
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_parent_preparation_preserves_primary_and_descriptor_cleanup_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_descriptor = os.open(tmp_path, os.O_RDONLY)
+    cleanup_failure = OSError("parent descriptor close failed")
+
+    def return_parent_descriptor(*args: object, **kwargs: object) -> int:
+        return parent_descriptor
+
+    def fail_parent_stat(descriptor: int) -> os.stat_result:
+        raise OSError("parent stat failed")
+
+    def fail_descriptor_close(descriptor: int) -> None:
+        raise cleanup_failure
+
+    monkeypatch.setattr(destination_module.os, "open", return_parent_descriptor)
+    monkeypatch.setattr(
+        destination_module.os,
+        "fstat",
+        fail_parent_stat,
+    )
+    monkeypatch.setattr(
+        destination_module,
+        "_close_descriptor",
+        fail_descriptor_close,
+    )
+
+    try:
+        with pytest.raises(BoundFileDestinationError, match="could not open") as captured:
+            BoundFileDestination.prepare(tmp_path / "report.json")
+    finally:
+        os.close(parent_descriptor)
+
+    assert captured.value.__cause__ is not None
+    assert str(captured.value.__cause__) == "parent stat failed"
+    assert captured.value.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_destination_preparation_preserves_primary_and_close_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_failure = OSError("destination close failed")
+    real_close = BoundFileDestination.close
+
+    def fail_verification(destination: BoundFileDestination) -> None:
+        raise OSError("destination verification failed")
+
+    def close_then_fail(destination: BoundFileDestination) -> None:
+        real_close(destination)
+        raise cleanup_failure
+
+    monkeypatch.setattr(BoundFileDestination, "verify_replaceable_leaf", fail_verification)
+    monkeypatch.setattr(BoundFileDestination, "close", close_then_fail)
+
+    with pytest.raises(OSError, match="destination verification failed") as captured:
+        BoundFileDestination.prepare(tmp_path / "report.json")
+
+    assert captured.value.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 def test_replace_failure_leaves_no_destination_or_temporary_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

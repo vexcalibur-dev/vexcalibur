@@ -1,12 +1,15 @@
 """Command-line entrypoint for Vexcalibur."""
 
 import sys
+from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
-from typing import Annotated, BinaryIO, cast
+from typing import Annotated, Any, BinaryIO, cast
 
 import typer
 from packageurl import PackageURL
 from rich.console import Console
+from typer.core import TyperGroup
 
 from vexcalibur.csaf import (
     CSAF_VERSION,
@@ -46,12 +49,99 @@ from vexcalibur.sources.osv import (
 )
 from vexcalibur.vex import VexRenderError, parse_timestamp
 
+
+class _VexcaliburGroup(TyperGroup):
+    """Ensure failed generate parsing cannot leave a stale success marker."""
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: Any,
+    ) -> Any:
+        raw_args = tuple(sys.argv[1:] if args is None else args)
+        try:
+            return super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=standalone_mode,
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+        except SystemExit as exc:
+            if exc.code not in {None, 0}:
+                _remove_failed_generate_report(raw_args)
+            raise
+
+
 app = typer.Typer(
     name="vexcalibur",
+    cls=_VexcaliburGroup,
     help="Generate VEX documents from SBOMs and vulnerability findings.",
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _remove_failed_generate_report(arguments: tuple[str, ...]) -> None:
+    if not arguments or arguments[0] != "generate":
+        return
+    report_path = _option_path(arguments, "--execution-report")
+    if report_path is None:
+        return
+    output_path = _option_path(arguments, "--output", "-o")
+    report_value_positions = _option_value_positions(arguments, "--execution-report")
+    protected_paths = tuple(
+        Path(value)
+        for index, value in enumerate(arguments[1:], start=1)
+        if value
+        and not value.startswith("-")
+        and index not in report_value_positions
+    )
+    transaction: GenerationOutputTransaction | None = None
+    try:
+        transaction = GenerationOutputTransaction.prepare(
+            output_path=output_path,
+            report_path=report_path,
+            protected_paths=protected_paths,
+            protected_descriptors=(
+                *_standard_output_descriptor(),
+                *_standard_error_descriptor(),
+            ),
+        )
+    except GenerationOutputError:
+        return
+    finally:
+        if transaction is not None:
+            with suppress(GenerationOutputError):
+                transaction.abort()
+
+
+def _option_path(arguments: tuple[str, ...], *names: str) -> Path | None:
+    value: str | None = None
+    for index, argument in enumerate(arguments):
+        if argument in names and index + 1 < len(arguments):
+            candidate = arguments[index + 1]
+            if not candidate.startswith("-"):
+                value = candidate
+            continue
+        for name in names:
+            prefix = f"{name}="
+            if argument.startswith(prefix):
+                value = argument.removeprefix(prefix)
+    return Path(value) if value else None
+
+
+def _option_value_positions(arguments: tuple[str, ...], *names: str) -> frozenset[int]:
+    return frozenset(
+        index + 1
+        for index, argument in enumerate(arguments[:-1])
+        if argument in names and not arguments[index + 1].startswith("-")
+    )
 
 
 @app.callback()

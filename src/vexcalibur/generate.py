@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 
 from vexcalibur.domain import (
@@ -49,21 +47,6 @@ from vexcalibur.sources.osv import (
 
 MAX_VEX_OUTPUT_BYTES = MAX_GENERATED_DOCUMENT_BYTES
 _OUTPUT_MEASUREMENT_CHUNK_CHARACTERS = 64 * 1024
-
-
-class _GenerationOwnership(Enum):
-    """Whether generation retains caller values or captures owned snapshots."""
-
-    COMPATIBILITY = "compatibility"
-    ISOLATED_RESULT = "isolated_result"
-
-
-@dataclass(frozen=True)
-class _GenerationRun:
-    """One completed internal generation operation."""
-
-    rendered_document: str
-    input_snapshot: GenerationInputSnapshot | None
 
 
 def generate_vex_from_source(
@@ -221,14 +204,15 @@ def _render_legacy_generation(
     renderer: VexRenderer | None,
 ) -> str:
     """Render through the compatibility path without copying extension values."""
-    run = _run_generation(
+    result = _run_generation(
         components=components,
         source=source,
         timestamp=timestamp,
         renderer=select_renderer(renderer),
-        ownership=_GenerationOwnership.COMPATIBILITY,
+        capture_inputs=False,
+        execution_context=None,
     )
-    return run.rendered_document
+    return result._legacy_rendered_document()
 
 
 def _generate_result(
@@ -240,18 +224,12 @@ def _generate_result(
     execution_context: GenerationExecutionContext | None,
 ) -> GenerationResult:
     """Render from isolated snapshots and retain only independently owned values."""
-    run = _run_generation(
+    return _run_generation(
         components=components,
         source=source,
         timestamp=timestamp,
         renderer=renderer,
-        ownership=_GenerationOwnership.ISOLATED_RESULT,
-    )
-    if run.input_snapshot is None:
-        raise AssertionError("isolated generation did not retain an input snapshot")
-    return GenerationResult._from_input_snapshot(
-        rendered_document=run.rendered_document,
-        input_snapshot=run.input_snapshot,
+        capture_inputs=True,
         execution_context=execution_context,
     )
 
@@ -262,13 +240,14 @@ def _run_generation(
     source: VulnerabilitySource,
     timestamp: datetime | None,
     renderer: VexRenderer,
-    ownership: _GenerationOwnership,
-) -> _GenerationRun:
+    capture_inputs: bool,
+    execution_context: GenerationExecutionContext | None,
+) -> GenerationResult:
     """Query and render once under one explicit input-ownership contract."""
     _require_components(components)
     input_snapshot: GenerationInputSnapshot | None = None
     source_components = components
-    if ownership is _GenerationOwnership.ISOLATED_RESULT:
+    if capture_inputs:
         input_snapshot = GenerationInputSnapshot.capture_components(components)
         source_components = input_snapshot.materialize_components()
 
@@ -285,11 +264,16 @@ def _run_generation(
         findings=render_findings,
         timestamp=timestamp,
         renderer=renderer,
-        preserve_extension_value=ownership is _GenerationOwnership.COMPATIBILITY,
+        preserve_extension_value=not capture_inputs,
     )
-    return _GenerationRun(
-        rendered_document=rendered,
+    if input_snapshot is None:
+        input_snapshot = GenerationInputSnapshot(components=(), findings=())
+    return GenerationResult._from_input_snapshot(
+        rendered_document=_canonical_rendered_text(rendered),
         input_snapshot=input_snapshot,
+        execution_context=execution_context,
+        compatibility_rendered_document=rendered if not capture_inputs else None,
+        capture_version=capture_inputs,
     )
 
 

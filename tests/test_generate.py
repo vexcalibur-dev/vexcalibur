@@ -151,6 +151,20 @@ def test_compatibility_generation_does_not_require_package_metadata(
     assert VALIDATOR.validate_str(generated) is None
 
 
+def test_compatibility_generation_does_not_validate_report_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("vexcalibur.__version__", "not report safe")
+
+    generated = generate_vex_from_local_findings(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        findings_file=FINDINGS_ROOT / "all-analysis-states.json",
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert VALIDATOR.validate_str(generated) is None
+
+
 def test_generate_vex_from_components_uses_provider_neutral_components() -> None:
     source = FakeVulnerabilitySource(())
 

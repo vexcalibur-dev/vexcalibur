@@ -167,7 +167,7 @@ def test_cli_reports_persistent_abort_failure(
     assert expected_error in result.output
     assert "Traceback" not in result.output
     assert output_path.exists()
-    assert report_path.exists()
+    assert not report_path.exists()
 
 
 def test_cli_reports_finalization_failure_without_a_traceback(
@@ -220,8 +220,9 @@ def test_cli_normalizes_staged_cleanup_failure_without_a_traceback(
 
     def close_then_fail(staged: destination_module.StagedFileWrite) -> None:
         nonlocal failed
+        was_committed = staged.committed
         real_close(staged)
-        if staged.destination.requested_path == output_path and staged.committed and not failed:
+        if staged.destination.requested_path == output_path and was_committed and not failed:
             failed = True
             raise BoundFileDestinationError("synthetic staged cleanup failure")
 
@@ -552,7 +553,7 @@ def test_invalid_timestamp_removes_stale_execution_report(tmp_path: Path) -> Non
         ("--unknown-option", "value"),
     ),
 )
-def test_parser_failure_preserves_unverified_stale_execution_report(
+def test_parser_failure_removes_stale_execution_report(
     tmp_path: Path,
     arguments: tuple[str, ...],
 ) -> None:
@@ -571,10 +572,10 @@ def test_parser_failure_preserves_unverified_stale_execution_report(
     )
 
     assert result.exit_code != 0
-    assert report_path.read_text(encoding="utf-8") == '{"stale":true}\n'
+    assert not report_path.exists()
 
 
-def test_missing_input_preserves_unverified_stale_execution_report(tmp_path: Path) -> None:
+def test_missing_input_removes_stale_execution_report(tmp_path: Path) -> None:
     report_path = tmp_path / "execution-report.json"
     report_path.write_text('{"stale":true}\n', encoding="utf-8")
 
@@ -589,10 +590,10 @@ def test_missing_input_preserves_unverified_stale_execution_report(tmp_path: Pat
     )
 
     assert result.exit_code != 0
-    assert report_path.read_text(encoding="utf-8") == '{"stale":true}\n'
+    assert not report_path.exists()
 
 
-def test_missing_findings_file_preserves_unverified_stale_execution_report(
+def test_missing_findings_file_removes_stale_execution_report(
     tmp_path: Path,
 ) -> None:
     report_path = tmp_path / "execution-report.json"
@@ -612,7 +613,7 @@ def test_missing_findings_file_preserves_unverified_stale_execution_report(
     )
 
     assert result.exit_code != 0
-    assert report_path.read_text(encoding="utf-8") == '{"stale":true}\n'
+    assert not report_path.exists()
 
 
 def test_generate_help_preserves_existing_report(tmp_path: Path) -> None:

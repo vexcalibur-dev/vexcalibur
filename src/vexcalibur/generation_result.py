@@ -131,6 +131,12 @@ class GenerationResult:
         compare=False,
         hash=False,
     )
+    _compatibility_rendered_document: str | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+        hash=False,
+    )
 
     def __init__(
         self,
@@ -170,12 +176,16 @@ class GenerationResult:
         rendered_document: str,
         input_snapshot: GenerationInputSnapshot,
         execution_context: GenerationExecutionContext | None,
+        compatibility_rendered_document: str | None = None,
+        capture_version: bool = True,
     ) -> GenerationResult:
         result = object.__new__(cls)
         result._initialize(
             rendered_document=rendered_document,
             input_snapshot=input_snapshot,
             execution_context=execution_context,
+            compatibility_rendered_document=compatibility_rendered_document,
+            capture_version=capture_version,
         )
         return result
 
@@ -185,6 +195,8 @@ class GenerationResult:
         rendered_document: str,
         input_snapshot: GenerationInputSnapshot,
         execution_context: GenerationExecutionContext | None,
+        compatibility_rendered_document: str | None = None,
+        capture_version: bool = True,
     ) -> None:
         if type(rendered_document) is not str:
             raise TypeError("rendered_document must be exact built-in text")
@@ -195,10 +207,25 @@ class GenerationResult:
             and type(execution_context) is not GenerationExecutionContext
         ):
             raise TypeError("execution_context must be a GenerationExecutionContext")
+        if compatibility_rendered_document is not None and not isinstance(
+            compatibility_rendered_document,
+            str,
+        ):
+            raise TypeError("compatibility_rendered_document must be text")
         object.__setattr__(self, "rendered_document", rendered_document)
         object.__setattr__(self, "execution_context", execution_context)
         object.__setattr__(self, "_input_snapshot", input_snapshot)
-        object.__setattr__(self, "_vexcalibur_version", _loaded_vexcalibur_version())
+        version = _loaded_vexcalibur_version() if capture_version else None
+        object.__setattr__(self, "_vexcalibur_version", version)
+        object.__setattr__(
+            self,
+            "_compatibility_rendered_document",
+            compatibility_rendered_document,
+        )
+
+    def _legacy_rendered_document(self) -> str:
+        compatibility = self._compatibility_rendered_document
+        return self.rendered_document if compatibility is None else compatibility
 
     @property
     def components(self) -> tuple[ComponentIdentity, ...]:
@@ -219,7 +246,15 @@ class GenerationResult:
             raise VexRenderError("rendered VEX must be valid UTF-8 text") from exc
 
     def execution_report(self) -> GenerationExecutionReport:
-        """Build the public execution report from retained generation facts."""
+        """Build the public execution report from retained generation facts.
+
+        Raises:
+            ValueError: The result lacks report context or contains values that
+                schema version 1 cannot represent.
+            GenerationReportMetadataError: Installed package metadata cannot
+                identify the loaded Vexcalibur code.
+            VexRenderError: The rendered document is not strict UTF-8 text.
+        """
         if self.execution_context is None:
             msg = (
                 "execution report context is unavailable; use a built-in source "
@@ -412,7 +447,11 @@ class GenerationExecutionReport:
         }
 
     def to_json(self) -> str:
-        """Serialize a bounded canonical report with one trailing newline."""
+        """Serialize a bounded canonical report with one trailing newline.
+
+        Raises:
+            ValueError: The canonical JSON exceeds the report size limit.
+        """
         serialized = (
             json.dumps(
                 self.to_dict(),
@@ -431,7 +470,19 @@ class GenerationExecutionReport:
 def parse_generation_execution_report(
     serialized: bytes | str,
 ) -> GenerationExecutionReport:
-    """Parse one bounded, canonical execution report into its typed value."""
+    """Parse one bounded, canonical execution report into its typed value.
+
+    Args:
+        serialized: Exact UTF-8 bytes or text for one report.
+
+    Returns:
+        The validated schema-version-1 report.
+
+    Raises:
+        TypeError: ``serialized`` is not exact built-in bytes or text.
+        GenerationExecutionReportParseError: The report is oversized,
+            malformed, noncanonical, or incompatible with schema version 1.
+    """
     if type(serialized) is str:
         if len(serialized) > MAX_EXECUTION_REPORT_BYTES:
             raise GenerationExecutionReportParseError(

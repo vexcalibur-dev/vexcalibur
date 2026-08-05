@@ -32,6 +32,7 @@ the App-backed production automation plan.
 ## How-to guides
 
 - [Generate VEX from Python](how-to/use-python-api.md)
+- [Generate an execution report from Python](how-to/generate-execution-report-from-python.md)
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
 - [Generate OpenVEX](how-to/generate-openvex.md)
 - [Generate CSAF VEX](how-to/generate-csaf.md)
@@ -74,6 +75,7 @@ the App-backed production automation plan.
 tutorials/quickstart
 tutorials/offline-local-findings
 how-to/use-python-api
+how-to/generate-execution-report-from-python
 how-to/generate-cyclonedx-vex
 how-to/generate-openvex
 how-to/generate-csaf

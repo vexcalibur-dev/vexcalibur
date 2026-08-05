@@ -338,9 +338,13 @@ class GenerationOutputTransaction:
             _write_all(binary_stdout, rendered_bytes)
             binary_stdout.flush()
         except (OSError, TypeError, ValueError) as exc:
-            with acquire_destination_locks((self.report_destination,)):
-                self._remove_existing_report()
-            raise GenerationDocumentWriteError(None, exc) from exc
+            failure = GenerationDocumentWriteError(None, exc)
+            try:
+                with acquire_destination_locks((self.report_destination,)):
+                    self._remove_existing_report()
+            except BaseException as cleanup_failure:
+                _retain_cleanup_failures(failure, (cleanup_failure,))
+            raise failure from exc
 
     def _publish_under_destination_locks(
         self,
@@ -356,10 +360,13 @@ class GenerationOutputTransaction:
 
         try:
             self._verify_report_still_distinct()
-            self._transition(GenerationOutputState.REPORT_GUARDED)
+            self._verify_published_output(staged_output)
+            self._transition(GenerationOutputState.REPORT_GUARD_ARMING)
             staged_report._prepare_rollback(self._report_rollback)
+            self._transition(GenerationOutputState.REPORT_GUARDED)
             self._report_rollback.begin_publication()
             staged_report.commit(destination_lock_held=True)
+            self._verify_published_output(staged_output)
             self._report_rollback.publication_succeeded()
             self._transition(GenerationOutputState.COMMITTED)
         except BoundFileDestinationError as exc:
@@ -367,6 +374,14 @@ class GenerationOutputTransaction:
                 self.report_destination.requested_path,
                 exc,
             ) from exc
+
+    def _verify_published_output(self, staged_output: StagedFileWrite | None) -> None:
+        if staged_output is None:
+            return
+        try:
+            staged_output.verify_publication()
+        except BoundFileDestinationError as exc:
+            raise GenerationDocumentWriteError(self.output_path, exc) from exc
 
     def _finalize_failed_commit(
         self,
@@ -426,6 +441,7 @@ class GenerationOutputTransaction:
             return
         if abort or self._state in {
             GenerationOutputState.COMMITTING,
+            GenerationOutputState.REPORT_GUARD_ARMING,
             GenerationOutputState.REPORT_GUARDED,
         }:
             self._require_abort()
@@ -571,7 +587,17 @@ class GenerationOutputTransaction:
         rollback.close()
 
     def _release_report_rollback(self) -> None:
-        self._report_rollback.close()
+        first_failure: Exception | None = None
+        for _ in range(2):
+            try:
+                self._report_rollback.close()
+                return
+            except Exception as exc:
+                if first_failure is None:
+                    first_failure = exc
+        if first_failure is None:
+            raise RuntimeError("rollback release failed without an exception")
+        raise first_failure
 
 
 def _label_destination_error(

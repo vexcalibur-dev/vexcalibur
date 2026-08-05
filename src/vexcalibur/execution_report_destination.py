@@ -21,10 +21,10 @@ from vexcalibur.execution_report_errors import DestinationLockError as Destinati
 from vexcalibur.execution_report_errors import _retain_cleanup_failures
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
-    _close_descriptor_retryable,
     _require_replaceable_leaf,
     _same_identity,
 )
+from vexcalibur.execution_report_lifecycle import DescriptorOwnership, DescriptorState
 from vexcalibur.execution_report_locks import (
     DESTINATION_LOCK_RETRY_SECONDS as DESTINATION_LOCK_RETRY_SECONDS,
 )
@@ -51,10 +51,9 @@ class BoundFileDestination:
     """A descriptor-bound file destination with one close-state transition."""
 
     __slots__ = (
-        "_closed",
         "_name",
         "_name_bytes",
-        "_parent_descriptor",
+        "_parent_descriptor_state",
         "access_parent_path",
         "parent_path",
         "requested_path",
@@ -86,8 +85,7 @@ class BoundFileDestination:
         self.parent_path = parent_path
         self._name = name
         self._name_bytes = name_bytes
-        self._parent_descriptor = parent_descriptor
-        self._closed = False
+        self._parent_descriptor_state = DescriptorState.owned(parent_descriptor)
 
     @classmethod
     def _create(
@@ -118,7 +116,15 @@ class BoundFileDestination:
     @property
     def closed(self) -> bool:
         """Return whether the retained parent descriptor is closed."""
-        return self._closed
+        return self._parent_descriptor_state.ownership is DescriptorOwnership.RELEASED
+
+    @property
+    def _parent_descriptor(self) -> int:
+        return self._parent_descriptor_state.descriptor
+
+    @property
+    def _parent_descriptor_ownership(self) -> DescriptorOwnership:
+        return self._parent_descriptor_state.ownership
 
     @classmethod
     def prepare(
@@ -169,14 +175,20 @@ class BoundFileDestination:
             ):
                 raise OSError("destination parent directory changed during preparation")
         except BaseException as exc:
-            _close_descriptor(parent_descriptor)
-            if not isinstance(exc, (OSError, RuntimeError)):
+            if isinstance(exc, (OSError, RuntimeError)):
+                failure: BaseException = BoundFileDestinationError(
+                    _parent_preparation_error(path=path, error=exc)
+                )
+            else:
+                failure = exc
+            _retain_descriptor_cleanup_failure(failure, parent_descriptor)
+            if failure is exc:
                 raise
-            msg = _parent_preparation_error(path=path, error=exc)
-            raise BoundFileDestinationError(msg) from exc
+            raise failure from exc
         if not stat.S_ISDIR(parent_stat.st_mode):
-            _close_descriptor(parent_descriptor)
-            raise BoundFileDestinationError("destination parent must be a directory")
+            failure = BoundFileDestinationError("destination parent must be a directory")
+            _retain_descriptor_cleanup_failure(failure, parent_descriptor)
+            raise failure
 
         destination: BoundFileDestination | None = None
         try:
@@ -201,11 +213,14 @@ class BoundFileDestination:
             destination.verify_replaceable_leaf()
             if remove_existing:
                 destination.remove_existing()
-        except BaseException:
-            if destination is None:
-                _close_descriptor(parent_descriptor)
-            else:
-                destination.close()
+        except BaseException as exc:
+            try:
+                if destination is None:
+                    _close_descriptor(parent_descriptor)
+                else:
+                    destination.close()
+            except BaseException as cleanup_failure:
+                _retain_cleanup_failures(exc, (cleanup_failure,))
             raise
         return destination
 
@@ -407,20 +422,10 @@ class BoundFileDestination:
 
     def close(self) -> None:
         """Close the retained parent directory descriptor."""
-        if getattr(self, "_closed", True):
+        state = getattr(self, "_parent_descriptor_state", DescriptorState.released())
+        if state.ownership is DescriptorOwnership.RELEASED:
             return
-        descriptor = self._parent_descriptor
-        object.__setattr__(self, "_parent_descriptor", -1)
-        try:
-            outcome = _close_descriptor_retryable(descriptor)
-            if outcome.unchanged:
-                object.__setattr__(self, "_parent_descriptor", descriptor)
-            if outcome.failure is not None:
-                raise outcome.failure
-            if not outcome.released:
-                raise RuntimeError("descriptor release returned no final state")
-        finally:
-            object.__setattr__(self, "_closed", self._parent_descriptor == -1)
+        staging_module._close_owned_descriptor(self, "parent_descriptor")
 
     def __copy__(self) -> BoundFileDestination:
         raise TypeError("bound file destinations cannot be copied")
@@ -444,13 +449,23 @@ class BoundFileDestination:
         self.close()
 
     def __del__(self) -> None:
-        descriptor = getattr(self, "_parent_descriptor", -1)
-        object.__setattr__(self, "_parent_descriptor", -1)
-        object.__setattr__(self, "_closed", True)
+        state = getattr(self, "_parent_descriptor_state", DescriptorState.released())
+        descriptor = state.descriptor
+        object.__setattr__(self, "_parent_descriptor_state", DescriptorState.released())
         if descriptor < 0:
             return
         with suppress(Exception):
             _FINALIZER_CLOSE_DESCRIPTOR(descriptor)
+
+
+def _retain_descriptor_cleanup_failure(
+    primary: BaseException,
+    descriptor: int,
+) -> None:
+    try:
+        _close_descriptor(descriptor)
+    except BaseException as cleanup_failure:
+        _retain_cleanup_failures(primary, (cleanup_failure,))
 
 
 def _parent_preparation_error(*, path: Path, error: OSError | RuntimeError) -> str:

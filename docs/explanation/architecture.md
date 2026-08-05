@@ -216,7 +216,8 @@ transaction's cleanup path.
 | State | Destinations and permitted next steps |
 | --- | --- |
 | `PREPARED` | The stale report is gone and the bound destination descriptors remain open. The transaction can start one commit, abort, or close without publishing. |
-| `COMMITTING` | Private files may exist, and the VEX document may be published. The transaction can retain the report rollback guard or move to cleanup after a failure. It does not restore a replaced VEX document. |
+| `COMMITTING` | Private files may exist, and the VEX document may be published. The transaction can begin acquiring the report rollback guard or move to cleanup after a failure. It does not restore a replaced VEX document. |
+| `REPORT_GUARD_ARMING` | The transaction owns the guard while it acquires the lock, parent, and report identity descriptors. A completed acquisition enters `REPORT_GUARDED`; any interruption enters `ABORT_REQUIRED`. |
 | `REPORT_GUARDED` | The transaction owns the report's identity-bound rollback guard. It can publish the report and enter `COMMITTED`, or enter `ABORT_REQUIRED` and remove only the report it published. |
 | `COMMITTED` | The VEX document and report were published in that order. Successful finalization releases the rollback guard; an interruption or cleanup failure moves to `ABORT_REQUIRED`. |
 | `ABORT_REQUIRED` | Cleanup preserves the VEX document, removes the report when its identity still matches, and releases every descriptor whose ownership is known. Only successful cleanup enters `CLOSED`. |
@@ -230,6 +231,13 @@ directory `fsync` succeeds. A retry flushes that directory again even when the
 report path is already absent. If descriptor release becomes ambiguous, the
 writer does not reuse that numeric descriptor or claim that cleanup completed.
 The report may remain, and the command exits unsuccessfully.
+
+Each private staged file has its own validated lifecycle: `STAGED`,
+`PUBLISHING`, `PUBLISHED`, `ROLLBACK_REQUIRED`, `ROLLED_BACK`, and `RELEASED`.
+The state decides whether cleanup removes the temporary file, removes the
+published identity, or preserves a committed destination. Descriptor value and
+ownership also move together as one state, so an ambiguous release cannot be
+mistaken for a closed destination.
 
 The file-output path follows this order:
 
@@ -246,9 +254,11 @@ GenerationResult
               |
               +--> publish VEX
               |
-              +--> recheck report aliases and parent identities
+              +--> recheck report aliases and the exact published VEX identity
               |
               +--> publish report last
+              |
+              +--> recheck the VEX parent and published identity
 ```
 
 An error before VEX publication removes both temporary files. An error after

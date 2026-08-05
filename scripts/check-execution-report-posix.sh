@@ -31,7 +31,8 @@ uv run --frozen pytest -q \
   tests/test_generation_output.py \
   tests/test_generation_output_concurrency.py \
   tests/test_generation_output_recovery.py \
-  tests/test_cli_execution_report.py
+  tests/test_cli_execution_report.py \
+  tests/test_cli_execution_report_failures.py
 
 shopt -s nullglob
 wheels=("${dist_dir}"/*.whl)

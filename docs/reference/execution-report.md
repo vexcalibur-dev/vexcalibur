@@ -130,17 +130,19 @@ pretending the extension is CycloneDX, OSV, or a built-in VEX format.
 
 ## Write behavior
 
-Vexcalibur first asks its normal command parser to validate the complete
-`generate` argument list. Only then does it remove a stale report. This order
-prevents a partial parse from mistaking an inventory, findings file, or VEX
-output for disposable report data.
+Vexcalibur removes a stale report before generation, including when the normal
+command parser rejects an unknown option or missing input. On a nonzero
+`generate` exit, it reads the raw `--execution-report` and `--output` values,
+treats every other non-option token as a possible input, and runs the same
+path-binding and alias checks used by a parsed command. It removes the candidate
+only when those checks prove that the path is not an input, VEX output, or
+redirected standard stream.
 
-Help, completion, unknown options, missing files, and other parser failures
-leave the candidate path unchanged because Vexcalibur cannot prove the path is
-a report. Once parsing succeeds, Vexcalibur binds the destination and removes
-an existing report before it validates timestamps, source combinations, or
-document metadata. Any later failure leaves no stale success marker from that
-transaction.
+Help and completion exit successfully, so they leave the candidate path
+unchanged. An unsafe or invalid report destination also remains unchanged; the
+command cannot remove a path that it cannot bind safely. Once parsing succeeds,
+the prepared transaction removes an existing report before it validates
+timestamps, source combinations, or document metadata.
 
 Stale-report cleanup briefly takes the report directory lock while Vexcalibur
 prepares the destination. The locks that coordinate the document and report
@@ -293,7 +295,7 @@ The option is additive on supported systems. Calls that omit
 `--execution-report` retain the existing text-mode output and Python API
 behavior.
 
-Vexcalibur v0.4.2 and earlier do not include `--execution-report`. Before you
+No Vexcalibur release through v0.4.4 includes `--execution-report`. Before you
 depend on the option, verify the installed command:
 
 ```bash

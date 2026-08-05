@@ -618,10 +618,14 @@ def test_destination_close_disowns_ambiguous_descriptor_before_release(
     with pytest.raises(KeyboardInterrupt, match="descriptor close interrupted"):
         destination.close()
 
-    assert destination.closed
+    assert not destination.closed
+    assert (
+        destination._parent_descriptor_ownership is DescriptorOwnership.AMBIGUOUS
+    )
     assert destination._parent_descriptor == -1
     os.fstat(descriptor)
-    destination.close()
+    with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
+        destination.close()
     os.fstat(descriptor)
     os.close(descriptor)
 

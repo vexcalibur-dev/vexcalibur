@@ -19,6 +19,7 @@ from vexcalibur.execution_report_lifecycle import (
     PublishedRollbackState,
 )
 from vexcalibur.generation_output import (
+    GenerationDocumentWriteError,
     GenerationOutputCleanupError,
     GenerationOutputError,
     GenerationOutputTransaction,
@@ -173,7 +174,7 @@ def test_transaction_owns_rollback_guard_before_descriptor_acquisition(
         nonlocal interrupted
         del staged
         assert supplied_rollback is rollback
-        assert transaction.state is GenerationOutputState.REPORT_GUARDED
+        assert transaction.state is GenerationOutputState.REPORT_GUARD_ARMING
         interrupted = True
         raise KeyboardInterrupt("synthetic rollback acquisition cancellation")
 
@@ -197,6 +198,114 @@ def test_transaction_owns_rollback_guard_before_descriptor_acquisition(
     assert transaction.closed
     assert output_path.exists()
     assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_transaction_retains_preowned_guard_when_rollback_dup_is_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    rollback = transaction._report_rollback
+    real_arm = staging_module.PublishedFileRollback._arm
+    real_dup = staging_module.os.dup
+    duplicate_calls = 0
+
+    def interrupt_second_duplicate(descriptor: int) -> int:
+        nonlocal duplicate_calls
+        duplicate_calls += 1
+        if duplicate_calls == 2:
+            raise KeyboardInterrupt("rollback acquisition interrupted")
+        return real_dup(descriptor)
+
+    def arm_with_interrupted_duplicate(
+        selected: staging_module.PublishedFileRollback,
+        *,
+        expected: os.stat_result,
+        parent_fd: int,
+        published_fd: int,
+        name: str | bytes,
+    ) -> None:
+        monkeypatch.setattr(staging_module.os, "dup", interrupt_second_duplicate)
+        try:
+            real_arm(
+                selected,
+                expected=expected,
+                parent_fd=parent_fd,
+                published_fd=published_fd,
+                name=name,
+            )
+        finally:
+            monkeypatch.setattr(staging_module.os, "dup", real_dup)
+
+    monkeypatch.setattr(
+        staging_module.PublishedFileRollback,
+        "_arm",
+        arm_with_interrupted_duplicate,
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="rollback acquisition interrupted"):
+        transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+
+    assert transaction._report_rollback is rollback
+    assert duplicate_calls == 2
+    assert output_path.exists()
+    assert not report_path.exists()
+    assert rollback.state is PublishedRollbackState.RELEASED
+    assert transaction.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_ambiguous_destination_release_never_closes_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    destination = transaction.report_destination
+    descriptor = destination._parent_descriptor
+    real_release = staging_module._close_descriptor_retryable
+    interrupted = False
+
+    def interrupt_destination_release(candidate: int) -> object:
+        nonlocal interrupted
+        if candidate == descriptor and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("destination release interrupted")
+        return real_release(candidate)
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        interrupt_destination_release,
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt, match="destination release interrupted"):
+            transaction.close()
+
+        assert interrupted
+        assert not report_path.exists()
+        assert not destination.closed
+        assert (
+            destination._parent_descriptor_ownership
+            is DescriptorOwnership.AMBIGUOUS
+        )
+        assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+        assert not transaction.closed
+        os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
@@ -556,6 +665,90 @@ def test_abort_preserves_rollback_ownership_after_a_transient_probe_failure(
 
     assert not report_path.exists()
     assert rollback.state is PublishedRollbackState.RELEASED
+    assert transaction.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+@pytest.mark.parametrize("failed_attribute", ("published_fd", "parent_fd", "lock_fd"))
+def test_transient_rollback_release_failure_preserves_success_marker(
+    failed_attribute: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    rollback = transaction._report_rollback
+    failed_descriptor = getattr(rollback, failed_attribute)
+    real_release = staging_module._close_descriptor_retryable
+    failed = False
+
+    def fail_once(descriptor: int) -> object:
+        nonlocal failed
+        if descriptor == failed_descriptor and not failed:
+            failed = True
+            return filesystem_module._DescriptorCloseOutcome(
+                released=False,
+                unchanged=True,
+                failure=OSError(errno.EMFILE, "synthetic descriptor exhaustion"),
+            )
+        return real_release(descriptor)
+
+    monkeypatch.setattr(staging_module, "_close_descriptor_retryable", fail_once)
+
+    transaction.close()
+
+    assert failed
+    assert transaction.closed
+    assert report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_output_path_rebinding_after_report_publication_removes_success_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_parent = tmp_path / "output"
+    report_parent = tmp_path / "report"
+    moved_output_parent = tmp_path / "moved-output"
+    output_parent.mkdir()
+    report_parent.mkdir()
+    output_path = output_parent / "result.json"
+    report_path = report_parent / "result.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    report_destination = transaction.report_destination
+    real_commit = staging_module.StagedFileWrite.commit
+    rebound = False
+
+    def commit_then_rebind(
+        staged: staging_module.StagedFileWrite,
+        *,
+        destination_lock_held: bool = False,
+    ) -> None:
+        nonlocal rebound
+        real_commit(staged, destination_lock_held=destination_lock_held)
+        if staged.destination is report_destination:
+            output_parent.rename(moved_output_parent)
+            output_parent.symlink_to(report_parent, target_is_directory=True)
+            rebound = True
+
+    monkeypatch.setattr(staging_module.StagedFileWrite, "commit", commit_then_rebind)
+
+    with pytest.raises(GenerationDocumentWriteError, match="parent directory changed"):
+        transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+
+    assert rebound
+    assert not report_path.exists()
+    assert not output_path.exists()
+    assert (moved_output_parent / "result.json").exists()
     assert transaction.closed
 
 
