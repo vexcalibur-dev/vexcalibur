@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 import vexcalibur.errors as _errors
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
 
 VexRenderError = _errors.VexRenderError
-
-if TYPE_CHECKING:
-    from vexcalibur.document import VexDocument
 
 
 class VexOutputFormat(str, Enum):
@@ -33,16 +30,16 @@ class VexRenderer(Protocol):
         findings: tuple[VulnerabilityFinding, ...],
         timestamp: datetime | None = None,
     ) -> str:
-        """Return a serialized VEX document."""
+        """Return a serialized VEX document.
 
+        Args:
+            components: Components available to the document.
+            findings: Vulnerability findings associated with those components.
+            timestamp: Document timestamp, or ``None`` to use the current time.
 
-class VexDocumentRenderer(Protocol):
-    """Render an immutable, format-neutral VEX document."""
+        Returns:
+            Serialized VEX JSON.
 
-    def render_document(
-        self,
-        *,
-        document: VexDocument,
-        timestamp: datetime | None = None,
-    ) -> str:
-        """Return a serialized VEX document."""
+        Raises:
+            VexRenderError: The values cannot form a valid bounded document.
+        """

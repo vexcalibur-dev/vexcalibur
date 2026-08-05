@@ -85,7 +85,8 @@ The adapter rejects duplicate component references, unknown references, finding 
 
 This model represents generated snapshots only. Vexcalibur still does not read VEX documents or convert between formats.
 
-The document model is an internal pre-1.0 seam. It is not yet a stable public API.
+The document model is internal. The supported extension contracts are
+`VulnerabilitySource` and `VexRenderer`, exported from `vexcalibur.api`.
 
 ## Network boundary
 
@@ -130,7 +131,9 @@ custom renderers use the post-render check because their expansion rules are
 not known. Built-in OSV relation expansion is bounded before findings are
 materialized.
 
-The built-in renderers also implement `VexDocumentRenderer`. Their compatibility method creates the atomic document, then delegates to the document renderer.
+Each built-in renderer's public `render` method creates the atomic document,
+then delegates to a private format serializer. The private method is not part
+of the supported Python contract.
 
 `vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders
 OpenVEX 0.2.0 JSON. `vexcalibur.csaf` renders CSAF 2.0 JSON with the VEX

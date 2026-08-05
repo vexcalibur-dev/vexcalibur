@@ -201,7 +201,7 @@ def test_csaf_document_renderer_rejects_conflicting_product_version() -> None:
     )
 
     with pytest.raises(CsafRenderError, match="conflicting version identity"):
-        Csaf20VexJsonRenderer(metadata=_metadata()).render_document(document=document)
+        Csaf20VexJsonRenderer(metadata=_metadata())._render_document(document=document)
 
 
 def test_csaf_compatibility_renderer_adapts_then_delegates() -> None:
@@ -210,7 +210,7 @@ def test_csaf_compatibility_renderer_adapts_then_delegates() -> None:
     received: dict[str, object] = {}
 
     class RecordingRenderer(Csaf20VexJsonRenderer):
-        def render_document(
+        def _render_document(
             self,
             *,
             document: VexDocument,
@@ -242,7 +242,7 @@ def test_csaf_renders_a_format_neutral_document_directly() -> None:
     rendered = Csaf20VexJsonRenderer(
         metadata=_metadata(),
         tool_version=TOOL_VERSION,
-    ).render_document(document=document, timestamp=TIMESTAMP)
+    )._render_document(document=document, timestamp=TIMESTAMP)
 
     parsed = _validate(rendered)
     assert parsed["vulnerabilities"][0]["product_status"] == {

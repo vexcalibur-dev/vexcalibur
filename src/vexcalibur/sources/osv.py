@@ -6,6 +6,7 @@ import posixpath
 import time
 import unicodedata
 import zlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -54,6 +55,9 @@ OSV_MIRROR_ANALYSIS_DETAIL = (
 )
 
 _T = TypeVar("_T")
+_HTTP_HEADER_NAME_CHARACTERS = frozenset(
+    "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+)
 
 
 @dataclass(frozen=True)
@@ -176,6 +180,7 @@ class OsvClient:
         max_total_vulnerabilities: int = DEFAULT_MAX_OSV_TOTAL_VULNERABILITIES,
         max_page_token_length: int = MAX_OSV_PAGE_TOKEN_LENGTH,
         max_vulnerability_id_length: int = MAX_OSV_VULNERABILITY_ID_LENGTH,
+        headers: Mapping[str, str] | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         if max_pages < 1:
@@ -219,6 +224,7 @@ class OsvClient:
         self._max_total_vulnerabilities = max_total_vulnerabilities
         self._max_page_token_length = max_page_token_length
         self._max_vulnerability_id_length = max_vulnerability_id_length
+        self._headers = _validated_osv_headers(headers)
         self._client = client
 
     @property
@@ -420,7 +426,7 @@ class OsvClient:
                 budget=budget,
             )
 
-        with httpx.Client() as owned_client:
+        with httpx.Client(headers=self._headers) as owned_client:
             return self._send_json_request(
                 owned_client,
                 method,
@@ -621,13 +627,28 @@ def _osv_json_error_message(error: StrictJsonError) -> str:
 
 @dataclass(frozen=True)
 class OsvSource:
-    """Vulnerability source backed by an OSV-compatible API client."""
+    """Vulnerability source backed by an OSV-compatible API client.
+
+    Attributes:
+        client: Injected bounded client. Its effective endpoint remains subject
+            to the public-service consent check.
+        osv_base_url: Endpoint used when ``client`` is ``None``.
+        allow_public_osv: Consent to send package inventory to public OSV.
+        source_name: Provenance name for a private compatible endpoint.
+        source_url: Provenance URL paired with ``source_name``.
+        headers: ASCII request headers sent only to the configured OSV
+            endpoint.
+
+    Raises:
+        OsvConfigurationError: Provenance settings are incomplete or unsafe.
+    """
 
     client: OsvClient | None = None
     osv_base_url: str = DEFAULT_OSV_API_URL
     allow_public_osv: bool = False
     source_name: str | None = None
     source_url: str | None = None
+    headers: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         source_name, source_url = _normalize_provenance_alias(
@@ -636,6 +657,8 @@ class OsvSource:
         )
         object.__setattr__(self, "source_name", source_name)
         object.__setattr__(self, "source_url", source_url)
+        if self.headers is not None:
+            object.__setattr__(self, "headers", _validated_osv_headers(self.headers))
 
     def findings_for_components(
         self,
@@ -666,6 +689,7 @@ class OsvSource:
             return osv_client_for_url(
                 osv_base_url=self.osv_base_url,
                 allow_public_osv=self.allow_public_osv,
+                headers=self.headers,
             )
         ensure_osv_client_allowed(
             osv_client=self.client,
@@ -693,14 +717,56 @@ class OsvSource:
         )
 
 
-def osv_client_for_url(*, osv_base_url: str, allow_public_osv: bool) -> OsvClient:
-    """Build an OSV client, requiring explicit opt-in for public OSV."""
+def osv_client_for_url(
+    *,
+    osv_base_url: str,
+    allow_public_osv: bool,
+    headers: Mapping[str, str] | None = None,
+) -> OsvClient:
+    """Build a bounded OSV client after checking public-service consent.
+
+    Args:
+        osv_base_url: Public OSV or a private OSV-compatible endpoint.
+        allow_public_osv: Consent to send package inventory to public OSV.
+        headers: ASCII request headers sent only to the configured endpoint.
+
+    Returns:
+        A bounded client for the normalized endpoint.
+
+    Raises:
+        OsvConfigurationError: The URL is invalid or public OSV was not
+            explicitly allowed.
+    """
     normalized_base_url = normalize_osv_base_url(osv_base_url)
     ensure_osv_url_allowed(
         osv_base_url=normalized_base_url,
         allow_public_osv=allow_public_osv,
     )
-    return OsvClient(base_url=normalized_base_url)
+    if headers is None:
+        return OsvClient(base_url=normalized_base_url)
+    return OsvClient(base_url=normalized_base_url, headers=headers)
+
+
+def _validated_osv_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
+    if headers is None:
+        return {}
+
+    validated: dict[str, str] = {}
+    for name, value in headers.items():
+        if not isinstance(name, str) or not isinstance(value, str):
+            msg = "OSV header names and values must be strings"
+            raise OsvConfigurationError(msg)
+        if not name or any(character not in _HTTP_HEADER_NAME_CHARACTERS for character in name):
+            msg = "OSV header names must use printable ASCII token characters"
+            raise OsvConfigurationError(msg)
+        if any(
+            ord(character) > 0x7E or (ord(character) < 0x20 and character != "\t")
+            for character in value
+        ):
+            msg = "OSV header values must use printable ASCII or horizontal tabs"
+            raise OsvConfigurationError(msg)
+        validated[name] = value
+    return validated
 
 
 def ensure_osv_url_allowed(*, osv_base_url: str, allow_public_osv: bool) -> None:

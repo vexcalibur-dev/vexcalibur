@@ -31,6 +31,7 @@ the App-backed production automation plan.
 
 ## How-to guides
 
+- [Generate VEX from Python](how-to/use-python-api.md)
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
 - [Generate OpenVEX](how-to/generate-openvex.md)
 - [Generate CSAF VEX](how-to/generate-csaf.md)
@@ -47,6 +48,7 @@ the App-backed production automation plan.
 - [Local findings format](reference/local-findings.md)
 - [Release-evidence contracts](reference/release-evidence.md)
 - [Vulnerability-source provider contract](reference/provider-contract.md)
+- [VEX renderer contract](reference/renderer-contract.md)
 - [Python API](reference/python-api.rst)
 
 ## Explanation
@@ -72,6 +74,7 @@ tutorials/offline-local-findings
 how-to/generate-cyclonedx-vex
 how-to/generate-openvex
 how-to/generate-csaf
+how-to/use-python-api
 how-to/use-private-osv-mirror
 how-to/build-release-evidence
 how-to/publish-to-pypi
@@ -80,6 +83,7 @@ reference/cyclonedx-vex-output
 reference/openvex-output
 reference/csaf-output
 reference/provider-contract
+reference/renderer-contract
 reference/python-api
 reference/local-findings
 reference/release-evidence

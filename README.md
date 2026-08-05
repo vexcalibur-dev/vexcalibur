@@ -121,8 +121,10 @@ The default public endpoint fails closed without that flag. Fetching an SBOM fro
 ## Documentation
 
 - Start with the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html).
+- Follow the [Python API how-to](https://vexcalibur-dev.github.io/vexcalibur/how-to/use-python-api.html) to generate and verify VEX from application code.
 - Follow the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html) generation guide.
 - Use the [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html) for flags and failure behavior.
+- Use `vexcalibur.api` as the supported application and extension entrypoint. Its [Python reference](https://vexcalibur-dev.github.io/vexcalibur/reference/python-api.html), [provider contract](https://vexcalibur-dev.github.io/vexcalibur/reference/provider-contract.html), and [renderer contract](https://vexcalibur-dev.github.io/vexcalibur/reference/renderer-contract.html) define the 1.x compatibility surface.
 - Read the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/reference/csaf-output.html) output contract before consuming generated files.
 - Read the [architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html) before adding a source or output format.
 - Read the [self-release evidence design](https://vexcalibur-dev.github.io/vexcalibur/explanation/self-release-evidence.html), inspect a [local bundle](https://vexcalibur-dev.github.io/vexcalibur/how-to/build-release-evidence.html), or follow the [immutable release runbook](https://vexcalibur-dev.github.io/vexcalibur/how-to/publish-to-pypi.html).

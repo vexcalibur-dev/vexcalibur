@@ -49,7 +49,19 @@ class VexRemediationCategory(str, Enum):
 
 @dataclass(frozen=True)
 class ComponentIdentity:
-    """Minimal component data needed by vulnerability sources and VEX output."""
+    """Minimal component data needed by vulnerability sources and VEX output.
+
+    Attributes:
+        ref: Source document identifier used to associate findings.
+        name: Human-readable component name.
+        version: Explicit component version, if supplied separately from its
+            package URL.
+        purl: Canonical package URL identifying the component.
+        type: CycloneDX component type used by applicable renderers.
+
+    Raises:
+        ComponentVersionError: ``version`` contradicts the package URL version.
+    """
 
     ref: str
     name: str
@@ -63,7 +75,22 @@ class ComponentIdentity:
 
 @dataclass(frozen=True)
 class VulnerabilityFinding:
-    """Provider-neutral vulnerability finding for one affected component."""
+    """Provider-neutral vulnerability finding for one affected component.
+
+    Attributes:
+        id: Vulnerability identifier.
+        source_name: Display name for the vulnerability source.
+        source_url: HTTP or HTTPS provenance URL for the source.
+        component_ref: Reference of the affected ``ComponentIdentity``.
+        purl: Package URL reported by the source.
+        modified: Source modification timestamp, when known.
+        analysis_state: Exploitability assessment represented in the VEX.
+        analysis_detail: Human-readable reason for the assessment.
+        action_statement: Action that a consumer should take, when applicable.
+        impact_statement: Reason the product is not affected, when applicable.
+        fixed_version: First known fixed version, when applicable.
+        remediation_category: Kind of remediation represented by the action.
+    """
 
     id: str
     source_name: str
@@ -94,4 +121,15 @@ class VulnerabilitySource(Protocol):
         self,
         components: tuple[ComponentIdentity, ...],
     ) -> tuple[VulnerabilityFinding, ...]:
-        """Return VEX-ready vulnerability findings for SBOM components."""
+        """Return VEX-ready vulnerability findings for SBOM components.
+
+        Args:
+            components: Immutable component identities to inspect.
+
+        Returns:
+            Immutable findings whose component references identify members of
+            ``components``.
+
+        Raises:
+            VulnerabilitySourceError: The source cannot produce findings.
+        """

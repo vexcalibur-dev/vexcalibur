@@ -36,7 +36,11 @@ class LocalFindingsError(VulnerabilitySourceError, ValueError):
 
 @dataclass(frozen=True)
 class LocalFindingsSource:
-    """Vulnerability source backed by a local findings JSON document."""
+    """Vulnerability source backed by a local findings JSON document.
+
+    Attributes:
+        path: Regular file containing Vexcalibur local findings JSON.
+    """
 
     path: Path
 
