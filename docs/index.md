@@ -9,6 +9,21 @@ Public OSV access fails closed. Vexcalibur sends package URLs and versions to `h
 
 Vexcalibur is pre-1.0. Pin an exact release and review the [project status](explanation/project-status.md) before depending on a public contract.
 
+## Automation targets
+
+- [GitHub Actions](https://github.com/vexcalibur-dev/vexcalibur-action) uses the
+  released companion Action to run Vexcalibur in a workflow.
+- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) documents its
+  current release status in the Orb README. Treat any development reference as
+  mutable and inspection-only. Do not import one into a project with
+  environment variables, contexts, private source, or other credentials.
+
+The GitHub Action's [compatibility
+reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
+explains how to resolve its latest tested commit and Vexcalibur package. [Orb
+issue #22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) records
+the App-backed production automation plan.
+
 ## Tutorials
 
 - [Generate your first VEX document](tutorials/quickstart.md)
@@ -16,6 +31,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 
 ## How-to guides
 
+- [Generate VEX from Python](how-to/use-python-api.md)
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
 - [Generate OpenVEX](how-to/generate-openvex.md)
 - [Generate CSAF VEX](how-to/generate-csaf.md)
@@ -34,6 +50,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 - [Local findings format](reference/local-findings.md)
 - [Release-evidence contracts](reference/release-evidence.md)
 - [Vulnerability-source provider contract](reference/provider-contract.md)
+- [VEX renderer contract](reference/renderer-contract.md)
 - [Python API](reference/python-api.rst)
 
 ## Explanation
@@ -56,6 +73,7 @@ Vexcalibur is pre-1.0. Pin an exact release and review the [project status](expl
 
 tutorials/quickstart
 tutorials/offline-local-findings
+how-to/use-python-api
 how-to/generate-cyclonedx-vex
 how-to/generate-openvex
 how-to/generate-csaf
@@ -69,6 +87,7 @@ reference/cyclonedx-vex-output
 reference/openvex-output
 reference/csaf-output
 reference/provider-contract
+reference/renderer-contract
 reference/python-api
 reference/local-findings
 reference/release-evidence

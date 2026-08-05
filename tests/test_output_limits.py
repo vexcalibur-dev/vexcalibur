@@ -320,7 +320,7 @@ def test_empty_builtin_renderer_subclass_keeps_preflight_budget(
 
 def _inherited_render_subclasses() -> tuple[VexRenderer, ...]:
     class CustomCycloneDxRenderer(CycloneDxJsonRenderer):
-        def render_document(
+        def _render_document(
             self,
             *,
             document: VexDocument,
@@ -330,7 +330,7 @@ def _inherited_render_subclasses() -> tuple[VexRenderer, ...]:
             return "{}\n"
 
     class CustomOpenVexRenderer(OpenVexJsonRenderer):
-        def render_document(
+        def _render_document(
             self,
             *,
             document: VexDocument,
@@ -340,7 +340,7 @@ def _inherited_render_subclasses() -> tuple[VexRenderer, ...]:
             return "{}\n"
 
     class CustomCsafRenderer(Csaf20VexJsonRenderer):
-        def render_document(
+        def _render_document(
             self,
             *,
             document: VexDocument,

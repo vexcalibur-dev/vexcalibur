@@ -63,7 +63,19 @@ class GithubRepository:
 
 
 class GithubSbomClient:
-    """Client for GitHub's Dependency Graph SBOM export endpoint."""
+    """Client for GitHub's Dependency Graph SBOM export endpoint.
+
+    Args:
+        api_url: GitHub REST API base URL.
+        token: Bearer token sent only to the configured GitHub API origin.
+        timeout: Timeout in seconds for each request.
+        report_poll_attempts: Maximum number of report status requests.
+        report_poll_interval: Default delay between report status requests.
+        client: Injected client used only for GitHub API requests.
+        download_client: Credential-free client used only for GitHub-provided
+            HTTPS download URLs. Do not configure authentication, cookies, or
+            sensitive default headers on this client.
+    """
 
     def __init__(
         self,
@@ -74,9 +86,10 @@ class GithubSbomClient:
         report_poll_attempts: int = DEFAULT_GITHUB_REPORT_POLL_ATTEMPTS,
         report_poll_interval: float = DEFAULT_GITHUB_REPORT_POLL_INTERVAL,
         client: httpx.Client | None = None,
+        download_client: httpx.Client | None = None,
     ) -> None:
         self._api_url = normalize_github_api_url(api_url)
-        self._token = token
+        self._token = _validated_github_token(token)
         self._timeout = timeout
         if report_poll_attempts < 1:
             msg = "GitHub SBOM report_poll_attempts must be at least 1"
@@ -87,6 +100,7 @@ class GithubSbomClient:
         self._report_poll_attempts = report_poll_attempts
         self._report_poll_interval = report_poll_interval
         self._client = client
+        self._download_client = download_client
 
     @property
     def api_url(self) -> str:
@@ -158,7 +172,13 @@ class GithubSbomClient:
             headers["Authorization"] = f"Bearer {self._token}"
 
         try:
-            with client.stream("GET", url, headers=headers, timeout=self._timeout) as response:
+            with client.stream(
+                "GET",
+                url,
+                headers=headers,
+                timeout=self._timeout,
+                follow_redirects=False,
+            ) as response:
                 yield response
         except httpx.HTTPError as exc:
             msg = f"GitHub SBOM API GET {path} request failed"
@@ -214,7 +234,7 @@ class GithubSbomClient:
                     )
                 elif response.status_code == 302:
                     location = response.headers.get("location")
-                    return self._download_report(client, location)
+                    return self._download_report(location)
                 elif response.status_code == 200:
                     raw_content = _read_limited_response_content(response)
                     return {
@@ -240,24 +260,43 @@ class GithubSbomClient:
         )
         raise GithubSbomClientError(msg)
 
-    def _download_report(self, client: httpx.Client, location: str | None) -> dict[str, Any]:
+    def _download_report(self, location: str | None) -> dict[str, Any]:
         download_url = _normalize_download_url(location)
+        if self._download_client is not None:
+            return self._download_report_with_client(self._download_client, download_url)
+
+        with httpx.Client(follow_redirects=False) as download_client:
+            return self._download_report_with_client(download_client, download_url)
+
+    def _download_report_with_client(
+        self,
+        client: httpx.Client,
+        download_url: str,
+    ) -> dict[str, Any]:
+        raw_content = b""
+        download_error: GithubSbomClientError | None = None
         try:
             with client.stream(
                 "GET",
                 download_url,
                 headers={"Accept": "application/json"},
                 timeout=self._timeout,
+                follow_redirects=False,
             ) as response:
                 response.raise_for_status()
                 raw_content = _read_limited_response_content(response)
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             msg = f"GitHub SBOM report download failed with HTTP {status_code}"
-            raise GithubSbomClientError(msg) from exc
-        except httpx.HTTPError as exc:
+            download_error = GithubSbomClientError(msg)
+        except httpx.HTTPError:
             msg = "GitHub SBOM report download request failed"
-            raise GithubSbomClientError(msg) from exc
+            download_error = GithubSbomClientError(msg)
+
+        # Raise outside the handler so the signed download URL held by httpx's
+        # request-bearing exception cannot survive in the public error chain.
+        if download_error is not None:
+            raise download_error
 
         return {
             "sbom": _json_object_from_response(
@@ -363,6 +402,18 @@ def resolve_github_token(
         return None
 
     return _gh_auth_token(api_url, environ=environment)
+
+
+def _validated_github_token(token: str | None) -> str | None:
+    if token is None or token == "":
+        return token
+    if not isinstance(token, str):
+        msg = "GitHub token must be a string"
+        raise GithubSbomConfigurationError(msg)
+    if any(ord(character) < 0x21 or ord(character) > 0x7E for character in token):
+        msg = "GitHub token must use printable ASCII without whitespace"
+        raise GithubSbomConfigurationError(msg)
+    return token
 
 
 def _default_token_env_names(api_url: str) -> tuple[str, ...]:

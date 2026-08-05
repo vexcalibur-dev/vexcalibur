@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -28,7 +28,12 @@ from vexcalibur.generation_selection import (
     select_renderer,
 )
 from vexcalibur.generation_snapshot import GenerationInputSnapshot
-from vexcalibur.github_sbom import GithubSbomClient, GithubSbomComponentLoader
+from vexcalibur.github_sbom import (
+    DEFAULT_GITHUB_API_URL,
+    GithubSbomClient,
+    GithubSbomComponentLoader,
+    resolve_github_token,
+)
 from vexcalibur.limits import MAX_GENERATED_DOCUMENT_BYTES
 from vexcalibur.render import (
     VexRenderer,
@@ -68,7 +73,24 @@ def generate_vex_from_source(
     timestamp: datetime | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a CycloneDX SBOM and source provider."""
+    """Generate VEX JSON from a CycloneDX SBOM and source provider.
+
+    Args:
+        input_file: CycloneDX JSON or XML file to read.
+        source: Provider used to find vulnerabilities for the SBOM components.
+        timestamp: Document timestamp. The renderer uses the current UTC time
+            when this is ``None``.
+        renderer: Output renderer. The default emits CycloneDX 1.6 JSON.
+
+    Returns:
+        The serialized VEX document.
+
+    Raises:
+        SbomError: The SBOM is unreadable, invalid, unsupported, or contains no
+            usable components.
+        VulnerabilitySourceError: The source cannot produce findings.
+        VexRenderError: The findings cannot be rendered within output limits.
+    """
     return _render_legacy_generation(
         components=load_cyclonedx_sbom(input_file),
         source=source,
@@ -106,10 +128,27 @@ def generate_vex_from_components(
     *,
     components: tuple[ComponentIdentity, ...],
     source: VulnerabilitySource,
-    timestamp: datetime | None,
+    timestamp: datetime | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from component identities and a source provider."""
+    """Generate VEX JSON from component identities and a source provider.
+
+    Args:
+        components: Components to query and include in the VEX document.
+        source: Provider used to find vulnerabilities for the components.
+        timestamp: Document timestamp. The renderer uses the current UTC time
+            when this is ``None``.
+        renderer: Output renderer. The default emits CycloneDX 1.6 JSON.
+
+    Returns:
+        The serialized VEX document.
+
+    Raises:
+        SbomError: No usable components were supplied or the source rejects
+            their identities.
+        VulnerabilitySourceError: The source cannot produce findings.
+        VexRenderError: The findings cannot be rendered within output limits.
+    """
     return _render_legacy_generation(
         components=components,
         source=source,
@@ -331,9 +370,38 @@ def generate_vex_from_sbom(
     allow_public_osv: bool = False,
     osv_source_name: str | None = None,
     osv_source_url: str | None = None,
+    osv_headers: Mapping[str, str] | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a CycloneDX SBOM."""
+    """Generate VEX JSON from a CycloneDX SBOM using an OSV-compatible source.
+
+    Public OSV receives package inventory only when ``allow_public_osv`` is
+    true. A private mirror may be selected with ``osv_base_url``.
+
+    Args:
+        input_file: CycloneDX JSON or XML file to read.
+        timestamp: Document timestamp. The renderer uses the current UTC time
+            when this is ``None``.
+        osv_client: Injected OSV client, primarily for private endpoints and
+            tests. Its effective URL remains subject to the consent check.
+        osv_base_url: OSV-compatible endpoint used when no client is supplied.
+        allow_public_osv: Consent to send package inventory to public OSV.
+        osv_source_name: Provenance name for a private OSV-compatible endpoint.
+        osv_source_url: Provenance URL paired with ``osv_source_name``.
+        osv_headers: ASCII request headers sent only to the configured OSV
+            endpoint.
+        renderer: Output renderer. The default emits CycloneDX 1.6 JSON.
+
+    Returns:
+        The serialized VEX document.
+
+    Raises:
+        SbomError: The SBOM is unreadable, invalid, unsupported, or contains no
+            usable versioned components.
+        OsvClientError: OSV configuration, transport, or response handling
+            fails.
+        VexRenderError: The findings cannot be rendered within output limits.
+    """
     return _render_legacy_generation(
         components=load_cyclonedx_sbom(input_file),
         source=_osv_source(
@@ -342,6 +410,7 @@ def generate_vex_from_sbom(
             allow_public_osv=allow_public_osv,
             source_name=osv_source_name,
             source_url=osv_source_url,
+            headers=osv_headers,
         ),
         timestamp=timestamp,
         renderer=renderer,
@@ -357,6 +426,7 @@ def generate_vex_from_sbom_result(
     allow_public_osv: bool = False,
     osv_source_name: str | None = None,
     osv_source_url: str | None = None,
+    osv_headers: Mapping[str, str] | None = None,
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
@@ -368,6 +438,7 @@ def generate_vex_from_sbom_result(
         allow_public_osv=allow_public_osv,
         source_name=osv_source_name,
         source_url=osv_source_url,
+        headers=osv_headers,
     )
     selected_renderer = select_renderer(renderer)
     return _generate_result(
@@ -388,26 +459,81 @@ def generate_vex_from_github_sbom(
     *,
     repository: str,
     timestamp: datetime | None = None,
+    github_api_url: str = DEFAULT_GITHUB_API_URL,
+    github_token_env: str | None = None,
+    use_gh_auth: bool = True,
     github_client: GithubSbomComponentLoader | None = None,
     osv_client: OsvClient | None = None,
     osv_base_url: str = DEFAULT_OSV_API_URL,
     allow_public_osv: bool = False,
     osv_source_name: str | None = None,
     osv_source_url: str | None = None,
+    osv_headers: Mapping[str, str] | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a GitHub Dependency Graph SBOM."""
-    raw_source = _osv_source(
+    """Generate VEX JSON from a GitHub Dependency Graph SBOM.
+
+    Fetching from GitHub does not grant consent to send the resulting package
+    inventory to public OSV. Set ``allow_public_osv`` explicitly for that
+    separate transfer.
+
+    Args:
+        repository: GitHub repository in ``OWNER/REPO`` form.
+        timestamp: Document timestamp. The renderer uses the current UTC time
+            when this is ``None``.
+        github_api_url: GitHub REST API base URL.
+        github_token_env: Environment variable containing a printable ASCII
+            GitHub token without whitespace. When omitted, standard GitHub
+            token variables are checked.
+        use_gh_auth: Fall back to ``gh auth token`` when environment variables
+            do not provide a token.
+        github_client: Injected GitHub SBOM client. The default resolves its
+            token from supported GitHub environment and CLI sources.
+        osv_client: Injected OSV client, primarily for private endpoints and
+            tests. Its effective URL remains subject to the consent check.
+        osv_base_url: OSV-compatible endpoint used when no client is supplied.
+        allow_public_osv: Consent to send package inventory to public OSV.
+        osv_source_name: Provenance name for a private OSV-compatible endpoint.
+        osv_source_url: Provenance URL paired with ``osv_source_name``.
+        osv_headers: ASCII request headers sent only to the configured OSV
+            endpoint.
+        renderer: Output renderer. The default emits CycloneDX 1.6 JSON.
+
+    Returns:
+        The serialized VEX document.
+
+    Raises:
+        GithubSbomError: GitHub configuration, transport, or SBOM parsing
+            fails.
+        SbomError: The fetched SBOM contains no usable versioned components.
+        OsvClientError: OSV configuration, transport, or response handling
+            fails.
+        VexRenderError: The findings cannot be rendered within output limits.
+    """
+    source = _osv_source(
         client=osv_client,
         osv_base_url=osv_base_url,
         allow_public_osv=allow_public_osv,
         source_name=osv_source_name,
         source_url=osv_source_url,
+        headers=osv_headers,
     )
-    _validate_source_before_inventory_load(raw_source)
+    _validate_source_before_inventory_load(source)
+    client: GithubSbomComponentLoader = (
+        GithubSbomClient(
+            api_url=github_api_url,
+            token=resolve_github_token(
+                api_url=github_api_url,
+                token_env=github_token_env,
+                allow_gh_cli=use_gh_auth,
+            ),
+        )
+        if github_client is None
+        else github_client
+    )
     return _render_legacy_generation(
-        components=_github_components(repository, github_client),
-        source=raw_source,
+        components=_github_components(repository, client),
+        source=source,
         timestamp=timestamp,
         renderer=renderer,
     )
@@ -469,12 +595,16 @@ def generate_vex_from_github_sbom_result(
     *,
     repository: str,
     timestamp: datetime | None = None,
+    github_api_url: str = DEFAULT_GITHUB_API_URL,
+    github_token_env: str | None = None,
+    use_gh_auth: bool = True,
     github_client: GithubSbomComponentLoader | None = None,
     osv_client: OsvClient | None = None,
     osv_base_url: str = DEFAULT_OSV_API_URL,
     allow_public_osv: bool = False,
     osv_source_name: str | None = None,
     osv_source_url: str | None = None,
+    osv_headers: Mapping[str, str] | None = None,
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
@@ -485,12 +615,25 @@ def generate_vex_from_github_sbom_result(
         allow_public_osv=allow_public_osv,
         source_name=osv_source_name,
         source_url=osv_source_url,
+        headers=osv_headers,
     )
+    def create_github_client() -> GithubSbomClient:
+        return GithubSbomClient(
+            api_url=github_api_url,
+            token=resolve_github_token(
+                api_url=github_api_url,
+                token_env=github_token_env,
+                allow_gh_cli=use_gh_auth,
+            ),
+        )
+
+    github_client_factory = create_github_client if github_client is None else None
     return generate_vex_from_github_source_result(
         repository=repository,
         source=source,
         timestamp=timestamp,
         github_client=github_client,
+        github_client_factory=github_client_factory,
         renderer=renderer,
         execution_context=execution_context,
     )
@@ -521,6 +664,7 @@ def _osv_source(
     allow_public_osv: bool,
     source_name: str | None,
     source_url: str | None,
+    headers: Mapping[str, str] | None = None,
 ) -> OsvSource:
     return OsvSource(
         client=client,
@@ -528,6 +672,7 @@ def _osv_source(
         allow_public_osv=allow_public_osv,
         source_name=source_name,
         source_url=source_url,
+        headers=headers,
     )
 
 
@@ -538,7 +683,24 @@ def generate_vex_from_local_findings(
     timestamp: datetime | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a CycloneDX SBOM and local findings."""
+    """Generate VEX JSON from a CycloneDX SBOM and local findings.
+
+    Args:
+        input_file: CycloneDX JSON or XML file to read.
+        findings_file: Local findings JSON file to read.
+        timestamp: Document timestamp. The renderer uses the current UTC time
+            when this is ``None``.
+        renderer: Output renderer. The default emits CycloneDX 1.6 JSON.
+
+    Returns:
+        The serialized VEX document.
+
+    Raises:
+        SbomError: The SBOM is unreadable, invalid, unsupported, or contains no
+            usable components.
+        LocalFindingsError: The findings file is unreadable or invalid.
+        VexRenderError: The findings cannot be rendered within output limits.
+    """
     return generate_vex_from_source(
         input_file=input_file,
         source=LocalFindingsSource(path=findings_file),

@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -905,7 +906,7 @@ def test_load_cyclonedx_json_rejects_wrong_bom_format(tmp_path: Path) -> None:
         load_cyclonedx_json(sbom_path)
 
 
-@pytest.mark.parametrize("spec_version", ('"9.9"', "[]", "{}"))
+@pytest.mark.parametrize("spec_version", ('"9.9"',))
 def test_load_cyclonedx_json_rejects_unsupported_spec_version(
     spec_version: str,
     tmp_path: Path,
@@ -917,6 +918,31 @@ def test_load_cyclonedx_json_rejects_unsupported_spec_version(
     )
 
     with pytest.raises(SbomError, match="unsupported CycloneDX specVersion"):
+        load_cyclonedx_json(sbom_path)
+
+
+@pytest.mark.parametrize(
+    "spec_version",
+    (None, 1, True, [], {}),
+    ids=("null", "integer", "boolean", "array", "object"),
+)
+def test_load_cyclonedx_json_rejects_non_string_spec_version(
+    tmp_path: Path,
+    spec_version: object,
+) -> None:
+    sbom_path = tmp_path / "malformed-spec-version.json"
+    sbom_path.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": spec_version,
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SbomError, match=r"specVersion.*string"):
         load_cyclonedx_json(sbom_path)
 
 

@@ -82,7 +82,34 @@ Use an absolute HTTPS URL with a hostname. Do not include credentials, a query s
 
 Vexcalibur accepts cleartext HTTP only for loopback hosts such as `localhost`, `127.0.0.1`, and `::1`. This exception supports local test servers; it is not for a remote mirror.
 
-The CLI has no option for a bearer token or custom HTTP header, and credentials in `--osv-url` are rejected. A CLI-accessible mirror must accept requests through the runner's existing network or gateway authentication. Python callers that need application headers can inject a configured `httpx.Client` into `OsvClient`, then use that client through `OsvSource`; keep the source and client base URLs identical.
+The CLI has no option for a bearer token or custom HTTP header, and credentials in `--osv-url` are rejected. A CLI-accessible mirror must accept requests through the runner's existing network or gateway authentication.
+
+Python callers can send application headers through the supported API. The
+following fragment expects `sbom.json` in the working directory and an
+`OSV_TOKEN` supplied by the process's secret manager. Read the token from the
+environment rather than writing it into source code:
+
+```python
+import json
+import os
+from pathlib import Path
+
+from vexcalibur.api import generate_vex_from_sbom
+
+document = generate_vex_from_sbom(
+    input_file=Path("sbom.json"),
+    osv_base_url="https://osv.internal.example",
+    osv_headers={"Authorization": f"Bearer {os.environ['OSV_TOKEN']}"},
+)
+parsed = json.loads(document)
+assert parsed["bomFormat"] == "CycloneDX"
+```
+
+Vexcalibur sends these headers only to the configured OSV endpoint. Redirects remain disabled. Header names use HTTP token characters, and values must contain printable ASCII or horizontal tabs.
+
+The call returns only after the mirror responds and Vexcalibur validates the
+document. For an offline setup with committed inputs and expected output, run
+the [Python API how-to](use-python-api.md) first.
 
 ## Handle mirror failures
 

@@ -75,7 +75,19 @@ class CsafRenderError(VexRenderError):
 
 @dataclass(frozen=True)
 class Csaf20DocumentMetadata:
-    """Publisher-controlled metadata required by the CSAF 2.0 VEX profile."""
+    """Publisher-controlled metadata required by the CSAF 2.0 VEX profile.
+
+    Attributes:
+        document_id: Publisher-controlled tracking identifier.
+        title: Human-readable document title.
+        publisher_name: Human-readable publisher name.
+        publisher_namespace: Absolute HTTP or HTTPS publisher namespace.
+        publisher_category: Publisher's role in the advisory process.
+        status: Initial CSAF document lifecycle status.
+
+    Raises:
+        CsafRenderError: Required metadata is empty, malformed, or unsupported.
+    """
 
     document_id: str
     title: str
@@ -126,7 +138,15 @@ class Csaf20DocumentMetadata:
 
 @dataclass(frozen=True)
 class Csaf20VexJsonRenderer:
-    """Render CSAF 2.0 JSON using the standard VEX profile."""
+    """Render CSAF 2.0 JSON using the standard VEX profile.
+
+    Attributes:
+        metadata: Tracking and publisher metadata for the document.
+        tool_version: Vexcalibur version recorded in generator metadata.
+
+    Raises:
+        CsafRenderError: ``tool_version`` is empty.
+    """
 
     metadata: Csaf20DocumentMetadata
     tool_version: str = field(default_factory=lambda: __version__)
@@ -145,8 +165,20 @@ class Csaf20VexJsonRenderer:
         findings: tuple[VulnerabilityFinding, ...],
         timestamp: datetime | None = None,
     ) -> str:
-        """Adapt provider findings and return CSAF 2.0 VEX JSON."""
-        if type(self).render_document is Csaf20VexJsonRenderer.render_document:
+        """Adapt provider findings and return CSAF 2.0 VEX JSON.
+
+        Args:
+            components: Components available to the document.
+            findings: Findings associated with those components.
+            timestamp: Document timestamp, or ``None`` to use current UTC.
+
+        Returns:
+            Serialized CSAF 2.0 VEX JSON.
+
+        Raises:
+            CsafRenderError: The values cannot form a valid document.
+        """
+        if type(self)._render_document is Csaf20VexJsonRenderer._render_document:
             enforce_builtin_render_input_budget(
                 components=components,
                 findings=findings,
@@ -163,9 +195,9 @@ class Csaf20VexJsonRenderer:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:
             raise CsafRenderError(str(exc)) from exc
-        return self.render_document(document=document, timestamp=timestamp)
+        return self._render_document(document=document, timestamp=timestamp)
 
-    def render_document(
+    def _render_document(
         self,
         *,
         document: VexDocument,

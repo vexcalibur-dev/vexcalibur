@@ -1,4 +1,5 @@
 import subprocess
+import traceback
 
 import httpx
 import pytest
@@ -51,6 +52,15 @@ def test_normalize_github_api_url_rejects_userinfo() -> None:
 def test_normalize_github_api_url_rejects_invalid_port() -> None:
     with pytest.raises(GithubSbomConfigurationError, match="port"):
         normalize_github_api_url("https://api.github.com:invalid")
+
+
+def test_github_sbom_client_rejects_non_ascii_token_without_disclosing_it() -> None:
+    token = "caf\N{LATIN SMALL LETTER E WITH ACUTE}"  # noqa: S105
+
+    with pytest.raises(GithubSbomConfigurationError, match="printable ASCII") as exc_info:
+        GithubSbomClient(token=token)
+
+    assert token not in str(exc_info.value)
 
 
 def test_resolve_github_token_prefers_explicit_env() -> None:
@@ -556,10 +566,22 @@ def test_github_sbom_client_fetches_components_with_auth_header() -> None:
             json=_github_spdx_document(),
         )
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+    transport = httpx.MockTransport(handler)
+    with (
+        httpx.Client(
+            transport=transport,
+            headers={
+                "Authorization": "Bearer injected-secret",
+                "X-Tenant-Metadata": "organization-1234",
+            },
+            follow_redirects=True,
+        ) as http_client,
+        httpx.Client(transport=transport) as download_client,
+    ):
         client = GithubSbomClient(
             token="secret-token",  # noqa: S106
             client=http_client,
+            download_client=download_client,
         )
         components = client.component_identities("vexcalibur-dev/vexcalibur")
 
@@ -580,6 +602,9 @@ def test_github_sbom_client_fetches_components_with_auth_header() -> None:
     assert captured_requests[0].headers["authorization"] == "Bearer secret-token"
     assert captured_requests[1].headers["authorization"] == "Bearer secret-token"
     assert "authorization" not in captured_requests[2].headers
+    assert captured_requests[0].headers["x-tenant-metadata"] == "organization-1234"
+    assert captured_requests[1].headers["x-tenant-metadata"] == "organization-1234"
+    assert "x-tenant-metadata" not in captured_requests[2].headers
     assert captured_requests[0].headers["x-github-api-version"] == GITHUB_API_VERSION
 
 
@@ -604,9 +629,10 @@ def test_github_sbom_client_allows_anonymous_public_requests() -> None:
         return httpx.Response(200, json={"spdxVersion": "SPDX-2.3", "packages": []})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        components = GithubSbomClient(client=http_client).component_identities(
-            "vexcalibur-dev/vexcalibur"
-        )
+        components = GithubSbomClient(
+            client=http_client,
+            download_client=http_client,
+        ).component_identities("vexcalibur-dev/vexcalibur")
 
     assert components == ()
 
@@ -639,6 +665,7 @@ def test_github_sbom_client_polls_pending_report() -> None:
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
         components = GithubSbomClient(
             client=http_client,
+            download_client=http_client,
             report_poll_interval=0.0,
         ).component_identities("vexcalibur-dev/vexcalibur")
 
@@ -709,9 +736,10 @@ def test_github_sbom_client_accepts_canonical_case_fetch_url() -> None:
         return httpx.Response(200, json=_github_spdx_document())
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        components = GithubSbomClient(client=http_client).component_identities(
-            "Vexcalibur-Dev/Vexcalibur"
-        )
+        components = GithubSbomClient(
+            client=http_client,
+            download_client=http_client,
+        ).component_identities("Vexcalibur-Dev/Vexcalibur")
 
     assert len(components) == 1
 
@@ -727,6 +755,47 @@ def test_github_sbom_client_reports_http_status_without_token() -> None:
             client.component_identities("vexcalibur-dev/private")
 
     assert "secret-token" not in str(exc_info.value)
+
+
+def test_github_sbom_client_omits_signed_download_url_from_error_chain() -> None:
+    signature = "super-secret-signature"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/dependency-graph/sbom/generate-report"):
+            return httpx.Response(
+                201,
+                json={
+                    "sbom_url": (
+                        "https://api.github.com/repos/vexcalibur-dev/vexcalibur/"
+                        "dependency-graph/sbom/fetch-report/report-id"
+                    )
+                },
+            )
+        if request.url.path.endswith("/dependency-graph/sbom/fetch-report/report-id"):
+            return httpx.Response(
+                302,
+                headers={"Location": f"https://download.example/sbom.json?sig={signature}"},
+            )
+        return httpx.Response(403, json={"message": "expired"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        client = GithubSbomClient(client=http_client, download_client=http_client)
+
+        with pytest.raises(
+            GithubSbomClientError, match="download failed with HTTP 403"
+        ) as exc_info:
+            client.component_identities("vexcalibur-dev/vexcalibur")
+
+    formatted_traceback = "".join(
+        traceback.format_exception(
+            type(exc_info.value),
+            exc_info.value,
+            exc_info.value.__traceback__,
+        )
+    )
+    assert signature not in formatted_traceback
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_github_sbom_client_rejects_oversized_response() -> None:
@@ -749,7 +818,7 @@ def test_github_sbom_client_rejects_oversized_response() -> None:
         return httpx.Response(200, content=b"{" + (b" " * MAX_SBOM_BYTES) + b"}")
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        client = GithubSbomClient(client=http_client)
+        client = GithubSbomClient(client=http_client, download_client=http_client)
 
         with pytest.raises(GithubSbomClientError, match="byte limit"):
             client.component_identities("vexcalibur-dev/vexcalibur")

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "review_kind": "production",
-  "analysis_revision": 6,
-  "reviewed_at": "2026-07-30T08:32:52Z",
+  "analysis_revision": 7,
+  "reviewed_at": "2026-08-05T21:26:30Z",
   "reviewed_by": "Danny Sauer (@dannysauer)",
   "inventory": {
     "path": "uv.lock",
-    "sha256": "4111a5387e6371ca:584e4475d39a0c63:d2e354a8f1a4db93:20261ac448653285",
+    "sha256": "5d351018de2f7368:ecaab81571e48751:d164f49338d2b681:5cec34237d6e6a6b",
     "coverage": "cross-platform-reference-runtime"
   },
   "findings": {
@@ -18,5 +18,5 @@
       "in_triage"
     ]
   },
-  "conclusion": "No reviewed vulnerability findings are included in analysis revision 6. The lock now records packaging and the Python 3.10 tomli fallback in a dedicated distribution-verifier group; its resolved package set is unchanged. The findings snapshot remains empty. This is not a claim that the inventory has no vulnerabilities."
+  "conclusion": "No reviewed vulnerability findings are included in analysis revision 7. The lock combines the reviewed distribution-verifier group with dependency updates already accepted on main. The findings snapshot remains empty. This is not a claim that the inventory has no vulnerabilities."
 }

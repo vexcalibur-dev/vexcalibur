@@ -1,494 +1,269 @@
 Python API
 ==========
 
-The Python API is pre-1.0. Import paths, signatures, exceptions, and return
-shapes may change between releases.
+``vexcalibur.api`` is the supported Python interface. Import application and
+extension code from this module rather than from implementation modules such as
+``vexcalibur.generate`` or ``vexcalibur.sources.osv``.
 
-Domain objects
---------------
+The compatibility guarantee begins with Vexcalibur 1.0. Before 1.0, pin an
+exact Vexcalibur release. For a 1.x release, the contract covers exported names,
+call signatures and defaults, documented return types and behavior, documented
+exceptions, public dataclass fields, protocol methods, and enum names and
+values. Modules and names outside this facade may change in any release.
 
-.. automodule:: vexcalibur.domain
-   :members:
-   :show-inheritance:
+A minor release may add an export, add an optional keyword argument with a
+default to a caller-facing function or constructor, or add a more specific
+exception beneath a documented base class. Protocol method signatures remain
+fixed throughout 1.x. Vexcalibur may extend a protocol behind an adapter only
+when existing implementations still receive the original call. Deprecations
+are identified in the API reference and release notes, emit
+``DeprecationWarning`` when practical, and remain available until the next
+major release. A security fix may reject input that was previously accepted as
+unsafe; release notes call out that change.
 
-SBOM ingest
------------
+The installation metadata accepts Python 3.10 or later within Python 3. CI
+currently tests Python 3.10 through 3.14. Other Python 3 versions are
+unverified. Dropping a tested Python version changes the installation contract
+and is announced in release notes.
 
-Use ``load_cyclonedx_sbom`` for an untrusted CycloneDX file. It enforces file,
-component, nesting, package URL, XML, and duplicate-reference rules before it
-returns component identities. ``load_cyclonedx_json`` is the JSON-only
-compatibility helper.
+Runnable example
+----------------
 
-.. list-table:: Loader contract
-   :header-rows: 1
-
-   * - Loader
-     - Input
-     - Limits and filtering
-   * - ``load_cyclonedx_sbom``
-     - CycloneDX JSON or XML 1.4, 1.5, or 1.6. JSON must be UTF-8. XML may use
-       a parser-detected encoding.
-     - Requires a regular file target and reads at most 10 MiB from one opened
-       descriptor. Symbolic links to regular files are accepted. Rejects more
-       than 10,000 components, nesting beyond 50 component levels,
-       contradictory explicit and package URL versions, malformed package
-       URLs, duplicate returned references, and XML DTD, entity, or
-       external-reference declarations. Components without package URLs are
-       omitted.
-   * - ``load_cyclonedx_json``
-     - UTF-8 CycloneDX JSON 1.4, 1.5, or 1.6.
-     - Applies the same file, component, nesting, package URL, version, and
-       reference checks as ``load_cyclonedx_sbom``. JSON also rejects duplicate
-       keys, more than 100 nested arrays or objects, and integer literals longer
-       than 1,000 decimal digits.
-   * - ``component_identities_from_github_spdx_sbom``
-     - A decoded GitHub Dependency Graph SPDX 2.3 JSON response.
-     - Applies the component, package URL, version, and reference checks. It
-       rejects multiple distinct package URLs for one SPDX package and omits
-       packages without package URLs and the repository package itself.
-
-All three return component identities sorted by package URL and reference.
-
-.. automodule:: vexcalibur.sbom
-   :members: SbomError, load_cyclonedx_sbom, load_cyclonedx_json
-
-GitHub SBOM client
-------------------
-
-``GithubSbomClient`` requests a repository Dependency Graph SBOM and returns
-the same component identities as local ingest. Public repositories may work
-without a token, subject to GitHub rate limits. Token-backed requests need
-repository read access. Generation helpers accept any
-``GithubSbomComponentLoader`` implementation. A custom loader runs in the
-caller's process and must return normalized ``ComponentIdentity`` values in a
-tuple. It owns authentication, network policy, timeouts, and retries. Its
-exceptions propagate unchanged, so the loader must document them for callers.
-
-.. automodule:: vexcalibur.github_sbom
-   :members: GithubSbomError, GithubSbomConfigurationError, GithubSbomClientError, GithubSbomComponentLoader, GithubRepository, GithubSbomClient, component_identities_from_github_spdx_sbom, parse_github_repository, normalize_github_api_url, resolve_github_token
-   :show-inheritance:
+The :doc:`Python API how-to <../how-to/use-python-api>` runs against committed
+fixtures, handles documented failures, writes a real CycloneDX VEX document,
+and verifies the result.
 
 Generation
 ----------
 
-Generation helpers use CycloneDX when ``renderer`` is omitted. Pass an
-``OpenVexJsonRenderer`` to select OpenVEX and supply its author metadata::
+All generation functions return serialized JSON as ``str``. CycloneDX 1.6 is
+the default output. Pass ``OpenVexJsonRenderer`` or ``Csaf20VexJsonRenderer``
+to select another format.
 
-   from pathlib import Path
+``generate_vex_from_source`` and ``generate_vex_from_components`` accept a
+custom ``VulnerabilitySource``. A source receives immutable component values
+and returns immutable findings. ``VexRenderer`` defines the corresponding
+output extension contract.
 
-   from vexcalibur.generate import generate_vex_from_local_findings
-   from vexcalibur.openvex import OpenVexJsonRenderer
+.. currentmodule:: vexcalibur.api
 
-   document = generate_vex_from_local_findings(
-       input_file=Path("sbom.json"),
-       findings_file=Path("findings.json"),
-       renderer=OpenVexJsonRenderer(
-           author="Example Security Team",
-           role="VEX document producer",
-       ),
-   )
+.. autofunction:: generate_vex_from_components
 
-``Csaf20VexJsonRenderer`` accepts explicit tracking and publisher metadata::
+.. autofunction:: generate_vex_from_source
 
-   from pathlib import Path
+.. autofunction:: generate_vex_from_sbom
 
-   from vexcalibur.csaf import (
-       Csaf20DocumentMetadata,
-       Csaf20VexJsonRenderer,
-       CsafDocumentStatus,
-       CsafPublisherCategory,
-   )
-   from vexcalibur.generate import generate_vex_from_local_findings
+.. autofunction:: generate_vex_from_github_sbom
 
-   metadata = Csaf20DocumentMetadata(
-       document_id="ACME-VEX-2026-001",
-       title="ACME component exploitability assessment",
-       publisher_name="ACME Product Security",
-       publisher_namespace="https://security.example.test",
-       publisher_category=CsafPublisherCategory.VENDOR,
-       status=CsafDocumentStatus.FINAL,
-   )
-   document = generate_vex_from_local_findings(
-       input_file=Path("sbom.json"),
-       findings_file=Path("findings.json"),
-       renderer=Csaf20VexJsonRenderer(metadata),
-   )
+.. autofunction:: generate_vex_from_local_findings
 
-The compatibility helpers return the rendered document as ``str``. Their
-matching ``*_result`` helpers return ``GenerationResult``, which keeps the
-normalized components and findings used by the renderer. Generation rejects
-rendered output larger than 25 MiB of UTF-8.
+SBOM ingest and GitHub
+----------------------
 
-The result helpers differ in how they establish inventory provenance:
+``load_cyclonedx_sbom`` reads CycloneDX JSON or XML 1.4, 1.5, or 1.6. It
+returns component identities sorted by package URL and reference. Components
+without package URLs are omitted.
 
-.. list-table:: Result helper contract
-   :header-rows: 1
+The loader opens its path once in nonblocking mode and requires the opened
+target to be a regular file. A symbolic link to a regular file works. The
+loader reads at most 10 MiB, accepts at most 10,000 components and 50 nested
+component levels, and rejects duplicate returned references. JSON input also
+rejects duplicate keys, more than 100 nested arrays or objects, and integer
+literals longer than 1,000 decimal digits. XML input rejects DTD, entity, and
+external-reference declarations.
 
-   * - Helper
-     - Inventory category
-     - Source category
-     - Routine failures
-   * - ``generate_vex_from_components_result``
-     - ``CUSTOM``. The caller supplied normalized components.
-     - Inferred from the exact source type or its ``CUSTOM`` declaration.
-     - ``SbomError`` for empty components or source-input failures;
-       ``LocalFindingsError``, ``OsvConfigurationError``, or ``OsvClientError``
-       from those built-in sources; ``VexRenderError`` for invalid or oversized
-       output; ``TypeError`` for mistyped values; ``ValueError`` for
-       contradictory context.
-   * - ``generate_vex_from_source_result``
-     - ``SBOM_FILE`` after local CycloneDX validation.
-     - Inferred from the exact source type or its ``CUSTOM`` declaration.
-     - ``SbomError`` for local inventory or source-input failures;
-       ``LocalFindingsError``, ``OsvConfigurationError``, or
-       ``OsvClientError`` from those built-in sources; ``VexRenderError`` for
-       invalid or oversized output; ``TypeError`` for mistyped values;
-       ``ValueError`` for contradictory context.
-   * - ``generate_vex_from_sbom_result``
-     - ``SBOM_FILE`` after local CycloneDX validation.
-     - ``CUSTOM`` for an injected ``osv_client``. Otherwise ``PUBLIC_OSV`` or
-       ``CUSTOM_OSV`` from the effective guarded endpoint.
-     - ``SbomError``, ``OsvConfigurationError``, ``OsvClientError``,
-       ``VexRenderError``, ``TypeError``, or ``ValueError``.
-   * - ``generate_vex_from_github_source_result``
-     - ``GITHUB_DEPENDENCY_GRAPH`` when Vexcalibur creates or receives an exact
-       ``GithubSbomClient``. Another injected loader is ``CUSTOM``.
-     - Inferred from the exact source type or its ``CUSTOM`` declaration.
-     - ``GithubSbomError``; ``OsvConfigurationError``, ``OsvClientError``, or
-       ``LocalFindingsError`` for those built-in sources; ``VexRenderError``;
-       ``TypeError``; ``ValueError``; or an injected loader's documented
-       exception, propagated unchanged.
-   * - ``generate_vex_from_github_sbom_result``
-     - ``GITHUB_DEPENDENCY_GRAPH`` when Vexcalibur creates or receives an exact
-       ``GithubSbomClient``. Another injected loader is ``CUSTOM``.
-     - ``CUSTOM`` for an injected ``osv_client``. Otherwise ``PUBLIC_OSV`` or
-       ``CUSTOM_OSV`` from the effective guarded endpoint.
-     - ``GithubSbomError``, ``OsvConfigurationError``, ``OsvClientError``,
-       ``VexRenderError``, ``TypeError``, ``ValueError``, or an injected
-       loader's documented exception, propagated unchanged.
-   * - ``generate_vex_from_local_findings_result``
-     - ``SBOM_FILE`` after local CycloneDX validation.
-     - ``LOCAL_FILE`` after local findings validation.
-     - ``SbomError``, ``LocalFindingsError``, ``VexRenderError``,
-       ``TypeError``, or ``ValueError``.
+``generate_vex_from_github_sbom`` requests a repository's Dependency Graph
+SBOM. Public repositories may work without a token, subject to GitHub's rate
+limits. Token-backed requests need read access to the repository. Set
+``github_token_env`` to read a named environment variable. Otherwise,
+Vexcalibur checks ``GH_TOKEN`` and then ``GITHUB_TOKEN`` for GitHub.com before
+falling back to ``gh auth token``. Pass ``use_gh_auth=False`` to disable that
+fallback. GitHub Enterprise requires either ``github_token_env`` or credentials
+available to ``gh`` for the configured host. Token text must be printable ASCII
+without whitespace.
 
-Custom source and renderer exceptions propagate unchanged unless the source
-raises ``VulnerabilitySourceInputError``, which Vexcalibur converts to
-``SbomError``. Catch an extension's documented exception in addition to the
-classes above.
+.. autofunction:: load_cyclonedx_sbom
 
-The ``*_result`` helpers pass plain ``tuple`` objects to the source and
-renderer. Sources return ``VulnerabilityFinding`` values in a tuple. Renderers
-return UTF-8 encodable text.
-
-Direct ``GenerationResult`` construction has an exact-type contract.
-``rendered_document`` must be a built-in ``str``. ``components`` and
-``findings`` must be built-in ``tuple`` objects containing exact
-``ComponentIdentity`` and ``VulnerabilityFinding`` values, respectively.
-``execution_context`` must be ``None`` or an exact
-``GenerationExecutionContext``. Lists, tuple subclasses, and domain subclasses
-are rejected.
-
-The compatibility helpers preserve caller and extension container and element
-identities. The ``*_result`` helpers isolate each extension boundary instead.
-They copy component and finding subclasses into exact ``ComponentIdentity`` and
-``VulnerabilityFinding`` values, give the renderer separate copies, and retain
-private primitive snapshots for the result. The ``components`` and ``findings``
-properties materialize a new built-in tuple of exact domain values on each
-access. Subclass-only state and object identity are not retained.
-
-.. automodule:: vexcalibur.generate
-   :members: generate_vex_from_components, generate_vex_from_components_result, generate_vex_from_source, generate_vex_from_source_result, generate_vex_from_sbom, generate_vex_from_sbom_result, generate_vex_from_github_source_result, generate_vex_from_github_sbom, generate_vex_from_github_sbom_result, generate_vex_from_local_findings, generate_vex_from_local_findings_result
-
-.. _execution-reports-python-api:
-
-Execution reports
------------------
-
-Wrappers can detect this contract without parsing CLI help. Import
-``EXECUTION_REPORT_SCHEMA_VERSION`` from
-``vexcalibur.generation_result`` and require the exact integer ``1``. A missing
-module means the installed package predates execution reports. A missing,
-mistyped, or different value is an unsupported contract, not an older package
-fallback.
-
-The built-in result helpers retain source categories and the selected output
-format while they generate the document. Call
-``GenerationResult.execution_report`` to derive counts, state totals, a digest,
-the byte size, and the installed Vexcalibur version without parsing the VEX
-document.
-
-Write the document from ``rendered_bytes`` so the saved bytes match the report
-on every platform. Run this source-checkout example from the repository root
-after ``uv sync --frozen``:
-
-.. literalinclude:: ../examples/generate_execution_report.py
-   :language: python
-   :linenos:
-
-Run the example with a new output directory:
-
-.. code-block:: bash
-
-   uv run --frozen python docs/examples/generate_execution_report.py \
-     /tmp/vexcalibur-python-api
-
-The example refuses to reuse the directory or replace either file. On POSIX it
-sets the directory to mode ``0700`` and both files to ``0600``. On Windows,
-access follows the parent directory's access control list.
-
-Validate the files together before automation accepts either one:
-
-.. code-block:: bash
-
-   uv run --frozen python docs/examples/validate_execution_report.py \
-     /tmp/vexcalibur-python-api/execution-report.json \
-     /tmp/vexcalibur-python-api/vex.json \
-     docs/execution-report-v1.schema.json
-
-The validator prints ``execution report verified`` on success.
-
-On Windows, use PowerShell 7.3 or later and a new directory under
-``$env:TEMP`` for both commands. ``$PSNativeCommandUseErrorActionPreference``
-makes a failed ``uv`` process stop the example.
-
-.. code-block:: powershell
-
-   $ErrorActionPreference = "Stop"
-   $PSNativeCommandUseErrorActionPreference = $true
-   $work = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
-   try {
-     uv run --frozen python docs/examples/generate_execution_report.py $work
-     uv run --frozen python docs/examples/validate_execution_report.py `
-       (Join-Path $work "execution-report.json") `
-       (Join-Path $work "vex.json") `
-       docs/execution-report-v1.schema.json
-   } finally {
-     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
-   }
-
-The second command prints ``execution report verified`` on success. Windows
-permissions inherit the access control list of ``$env:TEMP``.
-
-The two file writes are independent and non-atomic. They do not provide the
-CLI's Linux and macOS staging, alias checks, or report-last success marker. An
-embedding that needs those guarantees must provide its own transaction.
-
-The report is evidence about one generation operation, not a vulnerability
-policy verdict. A zero ``finding_count`` says only that the selected source
-returned no normalized findings. The embedding still decides whether that
-result passes its policy.
-
-``InventorySourceCategory``, ``FindingSourceCategory``, and
-``ExecutionReportOutputFormat`` define the accepted report context. Their
-``CUSTOM`` members describe an inventory, source, or renderer that the
-embedding owns and Vexcalibur cannot classify. Pass a
-``GenerationExecutionContext`` to any ``*_result`` helper for those extensions.
-Vexcalibur rejects context that contradicts a fact it can infer.
-
-``ExecutionReportOutputFormat`` is separate from the CLI's ``VexOutputFormat``.
-The CLI enum contains only formats that Vexcalibur can select itself, while an
-embedding can use ``ExecutionReportOutputFormat.CUSTOM`` for its own renderer.
-
-.. list-table:: Execution-report category values
-   :header-rows: 1
-
-   * - Enum member
-     - Serialized value
-     - Meaning
-   * - ``InventorySourceCategory.SBOM_FILE``
-     - ``sbom_file``
-     - A local CycloneDX file loaded by Vexcalibur.
-   * - ``InventorySourceCategory.GITHUB_DEPENDENCY_GRAPH``
-     - ``github_dependency_graph``
-     - A GitHub Dependency Graph SBOM loaded by Vexcalibur.
-   * - ``InventorySourceCategory.CUSTOM``
-     - ``custom``
-     - Components supplied by an embedding or another injected inventory
-       loader.
-   * - ``FindingSourceCategory.LOCAL_FILE``
-     - ``local_file``
-     - A local findings file loaded by Vexcalibur.
-   * - ``FindingSourceCategory.PUBLIC_OSV``
-     - ``public_osv``
-     - The canonical public OSV endpoint selected by Vexcalibur's exact
-       built-in client, after explicit consent.
-   * - ``FindingSourceCategory.CUSTOM_OSV``
-     - ``custom_osv``
-     - A noncanonical OSV-compatible endpoint selected by Vexcalibur's exact
-       built-in client.
-   * - ``FindingSourceCategory.CUSTOM``
-     - ``custom``
-     - Another source declared by an embedding, including an injected OSV
-       client.
-   * - ``ExecutionReportOutputFormat.CYCLONEDX``
-     - ``cyclonedx``
-     - CycloneDX VEX JSON.
-   * - ``ExecutionReportOutputFormat.OPENVEX``
-     - ``openvex``
-     - OpenVEX JSON.
-   * - ``ExecutionReportOutputFormat.CSAF``
-     - ``csaf``
-     - CSAF 2.0 JSON.
-   * - ``ExecutionReportOutputFormat.CUSTOM``
-     - ``custom``
-     - Another renderer declared by an embedding.
-
-The report classes validate their complete constructor state:
-
-.. list-table:: Execution-report class contracts
-   :header-rows: 1
-
-   * - Class
-     - Field constraints
-     - Failures
-   * - ``GenerationExecutionContext``
-     - ``inventory_source``, ``finding_source``, and ``output_format`` must be
-       members of their corresponding enums.
-     - ``TypeError`` for any mistyped category.
-   * - ``GenerationResult``
-     - ``rendered_document`` is exact built-in ``str``; ``components`` and
-       ``findings`` are tuples containing their corresponding domain types;
-       ``execution_context`` is optional. Construction snapshots the loaded
-       Vexcalibur version. Each ``execution_report`` call verifies that snapshot
-       against installed package metadata.
-     - ``TypeError`` for invalid constructor values; ``VexRenderError`` when
-       ``rendered_bytes`` cannot encode strict UTF-8;
-       ``GenerationReportMetadataError`` when package metadata is unavailable
-       or unsafe; ``ValueError`` when report context is unavailable.
-   * - ``GeneratedDocumentMetadata``
-     - ``sha256`` is 64 lowercase hexadecimal characters. ``bytes`` is an
-       integer from zero through 25 MiB.
-     - ``ValueError`` for an invalid digest or byte count.
-   * - ``GenerationExecutionReport``
-     - Schema version and command are fixed; package version is report-safe;
-       counts are nonnegative; state counts are positive, unique, follow
-       ``resolved``, ``exploitable``, ``in_triage``, ``false_positive``, then
-       ``not_affected`` order when present, and sum to ``finding_count``;
-       ``document`` is
-       ``GeneratedDocumentMetadata``.
-     - ``TypeError`` for mistyped categories, state pairs, or document;
-       ``ValueError`` for every invalid value or invariant. ``to_json`` also
-       raises ``ValueError`` above 16 KiB.
-
-``parse_generation_execution_report`` accepts exact ``bytes`` or ``str`` and
-returns a validated ``GenerationExecutionReport``. It applies the 16 KiB
-limit, rejects malformed UTF-8, duplicate keys, unknown or missing fields,
-mistyped values, invalid cross-field totals, and JSON that is not the canonical
-form produced by ``to_json``. It raises ``TypeError`` for another Python input
-type and ``GenerationExecutionReportParseError`` for invalid serialized
-content.
-
-Custom sources and renderers cannot assign their own report categories. The
-caller must provide a complete ``GenerationExecutionContext`` and use the
-``CUSTOM`` source or output category for each extension boundary. A subclass
-does not inherit a built-in source or renderer identity. This prevents changed
-extension behavior from being reported as a built-in operation. The built-in
-category members are reserved for Vexcalibur's exact built-in source and
-renderer types.
-
-Code that supplies components directly can produce a complete report without
-claiming a built-in inventory, source, or output identity:
-
-.. literalinclude:: ../examples/generate_custom_execution_report.py
-   :language: python
-   :linenos:
-
-Extensions run in the caller's process. Vexcalibur does not sandbox them,
-control their network access, retry them, or add timeouts. A source that sends
-package data must enforce its own consent and endpoint policy. An extension
-should raise ``VulnerabilitySourceInputError`` for rejected source input and
-``VexRenderError`` for rendering failures that callers can classify.
-
-A result without complete context still contains the rendered document,
-components, and findings, but ``execution_report()`` raises ``ValueError``.
-The first report call raises ``GenerationReportMetadataError``, a ``ValueError``
-subclass, when installed package metadata is unavailable or unsafe. Generation
-that does not request a report never reads that metadata.
-``GenerationExecutionReport.to_json`` raises ``ValueError`` if the canonical
-JSON would exceed 16 KiB. The report JSON includes one trailing newline.
-
-.. automodule:: vexcalibur.generation_result
-   :members: EXECUTION_REPORT_SCHEMA_VERSION, GenerationReportMetadataError, GenerationExecutionReportParseError, GeneratedDocumentMetadataDict, GenerationExecutionReportDict, InventorySourceCategory, FindingSourceCategory, ExecutionReportOutputFormat, GenerationExecutionContext, GenerationResult, GeneratedDocumentMetadata, GenerationExecutionReport, parse_generation_execution_report
-   :show-inheritance:
-
-VEX rendering
--------------
-
-``VexRenderer`` is the format boundary used by generation helpers.
-``CycloneDxJsonRenderer`` is the default. ``OpenVexJsonRenderer`` and
-``Csaf20VexJsonRenderer`` store their required document metadata and delegate
-to native format serializers.
-
-.. automodule:: vexcalibur.render
-   :members: VexOutputFormat, VexRenderer, VexDocumentRenderer, VexRenderError
-
-.. automodule:: vexcalibur.vex
-   :members: CycloneDxJsonRenderer, parse_timestamp, render_cyclonedx_vex_json
-
-.. automodule:: vexcalibur.openvex
-   :members: OpenVexJsonRenderer, OpenVexRenderError, render_openvex_json
-
-.. automodule:: vexcalibur.csaf
-   :members: Csaf20DocumentMetadata, Csaf20VexJsonRenderer, CsafDocumentStatus, CsafPublisherCategory, CsafRenderError, csaf_filename, render_csaf20_vex_json
-
-OSV source
-----------
-
-Prefer ``OsvSource``, ``osv_client_for_url``, or ``ensure_osv_url_allowed``.
-They keep public OSV behind an explicit opt-in even when a caller injects a
-client. A custom source passed to ``generate_vex_from_source`` must enforce its
-own trust boundary.
-
-``OsvSource`` reserves the ``OSV`` name and every HTTPS URL on the official
-``osv.dev`` origin for the canonical public service. A custom endpoint is
-identified as an
-``OSV-compatible mirror`` at its canonicalized effective base URL. Set both
-``source_name`` and ``source_url`` to publish an explicit HTTPS provenance
-alias for a custom endpoint without exposing an internal endpoint. Neither
-value may be supplied alone. The canonical public endpoint cannot be aliased,
-and a custom endpoint cannot claim the reserved official name or URL.
-
-One ``OsvClient`` query operation has independent per-request and cumulative
-encoded- and decoded-body limits, an overall wall-clock deadline, page and
-token limits, per-query and total vulnerability limits, and a 1,000-query
-request chunk. Requests never follow redirects. Identity responses are
-streamed raw, and gzip responses use bounded decompression with deadline checks
-at each transport chunk. Unicode-canonically equivalent vulnerability IDs are
-deduplicated before mapping; the first ID position and newest ``modified``
-timestamp are retained. IDs containing controls, bidi controls, or line
-separators are rejected. Constructor arguments expose the configurable limits;
-generation additionally caps component-to-vulnerability expansion and
-serialized UTF-8 output.
-
-The lower-level ``findings_from_osv_results`` mapper never infers official OSV
-provenance from an arbitrary result list. Callers must provide ``source_name``,
-``source_url``, and ``analysis_detail`` explicitly. Prefer ``OsvSource`` when
-the effective endpoint should determine guarded official-or-mirror provenance.
-
-Generation helpers apply a conservative allocation-free pre-render estimate
-when a renderer uses a built-in ``render_document`` implementation. An empty
-subclass still uses that implementation, so it retains the preflight check. The
-estimate accounts for JSON escaping, repeated fields, and synthesized versioned
-package URLs. It may reject an input whose grouped output would fall below the
-nominal limit. Custom renderers and subclasses that override serialization use
-the exact post-render UTF-8 check.
-
-.. warning::
-
-   Constructing ``OsvClient`` directly does not apply the public-OSV consent
-   check. Its default URL is ``https://api.osv.dev``, and its query methods do
-   not accept an opt-in flag. Use a guarded helper or ``OsvSource`` for normal
-   application code. A direct caller must validate the URL with
-   ``ensure_osv_url_allowed`` before sending package data.
-
-.. automodule:: vexcalibur.sources.osv
-   :members:
-   :show-inheritance:
-
-Local findings source
+Sources and renderers
 ---------------------
 
-.. automodule:: vexcalibur.sources.local
+The local-findings generation helper reads Vexcalibur's local findings format.
+The built-in OSV helpers deny public OSV unless the caller passes
+``allow_public_osv=True``; fetching an SBOM from GitHub does not supply that
+consent. Low-level OSV clients remain outside the supported facade so callers
+cannot bypass this check through a built-in helper.
+
+A custom ``VulnerabilitySource`` is trusted application code. It owns consent,
+authentication, redirect handling, resource limits, and disclosure policy for
+every service it contacts. The supported facade does not inspect or constrain
+that provider's I/O.
+
+Pass ``osv_headers`` when a private mirror needs application authentication.
+Vexcalibur sends those headers only to the configured endpoint and does not
+follow redirects. Header names use HTTP token characters. Values accept
+printable ASCII and horizontal tabs.
+
+One client operation has independent limits for each response and for all
+responses combined. It also bounds elapsed time, pages, page-token length,
+queries, vulnerability IDs, vulnerabilities per query, and total
+vulnerabilities. Requests don't follow redirects. Generation adds a 25 MiB
+limit for serialized UTF-8 output; built-in renderers also apply a conservative
+estimate before they allocate their document structures.
+
+.. autoclass:: ComponentIdentity
+
+``ComponentIdentity.purl`` uses :class:`packageurl.PackageURL`. Construct it
+with the third-party ``packageurl`` package::
+
+   from packageurl import PackageURL
+
+   purl = PackageURL.from_string("pkg:pypi/example@1.0.0")
+
+.. autoclass:: packageurl.PackageURL
+
+.. autoclass:: VulnerabilityFinding
+
+.. autoclass:: VexAnalysisState
    :members:
-   :show-inheritance:
+
+.. autoclass:: VexRemediationCategory
+   :members:
+
+.. autoclass:: VulnerabilitySource
+   :members:
+
+.. autoclass:: VexRenderer
+   :members:
+
+.. autoclass:: CycloneDxJsonRenderer
+   :members:
+
+.. autoclass:: OpenVexJsonRenderer
+   :members:
+
+.. autoclass:: Csaf20DocumentMetadata
+
+.. autoclass:: Csaf20VexJsonRenderer
+   :members:
+
+.. autoclass:: CsafDocumentStatus
+   :members:
+
+.. autoclass:: CsafPublisherCategory
+   :members:
+
+Enumeration values
+------------------
+
+.. list-table:: Public enum values
+   :header-rows: 1
+
+   * - Enum
+     - Member
+     - Serialized value
+   * - ``VexAnalysisState``
+     - ``RESOLVED``
+     - ``resolved``
+   * - ``VexAnalysisState``
+     - ``EXPLOITABLE``
+     - ``exploitable``
+   * - ``VexAnalysisState``
+     - ``IN_TRIAGE``
+     - ``in_triage``
+   * - ``VexAnalysisState``
+     - ``FALSE_POSITIVE``
+     - ``false_positive``
+   * - ``VexAnalysisState``
+     - ``NOT_AFFECTED``
+     - ``not_affected``
+   * - ``VexRemediationCategory``
+     - ``MITIGATION``
+     - ``mitigation``
+   * - ``VexRemediationCategory``
+     - ``NO_FIX_PLANNED``
+     - ``no_fix_planned``
+   * - ``VexRemediationCategory``
+     - ``NONE_AVAILABLE``
+     - ``none_available``
+   * - ``VexRemediationCategory``
+     - ``VENDOR_FIX``
+     - ``vendor_fix``
+   * - ``VexRemediationCategory``
+     - ``WORKAROUND``
+     - ``workaround``
+   * - ``CsafDocumentStatus``
+     - ``DRAFT``
+     - ``draft``
+   * - ``CsafDocumentStatus``
+     - ``FINAL``
+     - ``final``
+   * - ``CsafDocumentStatus``
+     - ``INTERIM``
+     - ``interim``
+   * - ``CsafPublisherCategory``
+     - ``COORDINATOR``
+     - ``coordinator``
+   * - ``CsafPublisherCategory``
+     - ``DISCOVERER``
+     - ``discoverer``
+   * - ``CsafPublisherCategory``
+     - ``OTHER``
+     - ``other``
+   * - ``CsafPublisherCategory``
+     - ``USER``
+     - ``user``
+   * - ``CsafPublisherCategory``
+     - ``VENDOR``
+     - ``vendor``
+
+Exceptions
+----------
+
+Catch the most specific exception when the recovery action differs. The base
+classes support broader boundaries:
+
+* ``SbomError`` covers local and GitHub SBOM input failures.
+* ``VulnerabilitySourceError`` covers provider failures. ``OsvClientError``
+  and ``LocalFindingsError`` add provider-specific detail.
+* ``VexRenderError`` covers invalid or oversized output. Format-specific
+  renderers raise its ``OpenVexRenderError`` or ``CsafRenderError`` subclasses.
+* ``ComponentVersionError`` reports contradictory explicit and package URL
+  versions when an application constructs ``ComponentIdentity`` directly.
+
+The API does not wrap unexpected exceptions raised by custom providers or
+renderers. Their implementations own those failures.
+
+.. autoexception:: ComponentVersionError
+
+.. autoexception:: SbomError
+
+.. autoexception:: GithubSbomError
+
+.. autoexception:: GithubSbomConfigurationError
+
+.. autoexception:: GithubSbomClientError
+
+.. autoexception:: VulnerabilitySourceError
+
+.. autoexception:: VulnerabilitySourceInputError
+
+.. autoexception:: LocalFindingsError
+
+.. autoexception:: OsvClientError
+
+.. autoexception:: OsvConfigurationError
+
+.. autoexception:: OsvResponseError
+
+.. autoexception:: VexRenderError
+
+.. autoexception:: OpenVexRenderError
+
+.. autoexception:: CsafRenderError
+
+Supported names
+---------------
+
+``vexcalibur.api.__all__`` is the machine-readable public surface. This page is
+generated from docstrings beside the implementation. Names omitted from
+``__all__`` are implementation details even when Python can import them.

@@ -79,7 +79,19 @@ class SbomError(ValueError):
 
 
 def load_cyclonedx_sbom(path: Path) -> tuple[ComponentIdentity, ...]:
-    """Load supported component identities from a CycloneDX JSON or XML SBOM."""
+    """Load supported component identities from a CycloneDX JSON or XML SBOM.
+
+    Args:
+        path: Regular file containing a supported CycloneDX document.
+
+    Returns:
+        Immutable component identities sorted by package URL and reference.
+        Components without package URLs are omitted.
+
+    Raises:
+        SbomError: The file is unreadable, oversized, malformed, unsupported,
+            or contains unsafe or contradictory component data.
+    """
     raw_content = _read_sbom_bytes(path)
     if _looks_like_xml(raw_content):
         return _component_identities_from_bom(
@@ -203,7 +215,10 @@ def _validate_cyclonedx_json_shape(raw_bom: Any, *, path: Path) -> None:
         msg = f"SBOM {path} must have bomFormat 'CycloneDX'"
         raise SbomError(msg)
     spec_version = raw_bom.get("specVersion")
-    if not isinstance(spec_version, str) or spec_version not in SUPPORTED_CYCLONEDX_JSON_VERSIONS:
+    if not isinstance(spec_version, str):
+        msg = f"SBOM {path} field 'specVersion' must be a string"
+        raise SbomError(msg)
+    if spec_version not in SUPPORTED_CYCLONEDX_JSON_VERSIONS:
         supported_versions = ", ".join(sorted(SUPPORTED_CYCLONEDX_JSON_VERSIONS))
         msg = (
             f"SBOM {path} has unsupported CycloneDX specVersion {spec_version!r}; "

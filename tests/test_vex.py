@@ -84,7 +84,7 @@ def test_cyclonedx_compatibility_renderer_adapts_then_delegates() -> None:
     received: dict[str, object] = {}
 
     class RecordingRenderer(CycloneDxJsonRenderer):
-        def render_document(
+        def _render_document(
             self,
             *,
             document: VexDocument,
@@ -320,4 +320,4 @@ def test_cyclonedx_document_renderer_rejects_conflicting_product_version() -> No
     )
 
     with pytest.raises(VexRenderError, match="conflicting version identity"):
-        CycloneDxJsonRenderer().render_document(document=document)
+        CycloneDxJsonRenderer()._render_document(document=document)

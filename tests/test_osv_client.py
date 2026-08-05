@@ -119,6 +119,49 @@ def test_query_sends_purl_to_osv_query_endpoint() -> None:
     }
 
 
+def test_owned_client_sends_configured_headers_only_to_osv_endpoint(monkeypatch) -> None:
+    requests: list[httpx.Request] = []
+    configured_headers: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"vulns": []})
+
+    owned_client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    def fake_httpx_client(*, headers: dict[str, str]) -> httpx.Client:
+        configured_headers.append(headers)
+        owned_client.headers.update(headers)
+        return owned_client
+
+    monkeypatch.setattr("vexcalibur.sources.osv.httpx.Client", fake_httpx_client)
+    client = osv_client_for_url(
+        osv_base_url="https://osv.example.test",
+        allow_public_osv=False,
+        headers={"Authorization": "Bearer mirror-token"},
+    )
+
+    client.query(PackageURL.from_string("pkg:pypi/example@1.0.0"))
+
+    assert configured_headers == [{"Authorization": "Bearer mirror-token"}]
+    assert len(requests) == 1
+    assert requests[0].url == "https://osv.example.test/v1/query"
+    assert requests[0].headers["Authorization"] == "Bearer mirror-token"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    (
+        {"X-Label": "caf\N{LATIN SMALL LETTER E WITH ACUTE}"},
+        {"X Label": "value"},
+        {"X-Label": "line-one\nline-two"},
+    ),
+)
+def test_osv_client_rejects_unsafe_configured_headers(headers: dict[str, str]) -> None:
+    with pytest.raises(OsvConfigurationError, match="OSV header"):
+        OsvClient(base_url="https://osv.example.test", headers=headers)
+
+
 def test_query_sends_top_level_version_when_supplied() -> None:
     requests: list[httpx.Request] = []
 

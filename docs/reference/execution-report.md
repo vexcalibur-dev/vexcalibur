@@ -260,10 +260,9 @@ are not supported on Windows. A Windows CLI request fails before Vexcalibur
 removes the candidate path, reads an inventory, or writes VEX output. Calls
 that omit `--execution-report` keep the existing Windows behavior.
 
-The {ref}`Python API <execution-reports-python-api>` can construct and serialize
-an execution report on every supported platform. The caller writes the VEX
-document and report separately, so those writes do not provide the CLI's
-transaction guarantees.
+Python embeddings can construct and serialize an execution report on every
+supported platform. The caller writes the VEX document and report separately,
+so those writes do not provide the CLI's transaction guarantees.
 
 The report is limited to 16 KiB. A missing or stale package version, invalid
 report value, size violation, or write failure makes the command fail.

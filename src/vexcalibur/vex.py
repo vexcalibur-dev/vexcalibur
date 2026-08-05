@@ -64,19 +64,31 @@ class CycloneDxJsonRenderer:
         findings: tuple[VulnerabilityFinding, ...],
         timestamp: datetime | None = None,
     ) -> str:
-        """Adapt provider findings and return CycloneDX 1.6 VEX JSON."""
-        if type(self).render_document is CycloneDxJsonRenderer.render_document:
+        """Adapt provider findings and return CycloneDX 1.6 VEX JSON.
+
+        Args:
+            components: Components available to the document.
+            findings: Findings associated with those components.
+            timestamp: Document timestamp, or ``None`` to use current UTC.
+
+        Returns:
+            Serialized CycloneDX 1.6 VEX JSON.
+
+        Raises:
+            VexRenderError: The values cannot form a valid document.
+        """
+        if type(self)._render_document is CycloneDxJsonRenderer._render_document:
             enforce_builtin_render_input_budget(
                 components=components,
                 findings=findings,
                 component_purl_copies=2,
             )
-        return self.render_document(
+        return self._render_document(
             document=vex_document_from_findings(components=components, findings=findings),
             timestamp=timestamp,
         )
 
-    def render_document(
+    def _render_document(
         self,
         *,
         document: VexDocument,
