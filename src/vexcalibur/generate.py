@@ -204,13 +204,21 @@ def _render_legacy_generation(
     renderer: VexRenderer | None,
 ) -> str:
     """Render through the compatibility path without copying extension values."""
-    result = _run_generation(
+    _require_components(components)
+    input_snapshot = GenerationInputSnapshot.capture_components(components)
+    source_findings = _findings_for_components(source, components)
+    input_snapshot = input_snapshot.capture_findings(source_findings)
+    rendered = _render_generation_document(
         components=components,
-        source=source,
+        findings=source_findings,
         timestamp=timestamp,
         renderer=select_renderer(renderer),
-        capture_inputs=False,
-        execution_context=None,
+        preserve_extension_value=True,
+    )
+    result = GenerationResult._from_compatibility_snapshot(
+        rendered_document=_canonical_rendered_text(rendered),
+        compatibility_rendered_document=rendered,
+        input_snapshot=input_snapshot,
     )
     return result._legacy_rendered_document()
 
@@ -224,56 +232,22 @@ def _generate_result(
     execution_context: GenerationExecutionContext | None,
 ) -> GenerationResult:
     """Render from isolated snapshots and retain only independently owned values."""
-    return _run_generation(
-        components=components,
-        source=source,
-        timestamp=timestamp,
-        renderer=renderer,
-        capture_inputs=True,
-        execution_context=execution_context,
-    )
-
-
-def _run_generation(
-    *,
-    components: tuple[ComponentIdentity, ...],
-    source: VulnerabilitySource,
-    timestamp: datetime | None,
-    renderer: VexRenderer,
-    capture_inputs: bool,
-    execution_context: GenerationExecutionContext | None,
-) -> GenerationResult:
-    """Query and render once under one explicit input-ownership contract."""
     _require_components(components)
-    input_snapshot: GenerationInputSnapshot | None = None
-    source_components = components
-    if capture_inputs:
-        input_snapshot = GenerationInputSnapshot.capture_components(components)
-        source_components = input_snapshot.materialize_components()
-
+    input_snapshot = GenerationInputSnapshot.capture_components(components)
+    source_components = input_snapshot.materialize_components()
     source_findings = _findings_for_components(source, source_components)
-    render_components = source_components
-    render_findings = source_findings
-    if input_snapshot is not None:
-        input_snapshot = input_snapshot.capture_findings(source_findings)
-        render_components = input_snapshot.materialize_components()
-        render_findings = input_snapshot.materialize_findings()
-
+    input_snapshot = input_snapshot.capture_findings(source_findings)
     rendered = _render_generation_document(
-        components=render_components,
-        findings=render_findings,
+        components=input_snapshot.materialize_components(),
+        findings=input_snapshot.materialize_findings(),
         timestamp=timestamp,
         renderer=renderer,
-        preserve_extension_value=not capture_inputs,
+        preserve_extension_value=False,
     )
-    if input_snapshot is None:
-        input_snapshot = GenerationInputSnapshot(components=(), findings=())
-    return GenerationResult._from_input_snapshot(
+    return GenerationResult._from_report_snapshot(
         rendered_document=_canonical_rendered_text(rendered),
         input_snapshot=input_snapshot,
         execution_context=execution_context,
-        compatibility_rendered_document=rendered if not capture_inputs else None,
-        capture_version=capture_inputs,
     )
 
 

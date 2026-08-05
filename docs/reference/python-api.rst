@@ -166,13 +166,15 @@ example writes matching VEX and report bytes without replacing existing files:
    :language: python
    :linenos:
 
-Run it from the repository root with a new output directory::
+Run it from Bash or PowerShell at the repository root with a new output
+directory::
 
-   uv run --frozen python docs/examples/generate_execution_report.py \
-     /tmp/vexcalibur-python-api
+   uv run --frozen python docs/examples/generate_execution_report.py vexcalibur-python-api
 
-Success prints both output paths. The two writes are independent; Python
-embeddings do not receive the CLI's coordinated publication transaction.
+Success prints both output paths. The two writes are independent and can leave
+partial files. On Windows, their privacy depends on the ACL of the existing
+parent directory. Python embeddings do not receive the CLI's coordinated
+publication transaction.
 
 SBOM ingest and GitHub
 ----------------------

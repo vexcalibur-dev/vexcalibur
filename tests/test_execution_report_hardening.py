@@ -152,10 +152,7 @@ def test_interrupted_destination_close_never_closes_reused_descriptor(
             destination.close()
 
         assert not destination.closed
-        assert (
-            destination._parent_descriptor_ownership
-            is DescriptorOwnership.AMBIGUOUS
-        )
+        assert destination._parent_descriptor_ownership is DescriptorOwnership.AMBIGUOUS
         assert destination._parent_descriptor == -1
         with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):
             destination.close()
@@ -398,6 +395,42 @@ def test_prepare_closes_destination_when_cleanup_registration_is_cancelled(
     assert len(observed) == 1
     with pytest.raises(OSError):
         os.fstat(observed[0]._parent_descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_rollback_acquisition_closes_descriptor_when_adoption_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "report.json")
+    acquired: list[int] = []
+    real_adopt = staging_module._adopt_owned_descriptor
+
+    def interrupt_parent_adoption(
+        owner: object,
+        attribute: str,
+        descriptor: int,
+    ) -> None:
+        if attribute == "parent_fd":
+            acquired.append(descriptor)
+            raise KeyboardInterrupt("pre-adoption interruption")
+        real_adopt(owner, attribute, descriptor)
+
+    monkeypatch.setattr(
+        staging_module,
+        "_adopt_owned_descriptor",
+        interrupt_parent_adoption,
+    )
+
+    with destination.stage_bytes(b"report") as staged:
+        staged.commit()
+        with pytest.raises(KeyboardInterrupt, match="pre-adoption interruption"):
+            staged.retain_rollback()
+
+    assert len(acquired) == 1
+    with pytest.raises(OSError):
+        os.fstat(acquired[0])
+    destination.close()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

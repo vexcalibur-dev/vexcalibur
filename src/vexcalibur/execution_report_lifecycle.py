@@ -68,6 +68,8 @@ class PublishedRollbackState(Enum):
     PUBLISHED = auto()
     REMOVAL_PENDING = auto()
     DISCARDED = auto()
+    DISCARDED_RELEASED = auto()
+    PUBLICATION_RELEASED = auto()
     RELEASED = auto()
 
 
@@ -79,6 +81,7 @@ class GenerationOutputState(Enum):
     REPORT_GUARD_ARMING = auto()
     REPORT_GUARDED = auto()
     COMMITTED = auto()
+    FINALIZING = auto()
     ABORT_REQUIRED = auto()
     CLOSED = auto()
 
@@ -106,23 +109,25 @@ _PUBLISHED_ROLLBACK_TRANSITIONS = MappingProxyType(
             {
                 PublishedRollbackState.PUBLISHED,
                 PublishedRollbackState.REMOVAL_PENDING,
-                PublishedRollbackState.RELEASED,
+                PublishedRollbackState.PUBLICATION_RELEASED,
             }
         ),
         PublishedRollbackState.PUBLISHED: frozenset(
             {
                 PublishedRollbackState.REMOVAL_PENDING,
                 PublishedRollbackState.DISCARDED,
-                PublishedRollbackState.RELEASED,
+                PublishedRollbackState.PUBLICATION_RELEASED,
             }
         ),
         PublishedRollbackState.REMOVAL_PENDING: frozenset(
             {
                 PublishedRollbackState.DISCARDED,
-                PublishedRollbackState.RELEASED,
+                PublishedRollbackState.PUBLICATION_RELEASED,
             }
         ),
-        PublishedRollbackState.DISCARDED: frozenset({PublishedRollbackState.RELEASED}),
+        PublishedRollbackState.DISCARDED: frozenset({PublishedRollbackState.DISCARDED_RELEASED}),
+        PublishedRollbackState.DISCARDED_RELEASED: frozenset(),
+        PublishedRollbackState.PUBLICATION_RELEASED: frozenset(),
         PublishedRollbackState.RELEASED: frozenset(),
     }
 )
@@ -172,6 +177,12 @@ _GENERATION_OUTPUT_TRANSITIONS = MappingProxyType(
             }
         ),
         GenerationOutputState.COMMITTED: frozenset(
+            {
+                GenerationOutputState.FINALIZING,
+                GenerationOutputState.ABORT_REQUIRED,
+            }
+        ),
+        GenerationOutputState.FINALIZING: frozenset(
             {GenerationOutputState.ABORT_REQUIRED, GenerationOutputState.CLOSED}
         ),
         GenerationOutputState.ABORT_REQUIRED: frozenset({GenerationOutputState.CLOSED}),

@@ -120,7 +120,20 @@ _DOCUMENT_METADATA_KEYS = frozenset(GeneratedDocumentMetadataDict.__required_key
 
 @dataclass(frozen=True, init=False)
 class GenerationResult:
-    """Rendered VEX and an immutable snapshot of the normalized render inputs."""
+    """Rendered VEX and an immutable snapshot of the normalized render inputs.
+
+    Args:
+        rendered_document: Exact built-in text rendered as VEX.
+        components: Exact tuple of normalized component identities.
+        findings: Exact tuple of normalized vulnerability findings.
+        execution_context: Optional source and renderer categories required to
+            construct an execution report.
+
+    Raises:
+        TypeError: A value has the wrong concrete type.
+        GenerationReportMetadataError: The loaded package version cannot be
+            identified safely for a report-aware result.
+    """
 
     rendered_document: str
     execution_context: GenerationExecutionContext | None
@@ -167,25 +180,41 @@ class GenerationResult:
             rendered_document=rendered_document,
             input_snapshot=input_snapshot,
             execution_context=execution_context,
+            version=_loaded_vexcalibur_version(),
         )
 
     @classmethod
-    def _from_input_snapshot(
+    def _from_report_snapshot(
         cls,
         *,
         rendered_document: str,
         input_snapshot: GenerationInputSnapshot,
         execution_context: GenerationExecutionContext | None,
-        compatibility_rendered_document: str | None = None,
-        capture_version: bool = True,
     ) -> GenerationResult:
         result = object.__new__(cls)
         result._initialize(
             rendered_document=rendered_document,
             input_snapshot=input_snapshot,
             execution_context=execution_context,
+            version=_loaded_vexcalibur_version(),
+        )
+        return result
+
+    @classmethod
+    def _from_compatibility_snapshot(
+        cls,
+        *,
+        rendered_document: str,
+        compatibility_rendered_document: str,
+        input_snapshot: GenerationInputSnapshot,
+    ) -> GenerationResult:
+        result = object.__new__(cls)
+        result._initialize(
+            rendered_document=rendered_document,
+            input_snapshot=input_snapshot,
+            execution_context=None,
+            version=None,
             compatibility_rendered_document=compatibility_rendered_document,
-            capture_version=capture_version,
         )
         return result
 
@@ -195,8 +224,8 @@ class GenerationResult:
         rendered_document: str,
         input_snapshot: GenerationInputSnapshot,
         execution_context: GenerationExecutionContext | None,
+        version: str | None = None,
         compatibility_rendered_document: str | None = None,
-        capture_version: bool = True,
     ) -> None:
         if type(rendered_document) is not str:
             raise TypeError("rendered_document must be exact built-in text")
@@ -215,7 +244,6 @@ class GenerationResult:
         object.__setattr__(self, "rendered_document", rendered_document)
         object.__setattr__(self, "execution_context", execution_context)
         object.__setattr__(self, "_input_snapshot", input_snapshot)
-        version = _loaded_vexcalibur_version() if capture_version else None
         object.__setattr__(self, "_vexcalibur_version", version)
         object.__setattr__(
             self,
@@ -239,7 +267,11 @@ class GenerationResult:
 
     @cached_property
     def rendered_bytes(self) -> bytes:
-        """Return and retain the strict UTF-8 representation of the document."""
+        """Return and retain the strict UTF-8 representation of the document.
+
+        Raises:
+            VexRenderError: The rendered document is not strict UTF-8 text.
+        """
         try:
             return str.encode(self.rendered_document, "utf-8", errors="strict")
         except UnicodeEncodeError as exc:
@@ -281,7 +313,15 @@ class GenerationResult:
 
 @dataclass(frozen=True)
 class GeneratedDocumentMetadata:
-    """Digest and byte size of the exact rendered VEX document."""
+    """Digest and byte size of the exact rendered VEX document.
+
+    Args:
+        sha256: Sixty-four lowercase hexadecimal SHA-256 characters.
+        bytes: UTF-8 byte count within the generated-document size limit.
+
+    Raises:
+        ValueError: The digest or byte count is outside that contract.
+    """
 
     sha256: str
     bytes: int
@@ -299,7 +339,15 @@ class GeneratedDocumentMetadata:
 
 @dataclass(frozen=True)
 class GenerationExecutionReport:
-    """Versioned summary of one successful ``generate`` operation."""
+    """Versioned summary of one successful ``generate`` operation.
+
+    Constructor values must satisfy the schema-version-1 enums, limits,
+    analysis-state order, and count relationships.
+
+    Raises:
+        TypeError: A field or nested value has the wrong type.
+        ValueError: A value violates the schema-version-1 invariants.
+    """
 
     schema_version: int
     command: Literal["generate"]
@@ -398,7 +446,24 @@ class GenerationExecutionReport:
         *,
         result: GenerationResult,
     ) -> GenerationExecutionReport:
-        """Calculate a report from the same normalized values used to render VEX."""
+        """Calculate a report from the normalized values used to render VEX.
+
+        Args:
+            result: Report-aware result from a supported ``*_result`` function.
+
+        Returns:
+            A validated schema-version-1 report.
+
+        Raises:
+            TypeError: ``result`` is not a ``GenerationResult``.
+            ValueError: The result lacks report context or its facts violate
+                schema-version-1 invariants.
+            GenerationReportMetadataError: Installed package metadata cannot
+                identify the loaded Vexcalibur code.
+            VexRenderError: The rendered document is not strict UTF-8 text.
+        """
+        if type(result) is not GenerationResult:
+            raise TypeError("result must be a GenerationResult")
         execution_context = result.execution_context
         if execution_context is None:
             raise ValueError("generation result has no execution report context")

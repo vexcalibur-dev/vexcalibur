@@ -15,6 +15,7 @@ from vexcalibur import cli
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
 from vexcalibur.execution_report_destination import BoundFileDestinationError
 from vexcalibur.generation_output import (
+    GenerationOutputError,
     GenerationOutputTransaction,
 )
 from vexcalibur.generation_result import (
@@ -573,6 +574,104 @@ def test_parser_failure_removes_stale_execution_report(
 
     assert result.exit_code != 0
     assert not report_path.exists()
+
+
+def test_option_scanning_stops_at_the_positional_terminator(tmp_path: Path) -> None:
+    sentinel_path = tmp_path / "sentinel.json"
+    sentinel_path.write_text('{"keep":true}\n', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--",
+            "--execution-report",
+            str(sentinel_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert sentinel_path.read_text(encoding="utf-8") == '{"keep":true}\n'
+
+
+def test_known_non_path_option_does_not_protect_stale_report(tmp_path: Path) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text('{"stale":true}\n', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--format",
+            str(report_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert not report_path.exists()
+
+
+def test_leading_hyphen_input_remains_protected_after_parser_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    input_path = Path("-input")
+    input_path.write_text('{"sentinel":true}\n', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--execution-report=-input",
+            "--",
+            "-input",
+            "extra",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert input_path.read_text(encoding="utf-8") == '{"sentinel":true}\n'
+
+
+def test_parser_cleanup_failure_emits_sanitized_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_failure = GenerationOutputError("sensitive path detail")
+
+    def fail_cleanup_prepare(
+        cls: type[GenerationOutputTransaction],
+        **kwargs: object,
+    ) -> GenerationOutputTransaction:
+        raise cleanup_failure
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "prepare",
+        classmethod(fail_cleanup_prepare),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--format",
+            "invalid",
+            "--execution-report",
+            str(tmp_path / "execution-report.json"),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Could not remove the stale execution report" in result.output
+    assert "sensitive path detail" not in result.output
+    assert result.exception is not None
+    assert result.exception.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
 
 
 def test_missing_input_removes_stale_execution_report(tmp_path: Path) -> None:

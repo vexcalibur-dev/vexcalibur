@@ -16,7 +16,7 @@ from vexcalibur.api import (
 )
 
 
-def _write_new_private_file(path: Path, content: bytes) -> None:
+def _write_new_file_exclusively(path: Path, content: bytes) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
@@ -39,6 +39,8 @@ def main(output_directory: Path) -> None:
             input_file=Path("tests/fixtures/sbom/cyclonedx-json-simple.json"),
             findings_file=Path("tests/fixtures/findings/all-analysis-states.json"),
         )
+    except GenerationReportMetadataError as exc:
+        raise SystemExit(f"package metadata cannot identify the report: {exc}") from exc
     except (SbomError, LocalFindingsError, VexRenderError) as exc:
         raise SystemExit(f"generation failed: {exc}") from exc
 
@@ -54,13 +56,15 @@ def main(output_directory: Path) -> None:
     except ValueError as exc:
         raise SystemExit(f"generation facts cannot produce a report: {exc}") from exc
 
+    if not output_directory.parent.is_dir():
+        raise SystemExit("output parent directory must already exist")
     output_directory.mkdir(mode=0o700)
     if os.name != "nt":
         output_directory.chmod(0o700)
     document_path = output_directory / "vex.json"
     report_path = output_directory / "execution-report.json"
-    _write_new_private_file(document_path, result.rendered_bytes)
-    _write_new_private_file(
+    _write_new_file_exclusively(document_path, result.rendered_bytes)
+    _write_new_file_exclusively(
         report_path,
         serialized_report.encode("utf-8"),
     )

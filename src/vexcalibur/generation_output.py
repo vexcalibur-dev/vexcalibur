@@ -164,55 +164,72 @@ class GenerationOutputTransaction:
         protected_descriptors: tuple[tuple[int, str], ...] = (),
     ) -> GenerationOutputTransaction:
         """Bind paths and durably remove a stale report before generation."""
-        with ExitStack() as destinations:
-            try:
-                report_destination = BoundFileDestination.prepare(
-                    report_path,
-                    protected_paths=(*protected_paths, output_path),
+        cleanup_failures: list[BaseException] = []
+        try:
+            with ExitStack() as destinations:
+                try:
+                    report_destination = BoundFileDestination.prepare(
+                        report_path,
+                        protected_paths=(*protected_paths, output_path),
+                        protected_descriptors=protected_descriptors,
+                        remove_existing=True,
+                    )
+                except BoundFileDestinationError as exc:
+                    raise GenerationOutputPreparationError(
+                        report_path,
+                        "execution report",
+                        exc,
+                    ) from exc
+                _register_destination_close(
+                    destinations,
+                    report_destination,
+                    cleanup_failures,
+                )
+
+                try:
+                    output_destination = (
+                        BoundFileDestination.prepare(output_path)
+                        if output_path is not None
+                        else None
+                    )
+                except BoundFileDestinationError as exc:
+                    if output_path is None:
+                        raise AssertionError("VEX output path is unavailable") from exc
+                    raise GenerationOutputPreparationError(
+                        output_path,
+                        "VEX output",
+                        exc,
+                    ) from exc
+                if output_destination is not None:
+                    _register_destination_close(
+                        destinations,
+                        output_destination,
+                        cleanup_failures,
+                    )
+
+                if output_destination is not None and report_destination.aliases(
+                    output_destination
+                ):
+                    cause = BoundFileDestinationError(
+                        "--execution-report must not replace an input or VEX output file",
+                    )
+                    raise GenerationOutputPreparationError(
+                        report_path,
+                        "execution report",
+                        cause,
+                    )
+
+                transaction = cls._create(
+                    output_path=output_path,
+                    report_destination=report_destination,
+                    output_destination=output_destination,
                     protected_descriptors=protected_descriptors,
-                    remove_existing=True,
                 )
-            except BoundFileDestinationError as exc:
-                raise GenerationOutputPreparationError(
-                    report_path,
-                    "execution report",
-                    exc,
-                ) from exc
-            _register_destination_close(destinations, report_destination)
-
-            try:
-                output_destination = (
-                    BoundFileDestination.prepare(output_path) if output_path is not None else None
-                )
-            except BoundFileDestinationError as exc:
-                if output_path is None:
-                    raise AssertionError("VEX output path is unavailable") from exc
-                raise GenerationOutputPreparationError(
-                    output_path,
-                    "VEX output",
-                    exc,
-                ) from exc
-            if output_destination is not None:
-                _register_destination_close(destinations, output_destination)
-
-            if output_destination is not None and report_destination.aliases(output_destination):
-                cause = BoundFileDestinationError(
-                    "--execution-report must not replace an input or VEX output file",
-                )
-                raise GenerationOutputPreparationError(
-                    report_path,
-                    "execution report",
-                    cause,
-                )
-
-            transaction = cls._create(
-                output_path=output_path,
-                report_destination=report_destination,
-                output_destination=output_destination,
-                protected_descriptors=protected_descriptors,
-            )
-            destinations.pop_all()
-            return transaction
+                destinations.pop_all()
+                return transaction
+        except BaseException as primary:
+            _retain_cleanup_failures(primary, tuple(cleanup_failures))
+            raise
 
     def commit(
         self,
@@ -464,8 +481,10 @@ class GenerationOutputTransaction:
             except BaseException as exc:
                 failures.append(exc)
         else:
+            if self._state is GenerationOutputState.COMMITTED:
+                self._transition(GenerationOutputState.FINALIZING)
             try:
-                self._release_report_rollback()
+                rollback_released = self._release_report_rollback()
             except BaseException as exc:
                 failures.append(exc)
                 self._require_abort()
@@ -473,16 +492,21 @@ class GenerationOutputTransaction:
                     self._discard_published_report()
                 except BaseException as discard_exc:
                     failures.append(discard_exc)
+            else:
+                if not rollback_released:
+                    return
 
         destinations_closed = all(
             destination is None or destination.closed
             for destination in (self.output_destination, self.report_destination)
         )
-        if destinations_closed and self._report_rollback.closed:
+        if not failures and destinations_closed and self._report_rollback.closed:
             self._transition(GenerationOutputState.CLOSED)
 
         if failures:
             self._raise_cleanup_failures(failures)
+        if self._state is GenerationOutputState.FINALIZING:
+            return
         if not self.closed:
             raise GenerationOutputCleanupError(
                 "generate output cleanup did not reach a final state"
@@ -564,14 +588,19 @@ class GenerationOutputTransaction:
             PublishedRollbackState.ARMING,
             PublishedRollbackState.ARMED,
             PublishedRollbackState.DISCARDED,
+            PublishedRollbackState.DISCARDED_RELEASED,
+            PublishedRollbackState.RELEASED,
         }:
             rollback.close()
             return
-        if rollback.state is PublishedRollbackState.RELEASED:
-            return
+        if rollback.state is PublishedRollbackState.PUBLICATION_RELEASED:
+            raise GenerationOutputCleanupError(
+                "published execution report can no longer be removed safely"
+            )
         if not rollback.can_discard:
-            rollback.close()
-            return
+            raise GenerationOutputCleanupError(
+                "published execution report can no longer be removed safely"
+            )
         failure: BaseException | None = None
         for _ in range(2):
             try:
@@ -586,15 +615,23 @@ class GenerationOutputTransaction:
             raise error
         rollback.close()
 
-    def _release_report_rollback(self) -> None:
-        first_failure: Exception | None = None
+    def _release_report_rollback(self) -> bool:
+        first_failure: BaseException | None = None
         for _ in range(2):
             try:
                 self._report_rollback.close()
-                return
-            except Exception as exc:
+                return True
+            except BaseException as exc:
+                if self._report_rollback.closed:
+                    return True
+                if not isinstance(exc, Exception):
+                    if self._report_rollback.can_discard:
+                        raise
+                    return False
                 if first_failure is None:
                     first_failure = exc
+        if not self._report_rollback.can_discard:
+            return False
         if first_failure is None:
             raise RuntimeError("rollback release failed without an exception")
         raise first_failure
@@ -647,12 +684,27 @@ def _generation_cleanup_failures(
 def _register_destination_close(
     stack: ExitStack,
     destination: BoundFileDestination,
+    cleanup_failures: list[BaseException],
 ) -> None:
     try:
-        stack.callback(destination.close)
+        stack.callback(
+            _close_destination_retaining_failure,
+            destination,
+            cleanup_failures,
+        )
     except BaseException:
-        destination.close()
+        _close_destination_retaining_failure(destination, cleanup_failures)
         raise
+
+
+def _close_destination_retaining_failure(
+    destination: BoundFileDestination,
+    cleanup_failures: list[BaseException],
+) -> None:
+    try:
+        destination.close()
+    except BaseException as cleanup_failure:
+        cleanup_failures.append(cleanup_failure)
 
 
 def _write_all(stream: BinaryIO, data: bytes) -> None:

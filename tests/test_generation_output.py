@@ -121,6 +121,53 @@ def test_prepare_cancellation_closes_every_bound_destination(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_prepare_retains_destination_close_failure_on_typed_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    primary_cause = BoundFileDestinationError("synthetic output preparation failure")
+    cleanup_failure = BoundFileDestinationError("synthetic report cleanup failure")
+    real_prepare = BoundFileDestination.prepare.__func__
+    real_close = BoundFileDestination.close
+
+    def fail_output_preparation(
+        cls: type[BoundFileDestination],
+        path: Path,
+        **kwargs: object,
+    ) -> BoundFileDestination:
+        if path == output_path:
+            raise primary_cause
+        return real_prepare(cls, path, **kwargs)
+
+    def close_then_fail(destination: BoundFileDestination) -> None:
+        real_close(destination)
+        if destination.requested_path == report_path:
+            raise cleanup_failure
+
+    monkeypatch.setattr(
+        BoundFileDestination,
+        "prepare",
+        classmethod(fail_output_preparation),
+    )
+    monkeypatch.setattr(BoundFileDestination, "close", close_then_fail)
+
+    with pytest.raises(
+        GenerationOutputPreparationError,
+        match="synthetic output preparation failure",
+    ) as captured:
+        GenerationOutputTransaction.prepare(
+            output_path=output_path,
+            report_path=report_path,
+            protected_paths=(),
+        )
+
+    assert captured.value.__cause__ is primary_cause
+    assert captured.value.vexcalibur_cleanup_failures == (cleanup_failure,)  # type: ignore[attr-defined]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
 def test_prepare_retargeted_output_parent_closes_every_destination(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

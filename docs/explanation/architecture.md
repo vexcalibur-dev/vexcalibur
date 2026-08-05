@@ -219,7 +219,8 @@ transaction's cleanup path.
 | `COMMITTING` | Private files may exist, and the VEX document may be published. The transaction can begin acquiring the report rollback guard or move to cleanup after a failure. It does not restore a replaced VEX document. |
 | `REPORT_GUARD_ARMING` | The transaction owns the guard while it acquires the lock, parent, and report identity descriptors. A completed acquisition enters `REPORT_GUARDED`; any interruption enters `ABORT_REQUIRED`. |
 | `REPORT_GUARDED` | The transaction owns the report's identity-bound rollback guard. It can publish the report and enter `COMMITTED`, or enter `ABORT_REQUIRED` and remove only the report it published. |
-| `COMMITTED` | The VEX document and report were published in that order. Successful finalization releases the rollback guard; an interruption or cleanup failure moves to `ABORT_REQUIRED`. |
+| `COMMITTED` | The VEX document and report were published in that order. Finalization can begin releasing the rollback guard, or an earlier failure can move to `ABORT_REQUIRED` while complete removal authority remains. |
+| `FINALIZING` | Rollback authority is being released. Cleanup retries descriptors whose ownership remains known. Once release has crossed its point of no return, cleanup does not turn the valid publication into a failed command. |
 | `ABORT_REQUIRED` | Cleanup preserves the VEX document, removes the report when its identity still matches, and releases every descriptor whose ownership is known. Only successful cleanup enters `CLOSED`. |
 | `CLOSED` | The transaction owns no retryable descriptors and cannot commit again. |
 
@@ -230,7 +231,9 @@ after the report and its directory entry are flushed. Cleanup enters
 directory `fsync` succeeds. A retry flushes that directory again even when the
 report path is already absent. If descriptor release becomes ambiguous, the
 writer does not reuse that numeric descriptor or claim that cleanup completed.
-The report may remain, and the command exits unsuccessfully.
+Before finalization crosses its point of no return, the command fails and removes
+the report. After that point, the valid report remains and the command succeeds;
+the transaction stays in `FINALIZING` so known descriptors can be retried.
 
 Each private staged file has its own validated lifecycle: `STAGED`,
 `PUBLISHING`, `PUBLISHED`, `ROLLBACK_REQUIRED`, `ROLLED_BACK`, and `RELEASED`.

@@ -172,6 +172,8 @@ def generate_vex_from_sbom_result(
         SbomError: The SBOM is invalid or contains no usable components.
         OsvClientError: OSV configuration, transport, or response handling fails.
         VexRenderError: The findings cannot be rendered within output limits.
+        GenerationReportMetadataError: The loaded package version cannot be
+            identified safely for a report.
         TypeError: A result or context value has the wrong type.
         ValueError: The execution context contradicts inferred generation facts.
     """
@@ -281,6 +283,8 @@ def generate_vex_from_github_sbom_result(
         SbomError: The inventory is invalid or contains no usable components.
         OsvClientError: OSV configuration, transport, or response handling fails.
         VexRenderError: The findings cannot be rendered within output limits.
+        GenerationReportMetadataError: The loaded package version cannot be
+            identified safely for a report.
         TypeError: A result or context value has the wrong type.
         ValueError: The execution context contradicts inferred generation facts.
     """
@@ -325,6 +329,8 @@ def generate_vex_from_github_source_result(
         GithubSbomError: GitHub authentication, transport, or SBOM parsing fails.
         SbomError: Inventory or source preflight validation fails.
         VexRenderError: The findings cannot be rendered within output limits.
+        GenerationReportMetadataError: The loaded package version cannot be
+            identified safely for a report.
         TypeError: A result or context value has the wrong type.
         ValueError: The execution context contradicts inferred generation facts.
     """
@@ -369,6 +375,8 @@ def generate_vex_from_source_result(
     Raises:
         SbomError: Inventory or source input validation fails.
         VexRenderError: The findings cannot be rendered within output limits.
+        GenerationReportMetadataError: The loaded package version cannot be
+            identified safely for a report.
         TypeError: A result or context value has the wrong type.
         ValueError: The execution context contradicts inferred generation facts.
     """
@@ -400,6 +408,8 @@ def generate_vex_from_components_result(
     Raises:
         SbomError: Component or source input validation fails.
         VexRenderError: The findings cannot be rendered within output limits.
+        GenerationReportMetadataError: The loaded package version cannot be
+            identified safely for a report.
         TypeError: A result or context value has the wrong type.
         ValueError: The execution context contradicts inferred generation facts.
     """
@@ -429,6 +439,8 @@ def generate_vex_from_local_findings_result(
         SbomError: The SBOM is invalid or contains no usable components.
         LocalFindingsError: The findings file is unreadable or invalid.
         VexRenderError: The findings cannot be rendered within output limits.
+        GenerationReportMetadataError: The loaded package version cannot be
+            identified safely for a report.
         TypeError: A result or context value has the wrong type.
         ValueError: The execution context contradicts inferred generation facts.
     """

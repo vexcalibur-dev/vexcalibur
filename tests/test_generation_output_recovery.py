@@ -297,10 +297,7 @@ def test_ambiguous_destination_release_never_closes_transaction(
         assert interrupted
         assert not report_path.exists()
         assert not destination.closed
-        assert (
-            destination._parent_descriptor_ownership
-            is DescriptorOwnership.AMBIGUOUS
-        )
+        assert destination._parent_descriptor_ownership is DescriptorOwnership.AMBIGUOUS
         assert transaction.state is GenerationOutputState.ABORT_REQUIRED
         assert not transaction.closed
         os.fstat(descriptor)
@@ -484,11 +481,7 @@ def test_interrupted_rollback_descriptor_release_becomes_ambiguous(
         interrupt_published_transfer,
     )
 
-    with pytest.raises(
-        KeyboardInterrupt,
-        match=rf"{descriptor_role} close interrupted",
-    ):
-        transaction.close()
+    transaction.close()
 
     assert interrupted
     assert output_path.exists()
@@ -497,11 +490,11 @@ def test_interrupted_rollback_descriptor_release_becomes_ambiguous(
     assert ownership is DescriptorOwnership.AMBIGUOUS
     assert getattr(rollback, descriptor_role) == -1
     assert transaction._report_rollback is rollback
-    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+    assert transaction.state is GenerationOutputState.FINALIZING
     assert not transaction.closed
     os.fstat(interrupted_descriptor)
-    with pytest.raises(GenerationOutputCleanupError, match="release is ambiguous"):
-        transaction.close()
+    transaction.close()
+    assert transaction.state is GenerationOutputState.FINALIZING
     os.close(interrupted_descriptor)
 
 
@@ -537,15 +530,61 @@ def test_interruption_after_physical_rollback_release_keeps_success_report(
         close_then_interrupt,
     )
 
-    with pytest.raises(
-        KeyboardInterrupt,
-        match="rollback was already released",
-    ):
-        transaction.close()
+    transaction.close()
 
     assert transaction.closed
     assert transaction._report_rollback.closed
     assert output_path.exists()
+    assert report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_persistent_release_failure_after_point_of_no_return_stays_finalizing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    rollback = transaction._report_rollback
+    parent_descriptor = rollback.parent_fd
+    real_release = staging_module._close_descriptor_retryable
+
+    def fail_parent_release(descriptor: int) -> object:
+        if descriptor == parent_descriptor:
+            return filesystem_module._DescriptorCloseOutcome(
+                released=False,
+                unchanged=True,
+                failure=OSError(errno.EMFILE, "synthetic descriptor exhaustion"),
+            )
+        return real_release(descriptor)
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        fail_parent_release,
+    )
+
+    transaction.close()
+
+    assert report_path.exists()
+    assert transaction.state is GenerationOutputState.FINALIZING
+    assert not transaction.closed
+    assert rollback._published_fd_ownership is DescriptorOwnership.RELEASED
+    assert rollback._parent_fd_ownership is DescriptorOwnership.OWNED
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        real_release,
+    )
+    transaction.close()
+
+    assert transaction.closed
     assert report_path.exists()
 
 
@@ -664,7 +703,7 @@ def test_abort_preserves_rollback_ownership_after_a_transient_probe_failure(
     transaction.abort()
 
     assert not report_path.exists()
-    assert rollback.state is PublishedRollbackState.RELEASED
+    assert rollback.state is PublishedRollbackState.DISCARDED_RELEASED
     assert transaction.closed
 
 
@@ -749,6 +788,48 @@ def test_output_path_rebinding_after_report_publication_removes_success_marker(
     assert not report_path.exists()
     assert not output_path.exists()
     assert (moved_output_parent / "result.json").exists()
+    assert transaction.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_output_inode_replacement_after_report_publication_removes_success_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    replacement_path = tmp_path / "replacement.json"
+    report_path = tmp_path / "execution-report.json"
+    replacement_path.write_text('{"replacement":true}\n', encoding="utf-8")
+    replacement_path.chmod(0o600)
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=output_path,
+        report_path=report_path,
+        protected_paths=(),
+    )
+    report_destination = transaction.report_destination
+    real_commit = staging_module.StagedFileWrite.commit
+
+    def commit_then_replace_output(
+        staged: staging_module.StagedFileWrite,
+        *,
+        destination_lock_held: bool = False,
+    ) -> None:
+        real_commit(staged, destination_lock_held=destination_lock_held)
+        if staged.destination is report_destination:
+            output_path.unlink()
+            replacement_path.rename(output_path)
+
+    monkeypatch.setattr(
+        staging_module.StagedFileWrite,
+        "commit",
+        commit_then_replace_output,
+    )
+
+    with pytest.raises(GenerationDocumentWriteError, match="published file changed"):
+        transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+
+    assert output_path.read_text(encoding="utf-8") == '{"replacement":true}\n'
+    assert not report_path.exists()
     assert transaction.closed
 
 
@@ -953,5 +1034,5 @@ def test_persistent_report_rollback_failure_remains_retryable(
 
     assert output_path.exists()
     assert not report_path.exists()
-    assert transaction._report_rollback.state is PublishedRollbackState.RELEASED
+    assert transaction._report_rollback.state is PublishedRollbackState.DISCARDED_RELEASED
     assert transaction.closed

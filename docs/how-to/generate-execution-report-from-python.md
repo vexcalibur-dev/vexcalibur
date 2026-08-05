@@ -23,17 +23,28 @@ rendering, package-metadata, and report-parse failures separately.
 
 ## Generate and validate both files
 
-Choose a new output directory so the example cannot replace an existing file:
+Choose a new child of the repository root so the parent already exists. The
+example refuses to replace the directory or either output file.
 
-```bash
-uv run --frozen python docs/examples/generate_execution_report.py \
-  /tmp/vexcalibur-python-report
+On POSIX, the example creates the directory with mode `0700` and each file with
+mode `0600`. On Windows, Python inherits access control lists (ACLs) from the
+parent; the example does not make an existing parent private. Run it only from
+a directory whose ACL already restricts access to the intended user.
+
+The two final-path writes are independent and are not atomic. A write or
+`fsync` failure can leave a partial VEX file or execution report. Use the CLI
+instead when a POSIX embedding needs coordinated publication.
+
+Run this one-line command from Bash or PowerShell:
+
+```console
+uv run --frozen python docs/examples/generate_execution_report.py vexcalibur-python-report
 ```
 
 A successful run prints both paths:
 
 ```text
-wrote /tmp/vexcalibur-python-report/vex.json and /tmp/vexcalibur-python-report/execution-report.json
+wrote vexcalibur-python-report/vex.json and vexcalibur-python-report/execution-report.json
 ```
 
 The example parses the serialized report through
@@ -46,9 +57,10 @@ document; either step can make the report describe different bytes.
 
 ## Handle publication in the embedding
 
-The example creates private files with exclusive creation and refuses to
-replace existing paths. This works on every supported Python platform, but the
-two writes are independent. If the report write fails, the VEX file may remain.
+The example uses exclusive creation and refuses to replace existing paths. On
+Windows, privacy depends on the parent ACL described above. On every platform,
+a failed direct write can leave a partial file, and a report failure can leave
+the VEX file behind.
 
 Applications that need coordinated replacement on Linux or macOS should invoke
 the CLI with `--execution-report`. The CLI publishes VEX first and the report

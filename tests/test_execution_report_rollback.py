@@ -619,9 +619,7 @@ def test_destination_close_disowns_ambiguous_descriptor_before_release(
         destination.close()
 
     assert not destination.closed
-    assert (
-        destination._parent_descriptor_ownership is DescriptorOwnership.AMBIGUOUS
-    )
+    assert destination._parent_descriptor_ownership is DescriptorOwnership.AMBIGUOUS
     assert destination._parent_descriptor == -1
     os.fstat(descriptor)
     with pytest.raises(BoundFileDestinationError, match="release is ambiguous"):

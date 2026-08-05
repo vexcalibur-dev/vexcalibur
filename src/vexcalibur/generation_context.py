@@ -34,7 +34,16 @@ class ExecutionReportOutputFormat(str, Enum):
 
 @dataclass(frozen=True)
 class GenerationExecutionContext:
-    """Source and renderer facts retained by one generation operation."""
+    """Source and renderer facts retained by one generation operation.
+
+    Args:
+        inventory_source: Category for the component inventory.
+        finding_source: Category for vulnerability findings.
+        output_format: Category for the rendered VEX document.
+
+    Raises:
+        TypeError: Any category is not a member of its declared enum.
+    """
 
     inventory_source: InventorySourceCategory
     finding_source: FindingSourceCategory

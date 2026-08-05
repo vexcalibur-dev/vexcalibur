@@ -5,7 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import secrets
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext, suppress
 from types import TracebackType
 from typing import NoReturn, Protocol
@@ -66,15 +66,16 @@ def _close_owned_descriptor(owner: object, attribute: str) -> None:
     descriptor = state.descriptor
     if descriptor < 0:
         raise RuntimeError(f"owned {attribute} has no descriptor")
+    object.__setattr__(owner, state_attribute, DescriptorState.ambiguous())
     try:
         outcome = _close_descriptor_retryable(descriptor)
     except BaseException:
-        object.__setattr__(owner, state_attribute, DescriptorState.ambiguous())
         raise
     if outcome.released:
         object.__setattr__(owner, state_attribute, DescriptorState.released())
         return
     if outcome.unchanged:
+        object.__setattr__(owner, state_attribute, DescriptorState.owned(descriptor))
         if outcome.failure is not None:
             raise outcome.failure
         raise RuntimeError("descriptor release returned unchanged without a failure")
@@ -93,6 +94,27 @@ def _adopt_owned_descriptor(owner: object, attribute: str, descriptor: int) -> N
     except BaseException:
         if getattr(owner, state_attribute) is not state:
             _close_descriptor(descriptor)
+        raise
+
+
+def _acquire_owned_descriptor(
+    owner: object,
+    attribute: str,
+    acquire: Callable[[], int],
+) -> None:
+    """Acquire and hand off a descriptor without an unguarded local owner."""
+    descriptor = -1
+    try:
+        descriptor = acquire()
+        _adopt_owned_descriptor(owner, attribute, descriptor)
+    except BaseException as primary:
+        state: DescriptorState = getattr(owner, f"_{attribute}_state")
+        adopted = state.ownership is DescriptorOwnership.OWNED and state.descriptor == descriptor
+        if descriptor >= 0 and not adopted:
+            try:
+                _close_descriptor(descriptor)
+            except BaseException as cleanup_failure:
+                _retain_cleanup_failures(primary, (cleanup_failure,))
         raise
 
 
@@ -319,10 +341,14 @@ class StagedFileWrite:
         """Remove unpublished temporary bytes and close the parent handle."""
         if self.closed:
             return
-        if self._state in {
-            StagedFileState.PUBLISHING,
-            StagedFileState.ROLLBACK_REQUIRED,
-        } and not self.discard_committed():
+        if (
+            self._state
+            in {
+                StagedFileState.PUBLISHING,
+                StagedFileState.ROLLBACK_REQUIRED,
+            }
+            and not self.discard_committed()
+        ):
             raise BoundFileDestinationError("could not remove the published staged file")
         if self._state in {StagedFileState.STAGED, StagedFileState.ROLLED_BACK}:
             try:
@@ -466,12 +492,17 @@ class PublishedFileRollback:
         object.__setattr__(self, "expected", expected)
         object.__setattr__(self, "name", name)
         try:
-            lock_fd = lock_module._open_private_destination_lock(parent_fd)
-            _adopt_owned_descriptor(self, "lock_fd", lock_fd)
-            retained_parent_fd = os.dup(parent_fd)
-            _adopt_owned_descriptor(self, "parent_fd", retained_parent_fd)
-            retained_published_fd = os.dup(published_fd)
-            _adopt_owned_descriptor(self, "published_fd", retained_published_fd)
+            _acquire_owned_descriptor(
+                self,
+                "lock_fd",
+                lambda: lock_module._open_private_destination_lock(parent_fd),
+            )
+            _acquire_owned_descriptor(self, "parent_fd", lambda: os.dup(parent_fd))
+            _acquire_owned_descriptor(
+                self,
+                "published_fd",
+                lambda: os.dup(published_fd),
+            )
         except BaseException as exc:
             cleanup_failure: BaseException | None = None
             try:
@@ -554,7 +585,14 @@ class PublishedFileRollback:
             PublishedRollbackState.REMOVAL_PENDING,
         }:
             return False
-        if self._published_fd_ownership is not DescriptorOwnership.OWNED:
+        if any(
+            ownership is not DescriptorOwnership.OWNED
+            for ownership in (
+                self._published_fd_ownership,
+                self._parent_fd_ownership,
+                self._lock_fd_ownership,
+            )
+        ):
             return False
         try:
             retained = os.fstat(self.published_fd)
@@ -577,7 +615,11 @@ class PublishedFileRollback:
 
     def close(self) -> None:
         """Release the retained file and directory descriptors."""
-        if self._state is PublishedRollbackState.RELEASED:
+        if self._state in {
+            PublishedRollbackState.DISCARDED_RELEASED,
+            PublishedRollbackState.PUBLICATION_RELEASED,
+            PublishedRollbackState.RELEASED,
+        }:
             return
         for attribute in ("published_fd", "parent_fd", "lock_fd"):
             _close_owned_descriptor(self, attribute)
@@ -588,12 +630,26 @@ class PublishedFileRollback:
             self._lock_fd_ownership,
         )
         if all(ownership is DescriptorOwnership.RELEASED for ownership in ownerships):
-            self._transition(PublishedRollbackState.RELEASED)
+            if self._state is PublishedRollbackState.DISCARDED:
+                target = PublishedRollbackState.DISCARDED_RELEASED
+            elif self._state in {
+                PublishedRollbackState.PUBLICATION_PENDING,
+                PublishedRollbackState.PUBLISHED,
+                PublishedRollbackState.REMOVAL_PENDING,
+            }:
+                target = PublishedRollbackState.PUBLICATION_RELEASED
+            else:
+                target = PublishedRollbackState.RELEASED
+            self._transition(target)
 
     @property
     def closed(self) -> bool:
         """Return whether every retained descriptor was released."""
-        return self._state is PublishedRollbackState.RELEASED
+        return self._state in {
+            PublishedRollbackState.DISCARDED_RELEASED,
+            PublishedRollbackState.PUBLICATION_RELEASED,
+            PublishedRollbackState.RELEASED,
+        }
 
     def __copy__(self) -> PublishedFileRollback:
         raise TypeError("published rollback handles cannot be copied")

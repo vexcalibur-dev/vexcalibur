@@ -2,7 +2,6 @@
 
 import sys
 from collections.abc import Sequence
-from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any, BinaryIO, cast
 
@@ -19,6 +18,7 @@ from vexcalibur.csaf import (
     CsafPublisherCategory,
     csaf_filename,
 )
+from vexcalibur.execution_report_errors import _retain_cleanup_failures
 from vexcalibur.generate_command import GenerateCommandRequest
 from vexcalibur.generation_output import (
     GenerationDocumentWriteError,
@@ -74,7 +74,14 @@ class _VexcaliburGroup(TyperGroup):
             )
         except SystemExit as exc:
             if exc.code not in {None, 0}:
-                _remove_failed_generate_report(raw_args)
+                cleanup_failure = _remove_failed_generate_report(self, raw_args)
+                if cleanup_failure is not None:
+                    _retain_cleanup_failures(exc, (cleanup_failure,))
+                    typer.echo(
+                        "Could not remove the stale execution report after "
+                        "argument validation failed.",
+                        err=True,
+                    )
             raise
 
 
@@ -87,22 +94,40 @@ app = typer.Typer(
 console = Console()
 
 
-def _remove_failed_generate_report(arguments: tuple[str, ...]) -> None:
+def _remove_failed_generate_report(
+    group: _VexcaliburGroup,
+    arguments: tuple[str, ...],
+) -> GenerationOutputError | None:
     if not arguments or arguments[0] != "generate":
-        return
-    report_path = _option_path(arguments, "--execution-report")
-    if report_path is None:
-        return
-    output_path = _option_path(arguments, "--output", "-o")
-    report_value_positions = _option_value_positions(arguments, "--execution-report")
+        return None
+    command = group.commands.get("generate")
+    if command is None:
+        return None
+    try:
+        context = command.context_class(
+            command,
+            resilient_parsing=True,
+            ignore_unknown_options=True,
+            allow_extra_args=True,
+        )
+        values, remaining, _ = command.make_parser(context).parse_args(list(arguments[1:]))
+    except Exception:
+        return None
+    report_value = values.get("execution_report")
+    if not isinstance(report_value, str) or not report_value:
+        return None
+    report_path = Path(report_value)
+    output_value = values.get("output_file")
+    output_path = Path(output_value) if isinstance(output_value, str) else None
+    protected_values = [
+        values.get("input_file"),
+        values.get("output_file"),
+        values.get("findings_file"),
+        *remaining,
+    ]
     protected_paths = tuple(
-        Path(value)
-        for index, value in enumerate(arguments[1:], start=1)
-        if value
-        and not value.startswith("-")
-        and index not in report_value_positions
+        Path(value) for value in protected_values if isinstance(value, str) and value
     )
-    transaction: GenerationOutputTransaction | None = None
     try:
         transaction = GenerationOutputTransaction.prepare(
             output_path=output_path,
@@ -113,35 +138,13 @@ def _remove_failed_generate_report(arguments: tuple[str, ...]) -> None:
                 *_standard_error_descriptor(),
             ),
         )
-    except GenerationOutputError:
-        return
-    finally:
-        if transaction is not None:
-            with suppress(GenerationOutputError):
-                transaction.abort()
-
-
-def _option_path(arguments: tuple[str, ...], *names: str) -> Path | None:
-    value: str | None = None
-    for index, argument in enumerate(arguments):
-        if argument in names and index + 1 < len(arguments):
-            candidate = arguments[index + 1]
-            if not candidate.startswith("-"):
-                value = candidate
-            continue
-        for name in names:
-            prefix = f"{name}="
-            if argument.startswith(prefix):
-                value = argument.removeprefix(prefix)
-    return Path(value) if value else None
-
-
-def _option_value_positions(arguments: tuple[str, ...], *names: str) -> frozenset[int]:
-    return frozenset(
-        index + 1
-        for index, argument in enumerate(arguments[:-1])
-        if argument in names and not arguments[index + 1].startswith("-")
-    )
+    except GenerationOutputError as cleanup_failure:
+        return cleanup_failure
+    try:
+        transaction.abort()
+    except GenerationOutputError as cleanup_failure:
+        return cleanup_failure
+    return None
 
 
 @app.callback()

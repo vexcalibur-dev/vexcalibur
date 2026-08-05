@@ -25,8 +25,10 @@ _GENERATION_TRANSITIONS = {
     (GenerationOutputState.REPORT_GUARD_ARMING, GenerationOutputState.ABORT_REQUIRED),
     (GenerationOutputState.REPORT_GUARDED, GenerationOutputState.COMMITTED),
     (GenerationOutputState.REPORT_GUARDED, GenerationOutputState.ABORT_REQUIRED),
+    (GenerationOutputState.COMMITTED, GenerationOutputState.FINALIZING),
     (GenerationOutputState.COMMITTED, GenerationOutputState.ABORT_REQUIRED),
-    (GenerationOutputState.COMMITTED, GenerationOutputState.CLOSED),
+    (GenerationOutputState.FINALIZING, GenerationOutputState.ABORT_REQUIRED),
+    (GenerationOutputState.FINALIZING, GenerationOutputState.CLOSED),
     (GenerationOutputState.ABORT_REQUIRED, GenerationOutputState.CLOSED),
 }
 
@@ -52,13 +54,19 @@ _ROLLBACK_TRANSITIONS = {
     (PublishedRollbackState.ARMED, PublishedRollbackState.RELEASED),
     (PublishedRollbackState.PUBLICATION_PENDING, PublishedRollbackState.PUBLISHED),
     (PublishedRollbackState.PUBLICATION_PENDING, PublishedRollbackState.REMOVAL_PENDING),
-    (PublishedRollbackState.PUBLICATION_PENDING, PublishedRollbackState.RELEASED),
+    (
+        PublishedRollbackState.PUBLICATION_PENDING,
+        PublishedRollbackState.PUBLICATION_RELEASED,
+    ),
     (PublishedRollbackState.PUBLISHED, PublishedRollbackState.REMOVAL_PENDING),
     (PublishedRollbackState.PUBLISHED, PublishedRollbackState.DISCARDED),
-    (PublishedRollbackState.PUBLISHED, PublishedRollbackState.RELEASED),
+    (PublishedRollbackState.PUBLISHED, PublishedRollbackState.PUBLICATION_RELEASED),
     (PublishedRollbackState.REMOVAL_PENDING, PublishedRollbackState.DISCARDED),
-    (PublishedRollbackState.REMOVAL_PENDING, PublishedRollbackState.RELEASED),
-    (PublishedRollbackState.DISCARDED, PublishedRollbackState.RELEASED),
+    (
+        PublishedRollbackState.REMOVAL_PENDING,
+        PublishedRollbackState.PUBLICATION_RELEASED,
+    ),
+    (PublishedRollbackState.DISCARDED, PublishedRollbackState.DISCARDED_RELEASED),
 }
 
 
