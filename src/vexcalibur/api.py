@@ -159,7 +159,22 @@ def generate_vex_from_sbom_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from a local CycloneDX SBOM."""
+    """Generate report-aware VEX from a local CycloneDX SBOM.
+
+    The arguments, consent policy, and provider failures match
+    ``generate_vex_from_sbom``. ``execution_context`` may classify a custom
+    renderer but must not contradict Vexcalibur's inventory or source category.
+
+    Returns:
+        The rendered document and immutable inputs needed to derive its report.
+
+    Raises:
+        SbomError: The SBOM is invalid or contains no usable components.
+        OsvClientError: OSV configuration, transport, or response handling fails.
+        VexRenderError: The findings cannot be rendered within output limits.
+        TypeError: A result or context value has the wrong type.
+        ValueError: The execution context contradicts inferred generation facts.
+    """
     return _generate_vex_from_sbom_result(
         input_file=input_file,
         timestamp=timestamp,
@@ -252,7 +267,23 @@ def generate_vex_from_github_sbom_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from a GitHub Dependency Graph SBOM."""
+    """Generate report-aware VEX from a GitHub Dependency Graph SBOM.
+
+    Fetching from GitHub does not grant consent to send the resulting inventory
+    to public OSV. ``execution_context`` may classify a custom renderer but must
+    not contradict Vexcalibur's inventory or source category.
+
+    Returns:
+        The rendered document and immutable inputs needed to derive its report.
+
+    Raises:
+        GithubSbomError: GitHub authentication, transport, or SBOM parsing fails.
+        SbomError: The inventory is invalid or contains no usable components.
+        OsvClientError: OSV configuration, transport, or response handling fails.
+        VexRenderError: The findings cannot be rendered within output limits.
+        TypeError: A result or context value has the wrong type.
+        ValueError: The execution context contradicts inferred generation facts.
+    """
     return _generate_vex_from_github_sbom_result(
         repository=repository,
         timestamp=timestamp,
@@ -280,7 +311,23 @@ def generate_vex_from_github_source_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from GitHub inventory and a custom source."""
+    """Generate report-aware VEX from GitHub inventory and a custom source.
+
+    A ``GenerationSourcePreflight`` runs before Vexcalibur resolves GitHub
+    credentials or creates a client. The custom source owns its network and
+    disclosure policy. Its documented exceptions propagate unchanged unless it
+    raises ``VulnerabilitySourceInputError``, which becomes ``SbomError``.
+
+    Returns:
+        The rendered document and immutable inputs needed to derive its report.
+
+    Raises:
+        GithubSbomError: GitHub authentication, transport, or SBOM parsing fails.
+        SbomError: Inventory or source preflight validation fails.
+        VexRenderError: The findings cannot be rendered within output limits.
+        TypeError: A result or context value has the wrong type.
+        ValueError: The execution context contradicts inferred generation facts.
+    """
 
     def create_github_client() -> _GithubSbomClient:
         return _GithubSbomClient(
@@ -310,7 +357,21 @@ def generate_vex_from_source_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from a CycloneDX SBOM and custom source."""
+    """Generate report-aware VEX from a CycloneDX SBOM and custom source.
+
+    The source owns its network, authentication, and disclosure policy. Its
+    documented exceptions propagate unchanged unless it raises
+    ``VulnerabilitySourceInputError``, which becomes ``SbomError``.
+
+    Returns:
+        The rendered document and immutable inputs needed to derive its report.
+
+    Raises:
+        SbomError: Inventory or source input validation fails.
+        VexRenderError: The findings cannot be rendered within output limits.
+        TypeError: A result or context value has the wrong type.
+        ValueError: The execution context contradicts inferred generation facts.
+    """
     return _generate_vex_from_source_result(
         input_file=input_file,
         source=source,
@@ -328,7 +389,20 @@ def generate_vex_from_components_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from caller-supplied components and source."""
+    """Generate report-aware VEX from caller-supplied components and source.
+
+    Direct component input has the ``CUSTOM`` inventory category. The source
+    owns its network, authentication, and disclosure policy.
+
+    Returns:
+        The rendered document and immutable inputs needed to derive its report.
+
+    Raises:
+        SbomError: Component or source input validation fails.
+        VexRenderError: The findings cannot be rendered within output limits.
+        TypeError: A result or context value has the wrong type.
+        ValueError: The execution context contradicts inferred generation facts.
+    """
     return _generate_vex_from_components_result(
         components=components,
         source=source,
@@ -346,7 +420,18 @@ def generate_vex_from_local_findings_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from local CycloneDX and findings files."""
+    """Generate report-aware VEX from local CycloneDX and findings files.
+
+    Returns:
+        The rendered document and immutable inputs needed to derive its report.
+
+    Raises:
+        SbomError: The SBOM is invalid or contains no usable components.
+        LocalFindingsError: The findings file is unreadable or invalid.
+        VexRenderError: The findings cannot be rendered within output limits.
+        TypeError: A result or context value has the wrong type.
+        ValueError: The execution context contradicts inferred generation facts.
+    """
     return _generate_vex_from_local_findings_result(
         input_file=input_file,
         findings_file=findings_file,
