@@ -23,6 +23,31 @@ sys.modules[SPEC.name] = governance
 SPEC.loader.exec_module(governance)
 
 
+def _required_status_checks(
+    snapshot: dict[str, object], repository: str
+) -> list[dict[str, object]]:
+    repositories = cast(dict[str, list[dict[str, object]]], snapshot["repository_rulesets"])
+    branch_ruleset = next(
+        ruleset
+        for ruleset in repositories[repository]
+        if ruleset.get("name") == governance.BRANCH_RULESET_NAME
+    )
+    rules = cast(list[dict[str, object]], branch_ruleset["rules"])
+    status_rule = next(rule for rule in rules if rule.get("type") == "required_status_checks")
+    parameters = cast(dict[str, object], status_rule["parameters"])
+    return cast(list[dict[str, object]], parameters["required_status_checks"])
+
+
+def _required_status_check(
+    snapshot: dict[str, object], repository: str, context: str
+) -> dict[str, object]:
+    return next(
+        check
+        for check in _required_status_checks(snapshot, repository)
+        if check.get("context") == context
+    )
+
+
 def test_expected_snapshot_matches_policy() -> None:
     snapshot = governance.load_snapshot(FIXTURE)
 
@@ -127,16 +152,26 @@ def test_missing_required_ruleset_is_a_violation(tmp_path: Path) -> None:
     )
 
 
-def test_integrationless_required_check_is_exactly_allowlisted(tmp_path: Path) -> None:
+def test_required_check_with_omitted_expected_integration_is_drift(tmp_path: Path) -> None:
     raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
-    repositories = cast(dict[str, list[dict[str, object]]], raw["repository_rulesets"])
-    branch_ruleset = repositories["vexcalibur-action"][0]
-    rules = cast(list[dict[str, object]], branch_ruleset["rules"])
-    status_rule = next(rule for rule in rules if rule["type"] == "required_status_checks")
-    parameters = cast(dict[str, object], status_rule["parameters"])
-    checks = cast(list[dict[str, object]], parameters["required_status_checks"])
-    pre_commit = next(check for check in checks if check["context"] == "pre-commit.ci - pr")
-    pre_commit["integration_id"] = governance.GITHUB_ACTIONS_INTEGRATION_ID
+    check = _required_status_check(raw, "vexcalibur", "Analyze Python")
+    del check["integration_id"]
+    path = tmp_path / "missing-expected-integration.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    violations = governance.validate_snapshot(governance.load_snapshot(path))
+
+    assert any(
+        "vexcalibur default-branch ruleset required checks" in violation
+        and '["Analyze Python",null]' in violation
+        for violation in violations
+    )
+
+
+def test_reviewed_integrationless_check_rejects_new_integration(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    check = _required_status_check(raw, "vexcalibur-action", "pre-commit.ci - pr")
+    check["integration_id"] = governance.GITHUB_ACTIONS_INTEGRATION_ID
     path = tmp_path / "unexpected-integration.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
 
@@ -145,6 +180,32 @@ def test_integrationless_required_check_is_exactly_allowlisted(tmp_path: Path) -
     assert any(
         "vexcalibur-action default-branch ruleset required checks" in violation
         and '["pre-commit.ci - pr",15368]' in violation
+        for violation in violations
+    )
+
+
+def test_malformed_required_check_integration_fails_closed(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    check = _required_status_check(raw, "vexcalibur-action", "pre-commit.ci - pr")
+    check["integration_id"] = "unknown"
+    path = tmp_path / "malformed-integration.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(governance.GovernanceReadError, match="malformed integration id"):
+        governance.validate_snapshot(governance.load_snapshot(path))
+
+
+def test_duplicate_integrationless_check_is_drift(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    checks = _required_status_checks(raw, "vexcalibur-orb")
+    checks.append({"context": "pre-commit.ci - pr"})
+    path = tmp_path / "duplicate-integrationless-check.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    violations = governance.validate_snapshot(governance.load_snapshot(path))
+
+    assert any(
+        "vexcalibur-orb default-branch ruleset required checks" in violation
         for violation in violations
     )
 

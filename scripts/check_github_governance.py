@@ -19,11 +19,13 @@ BRANCH_RULESET_NAME = "protected main (PR + CI)"
 TAG_CREATION_RULESET_NAME = "restricted release tag creation"
 TAG_IMMUTABILITY_RULESET_NAME = "immutable release tags"
 GITHUB_ACTIONS_INTEGRATION_ID = 15368
-GITHUB_CODEQL_INTEGRATION_ID = 57789
+CODEQL_INTEGRATION_ID = 57789
 CIRCLECI_INTEGRATION_ID = 18001
 RELEASE_AUTOMATION_INTEGRATION_ID = 4250150
 
-REQUIRED_CHECKS: dict[str, tuple[tuple[str, int | None], ...]] = {
+RequiredStatusCheck = tuple[str, int | None]
+
+REQUIRED_CHECKS: dict[str, tuple[RequiredStatusCheck, ...]] = {
     "vexcalibur": (
         ("Analyze Python", GITHUB_ACTIONS_INTEGRATION_ID),
         ("CI result", GITHUB_ACTIONS_INTEGRATION_ID),
@@ -33,13 +35,13 @@ REQUIRED_CHECKS: dict[str, tuple[tuple[str, int | None], ...]] = {
     ),
     "vexcalibur-action": (
         ("CI result", GITHUB_ACTIONS_INTEGRATION_ID),
-        ("CodeQL", GITHUB_CODEQL_INTEGRATION_ID),
+        ("CodeQL", CODEQL_INTEGRATION_ID),
         ("Dependency Review", GITHUB_ACTIONS_INTEGRATION_ID),
         ("OpenSSF Scorecard", GITHUB_ACTIONS_INTEGRATION_ID),
         ("pre-commit.ci - pr", None),
     ),
     "vexcalibur-orb": (
-        ("CodeQL", GITHUB_CODEQL_INTEGRATION_ID),
+        ("CodeQL", CODEQL_INTEGRATION_ID),
         ("Quality", GITHUB_ACTIONS_INTEGRATION_ID),
         ("Scorecard", GITHUB_ACTIONS_INTEGRATION_ID),
         ("lint-pack", CIRCLECI_INTEGRATION_ID),
@@ -47,7 +49,7 @@ REQUIRED_CHECKS: dict[str, tuple[tuple[str, int | None], ...]] = {
         ("test-deploy", CIRCLECI_INTEGRATION_ID),
     ),
     ".github": (
-        ("CodeQL", GITHUB_CODEQL_INTEGRATION_ID),
+        ("CodeQL", CODEQL_INTEGRATION_ID),
         ("Smoke Python security commands", GITHUB_ACTIONS_INTEGRATION_ID),
         ("Validate workflow templates", GITHUB_ACTIONS_INTEGRATION_ID),
     ),
@@ -360,18 +362,14 @@ def _validate_release_automation_installation(
         errors,
         "release automation App permissions",
         _mapping_value(installation, "permissions"),
-        {
-            "administration": "read",
-            "contents": "write",
-            "metadata": "read",
-        },
+        {"administration": "read", "contents": "write", "metadata": "read"},
     )
 
 
 def _validate_branch_ruleset(
     repository: str,
     ruleset: JsonObject,
-    required_checks: tuple[tuple[str, int | None], ...],
+    required_checks: tuple[RequiredStatusCheck, ...],
     errors: list[str],
 ) -> None:
     label = f"{repository} default-branch ruleset"
@@ -420,10 +418,7 @@ def _validate_branch_ruleset(
         True,
     )
     expected_status_checks = tuple(
-        sorted(
-            required_checks,
-            key=lambda item: (item[0], _stable(item[1])),
-        )
+        sorted(required_checks, key=lambda item: (item[0], _stable(item[1])))
     )
     _expect(
         errors,
@@ -638,18 +633,19 @@ def _ref_condition(ruleset: JsonObject) -> tuple[tuple[str, ...], tuple[str, ...
     return (_string_tuple(ref_name.get("include")), _string_tuple(ref_name.get("exclude")))
 
 
-def _status_checks(parameters: JsonObject) -> tuple[tuple[str, object], ...]:
-    checks: list[tuple[str, object]] = []
+def _status_checks(parameters: JsonObject) -> tuple[RequiredStatusCheck, ...]:
+    checks: list[RequiredStatusCheck] = []
     for check in _mapping_sequence(parameters.get("required_status_checks")):
         context = check.get("context")
         if not isinstance(context, str):
             raise GovernanceReadError("required status check omitted a string context")
         if "integration_id" not in check:
-            checks.append((context, None))
-            continue
-        integration_id = check.get("integration_id")
-        if not isinstance(integration_id, int) or isinstance(integration_id, bool):
-            raise GovernanceReadError("required status check omitted a numeric integration id")
+            integration_id: int | None = None
+        else:
+            integration_id_value = check.get("integration_id")
+            if not isinstance(integration_id_value, int) or isinstance(integration_id_value, bool):
+                raise GovernanceReadError("required status check has a malformed integration id")
+            integration_id = integration_id_value
         checks.append((context, integration_id))
     return tuple(sorted(checks, key=lambda item: (item[0], _stable(item[1]))))
 

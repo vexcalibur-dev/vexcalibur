@@ -36,25 +36,28 @@ the required read access and run the complete check again.
 
 The checker requires these default-branch controls:
 
-| Repository | Strict required checks |
+| Repository | Required checks and source binding |
 | --- | --- |
-| `vexcalibur` | `Analyze Python`, `CI result`, `Scorecard`, `dependency-review`, `pre-commit` |
-| `vexcalibur-action` | `CI result`, `CodeQL`, `Dependency Review`, `OpenSSF Scorecard`, `pre-commit.ci - pr` |
-| `vexcalibur-orb` | `CodeQL`, `Quality`, `Scorecard`, `lint-pack`, `pre-commit.ci - pr`, `test-deploy` |
-| `.github` | `CodeQL`, `Smoke Python security commands`, `Validate workflow templates` |
+| `vexcalibur` | `Analyze Python`, `CI result`, `Scorecard`, `dependency-review`, and `pre-commit` from GitHub Actions (`15368`) |
+| `vexcalibur-action` | `CI result`, `Dependency Review`, and `OpenSSF Scorecard` from GitHub Actions (`15368`); `CodeQL` from GitHub Advanced Security (`57789`); `pre-commit.ci - pr` with no source binding |
+| `vexcalibur-orb` | `Quality` and `Scorecard` from GitHub Actions (`15368`); `CodeQL` from GitHub Advanced Security (`57789`); `lint-pack` and `test-deploy` from CircleCI (`18001`); `pre-commit.ci - pr` with no source binding |
+| `.github` | `Smoke Python security commands` and `Validate workflow templates` from GitHub Actions (`15368`); `CodeQL` from GitHub Advanced Security (`57789`) |
 
-Every repository's default branch must remain `main`. The policy binds checks
-to GitHub Actions, GitHub CodeQL, or CircleCI by integration ID when GitHub
-returns one. GitHub omits that ID for `pre-commit.ci - pr`, so the checker
-allows the name-only form only for that check in Action and Orb. An unexpected
-ID still fails the check.
+Every repository's default branch must remain `main`. The checker compares
+each numeric integration ID with the expected owner, not only the check name.
+GitHub does not bind `pre-commit.ci - pr` to an expected source in the Action
+and Orb rulesets, so the checker can require only its exact name. A same-name
+status from another actor with write access may satisfy that requirement. This
+accepted risk is tracked in [issue #144](https://github.com/vexcalibur-dev/vexcalibur/issues/144).
+A new name-only check, a newly supplied ID, a duplicate, or a different
+integration is drift until this policy is reviewed and updated.
 
 Each active ruleset applies to the default branch, requires a pull request,
-allows squash merges, resolves review threads, prevents deletion and
-non-fast-forward updates, and uses strict required checks. The rulesets have no
-branch bypass actors. They allow zero required approvals so a solo maintainer
-can merge a passing pull request without fabricating an independent reviewer.
-Changing that tradeoff requires an explicit policy review.
+resolves review threads, prevents deletion and non-fast-forward updates, and
+uses strict required checks. Only squash merging is allowed. The rulesets have
+no branch bypass actors. They allow zero required approvals so a solo
+maintainer can merge a passing pull request without fabricating an independent
+reviewer. Changing that tradeoff requires an explicit policy review.
 
 Core, Action, and Orb each have two active `refs/tags/v*` rulesets:
 
@@ -93,26 +96,32 @@ controls, not a claim of independent approval.
 
 ## Controls that still need external administration
 
-The checker records the current safe baseline; it does not claim every desired
-control is complete. Core and Action still use one long-lived automation App
-key. GitHub rejects the built-in Actions integration as a tag-ruleset bypass
-actor, so removing that key without a separately scoped App or credential broker
-would weaken restricted `v*` tag creation. The checker confirms that the App is
-unsuspended and has Administration-read and Contents-write permission. GitHub
-adds Metadata-read automatically. Administration-read lets the publisher verify
-the immutable-release policy; it doesn't grant permission to change repository
-settings. The checker also records the current, undesirably broad
-`all`-repositories installation selection. Narrowing that scope requires an
-intentional checker and documentation update. The private-key lifecycle is not
-API-readable and remains tracked with the App scope as a release-governance
-finding.
+The checker records the current baseline; it does not claim every desired
+control is complete. Core, Action, and Orb use one long-lived automation App
+key. A compromise can therefore create a first release tag in any of those
+repositories where the key is available, although the no-bypass rules prevent
+later tag updates or deletion. GitHub rejects the built-in Actions integration
+as a tag-ruleset bypass actor, so removing the App without a separately scoped
+identity or credential broker would weaken restricted `v*` tag creation.
+
+The checker confirms that the App is unsuspended and has administration-read,
+contents-write, and metadata-read permission. Administration read lets release
+automation inspect repository rules without changing them. The checker also
+records the current `all`-repositories installation selection. Narrowing the
+installation and giving each release path its own identity remains tracked in
+[issue #101](https://github.com/vexcalibur-dev/vexcalibur/issues/101). The
+private-key lifecycle is not API-readable.
 
 Future releases are immutable, but release notes and assets created before that
 organization policy remain legacy-mutable; their tag refs are protected. The
 `pypi` environment has no independent reviewer because the organization
 currently has one maintainer, and its administrator-bypass setting remains
-enabled. Orb publication still depends on the external CircleCI account,
-namespace, context, and token setup described in its repository issue tracker.
+enabled. Orb publication uses a CircleCI namespace and an `orb-publishing`
+context restricted to the orb project. Its expression restriction also rejects
+SSH jobs and API-supplied pipeline configuration. The Vexcalibur automation App
+is already the only identity allowed to create an Orb production tag; [Orb
+issue #22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) tracks
+implementing and validating that App-backed release workflow.
 
 ## When to run it
 
