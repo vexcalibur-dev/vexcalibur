@@ -101,7 +101,8 @@ def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
     assert result.stdout == "execution report verified\n"
 
 
-def test_consumer_example_opens_inputs_in_binary_mode(
+@pytest.mark.skipif(os.name == "nt", reason="Windows uses a native shared handle")
+def test_posix_consumer_example_opens_inputs_in_binary_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -131,6 +132,78 @@ def test_consumer_example_opens_inputs_in_binary_mode(
 
     assert observed_flags & binary_flag
     assert result == payload
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing modes are unavailable")
+def test_windows_consumer_allows_readers_and_denies_writers_and_deleters(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "shared-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    read_script = (
+        "from pathlib import Path; import sys; "
+        "raise SystemExit(0 if Path(sys.argv[1]).read_bytes() == b'stable' else 1)"
+    )
+    write_script = (
+        "from pathlib import Path; import errno, sys; "
+        "\ntry: Path(sys.argv[1]).write_bytes(b'changed')"
+        "\nexcept OSError as error: "
+        "raise SystemExit(0 if error.errno == errno.EACCES else 2)"
+        "\nraise SystemExit(1)"
+    )
+    delete_script = (
+        "from pathlib import Path; import sys; "
+        "\ntry: Path(sys.argv[1]).unlink()"
+        "\nexcept OSError as error: "
+        "raise SystemExit(0 if getattr(error, 'winerror', None) == 32 else 2)"
+        "\nraise SystemExit(1)"
+    )
+
+    with consumer._open_regular_file(path, role="test input") as (stream, _):
+        assert not os.get_inheritable(stream.fileno())
+        assert stream.read() == payload
+        reader = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-c", read_script, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+        writer = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-c", write_script, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+        deleter = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-c", delete_script, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+
+        assert reader.returncode == 0, reader.stderr
+        assert writer.returncode == 0, writer.stderr
+        assert deleter.returncode == 0, deleter.stderr
+        assert path.read_bytes() == payload
+
+    path.write_bytes(b"changed")
+    assert path.read_bytes() == b"changed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing modes are unavailable")
+def test_windows_consumer_rejects_a_preexisting_writer(tmp_path: Path) -> None:
+    path = tmp_path / "writer-open.json"
+    path.write_bytes(b"stable")
+
+    with (
+        path.open("r+b"),
+        pytest.raises(OSError) as error,
+        consumer._open_regular_file(path, role="test input"),
+    ):
+        pytest.fail("a Windows reader opened while a writer held the file")
+
+    assert error.value.winerror == 32
 
 
 def test_consumer_example_compares_timestamps_from_the_same_stat_interface(

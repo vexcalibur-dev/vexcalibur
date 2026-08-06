@@ -25,6 +25,9 @@ MAX_SCHEMA_BYTES = 256 * 1024
 EXECUTION_REPORT_SCHEMA_SHA256 = (
     "8e49a8d5652a94bcbd46eb012e643d8300f1e7c376803def509d37e37e54ed65"  # pragma: allowlist secret
 )
+_WINDOWS_GENERIC_READ = 0x80000000
+_WINDOWS_FILE_SHARE_READ = 0x00000001
+_WINDOWS_OPEN_EXISTING = 3
 
 
 def _reject_external_schema_reference(uri: str) -> NoReturn:
@@ -50,6 +53,65 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _open_windows_read_descriptor(path: Path) -> int:
+    """Open a binary descriptor that permits readers but denies writers and deletion."""
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    handle = create_file(
+        str(path),
+        _WINDOWS_GENERIC_READ,
+        _WINDOWS_FILE_SHARE_READ,
+        None,
+        _WINDOWS_OPEN_EXISTING,
+        0,
+        None,
+    )
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    descriptor_flags = os.O_RDONLY
+    descriptor_flags |= getattr(os, "O_BINARY", 0)
+    descriptor_flags |= getattr(os, "O_NOINHERIT", 0)
+    try:
+        return msvcrt.open_osfhandle(handle, descriptor_flags)
+    except BaseException as exc:
+        if not close_handle(handle):
+            raise ctypes.WinError(ctypes.get_last_error()) from exc
+        raise
+
+
+def _open_read_descriptor(path: Path) -> int:
+    """Open a non-inheritable descriptor for the regular-file checks."""
+
+    if os.name == "nt":
+        return _open_windows_read_descriptor(path)
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return os.open(path, flags)
+
+
 @contextmanager
 def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.stat_result]]:
     before_open = os.lstat(path)
@@ -57,14 +119,9 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
         raise ValueError(f"{role} must not be a symbolic link")
     if not stat.S_ISREG(before_open.st_mode):
         raise ValueError(f"{role} must be a regular file")
-    flags = os.O_RDONLY
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_NONBLOCK", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
     descriptor = -1
     try:
-        descriptor = os.open(path, flags)
+        descriptor = _open_read_descriptor(path)
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError(f"{role} must be a regular file")

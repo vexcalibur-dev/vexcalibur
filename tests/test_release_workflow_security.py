@@ -435,7 +435,8 @@ def test_windows_installs_wheel_and_sdist_with_locked_offline_builds() -> None:
     assert "$PSNativeCommandUseErrorActionPreference = $true" in contract
     assert "[AllowEmptyString()]" in contract
     assert 'if ($PSVersionTable.PSVersion -lt [Version]"7.3")' in contract
-    assert "test_consumer_example_opens_inputs_in_binary_mode" in contract
+    assert "test_windows_consumer_allows_readers_and_denies_writers_and_deleters" in contract
+    assert "test_windows_consumer_rejects_a_preexisting_writer" in contract
     assert "Get-ChildItem -LiteralPath $resolvedDistributionDirectory -Filter *.whl" in contract
     assert "Get-ChildItem -LiteralPath $resolvedDistributionDirectory -Filter *.tar.gz" in contract
     build_export = contract.index("--only-group sdist-build")
