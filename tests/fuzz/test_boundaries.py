@@ -34,6 +34,28 @@ CORPUS_EXPECTATIONS: dict[str, tuple[str, str | None]] = {
     "osv/valid-gzip-query.json": ("accepted", None),
     "report/malformed-utf8.hex": ("rejected", "VexRenderError"),
     "report/valid-multibyte.txt": ("accepted", None),
+    "report-parser/count-overflow.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/duplicate-key.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/malformed.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/multibyte.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/unsupported-schema.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/valid-maximum-count.json": ("accepted", None),
+    "report-parser/valid-zero-findings.json": ("accepted", None),
     "sbom/forbidden-entity.xml": ("rejected", "SbomError"),
     "sbom/invalid-spec-version.json": ("rejected", "SbomError"),
     "sbom/non-string-spec-version.json": ("rejected", "SbomError"),
@@ -160,6 +182,22 @@ def test_report_oracle_binds_multibyte_utf8_and_rejects_malformed_bytes() -> Non
     assert deterministic_outcome("report", b"\xff") == (
         "rejected",
         "VexRenderError",
+    )
+
+
+def test_report_parser_oracle_reaches_public_parser_contract() -> None:
+    valid_zero = (CORPUS_ROOT / "report-parser/valid-zero-findings.json").read_bytes()
+    valid_maximum = (CORPUS_ROOT / "report-parser/valid-maximum-count.json").read_bytes()
+    malformed_utf8 = valid_zero.replace(
+        b'"vexcalibur_version":"0"',
+        b'"vexcalibur_version":"\xff"',
+    )
+
+    assert deterministic_outcome("report-parser", valid_zero)[0] == "accepted"
+    assert deterministic_outcome("report-parser", valid_maximum)[0] == "accepted"
+    assert deterministic_outcome("report-parser", malformed_utf8) == (
+        "rejected",
+        "GenerationExecutionReportParseError",
     )
 
 

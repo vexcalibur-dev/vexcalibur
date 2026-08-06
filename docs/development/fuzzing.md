@@ -24,6 +24,7 @@ failure is a crash to investigate.
 | `osv` | OSV response transport and query parsers | Identity, valid and malformed gzip, HTTP errors, pagination, evolving fields, and terminal-safe vulnerability IDs are covered without network access. |
 | `identity` | CycloneDX component normalization | Equivalent generated JSON and XML produce the same component identity. |
 | `report` | Generation execution-report serialization and schema validation | Strict UTF-8, canonical JSON, schema validation, and the rendered-document digest and byte count remain deterministic. The harness checks that bounded synthetic reports stay below 16 KiB; ordinary regression tests cover rejection at the exact size boundary. |
+| `report-parser` | Public execution-report parser | UTF-8 decoding, duplicate keys, schema versions, count limits, canonicalization, and typed report construction have bounded outcomes. |
 | `consumer` | Published execution-report consumer | Arbitrary report bytes are either rejected by a typed parser or validate deterministically against a matching document. Schema bytes must match the reviewed schema exactly before validation, so substituted schemas and external references never run. |
 
 Inputs are synthetic. The harness never calls GitHub, OSV, or another service.
@@ -73,6 +74,16 @@ Select one target while developing:
 ```bash
 FUZZ_TARGET=osv FUZZ_MAX_TOTAL_TIME=60 make fuzz-coverage
 ```
+
+To exercise the public execution-report parser for one minute, run:
+
+```bash
+FUZZ_TARGET=report-parser FUZZ_MAX_TOTAL_TIME=60 make fuzz-coverage
+```
+
+A successful bounded campaign exits with status 0 and prints libFuzzer's final
+statistics. A crash, timeout, or unexpected exception leaves a reproducer below
+`fuzz-artifacts/report-parser/`.
 
 Defaults are deliberately finite:
 

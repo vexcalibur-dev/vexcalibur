@@ -1,0 +1,1 @@
+{"analysis_state_counts":{"resolved":10000000},"command":"generate","component_count":10000000,"document":{"bytes":26214400,"sha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},"finding_count":10000000,"finding_source":"public_osv","inventory_source":"github_dependency_graph","output_format":"openvex","schema_version":1,"vexcalibur_version":"9999"}

@@ -5,7 +5,7 @@ readonly fuzz_entrypoint="tests.fuzz.fuzz_boundaries"
 readonly tracked_corpus="tests/fuzz/corpus"
 readonly generated_corpus="${FUZZ_CORPUS_ROOT:-.fuzz-corpus}"
 readonly artifact_root="${FUZZ_ARTIFACT_ROOT:-fuzz-artifacts}"
-readonly -a all_targets=(json sbom github local osv identity report consumer)
+readonly -a all_targets=(json sbom github local osv identity report report-parser consumer)
 
 require_positive_integer() {
   local name="$1"

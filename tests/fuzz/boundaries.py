@@ -24,8 +24,10 @@ from vexcalibur.generation_result import (
     ExecutionReportOutputFormat,
     FindingSourceCategory,
     GenerationExecutionContext,
+    GenerationExecutionReportParseError,
     GenerationResult,
     InventorySourceCategory,
+    parse_generation_execution_report,
 )
 from vexcalibur.github_sbom import (
     GithubSbomClientError,
@@ -47,6 +49,7 @@ FUZZ_TARGETS = (
     "osv",
     "identity",
     "report",
+    "report-parser",
     "consumer",
 )
 _REPORT_CONSUMER_PATH = (
@@ -364,6 +367,11 @@ def _exercise_report(data: bytes) -> str:
     return _digest(serialized)
 
 
+def _exercise_report_parser(data: bytes) -> str:
+    report = parse_generation_execution_report(data)
+    return _digest(report.to_json().encode("ascii"))
+
+
 def _exercise_consumer(data: bytes) -> str:
     selector = data[0] if data else 0
     payload = data[1:] if data else b""
@@ -444,6 +452,7 @@ _EXERCISES: dict[str, Exercise] = {
     "osv": _exercise_osv,
     "identity": _exercise_identity,
     "report": _exercise_report,
+    "report-parser": _exercise_report_parser,
     "consumer": _exercise_consumer,
 }
 
@@ -455,6 +464,7 @@ _EXPECTED_ERRORS: dict[str, tuple[type[Exception], ...]] = {
     "osv": (OsvClientError,),
     "identity": (),
     "report": (VexRenderError,),
+    "report-parser": (GenerationExecutionReportParseError,),
     "consumer": (
         SchemaError,
         UnicodeError,
