@@ -60,14 +60,19 @@ def _write_pair(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     return report_path, document_path, report
 
 
-def _offset_stat(metadata: os.stat_result, *, nanoseconds: int) -> os.stat_result:
+def _offset_stat(
+    metadata: os.stat_result,
+    *,
+    nanoseconds: int = 0,
+    size: int | None = None,
+) -> os.stat_result:
     return cast(
         os.stat_result,
         SimpleNamespace(
             st_mode=metadata.st_mode,
             st_dev=metadata.st_dev,
             st_ino=metadata.st_ino,
-            st_size=metadata.st_size,
+            st_size=metadata.st_size if size is None else size,
             st_mtime_ns=metadata.st_mtime_ns + nanoseconds,
             st_ctime_ns=metadata.st_ctime_ns + nanoseconds,
         ),
@@ -156,9 +161,11 @@ def test_consumer_example_compares_timestamps_from_the_same_stat_interface(
     )
 
 
-def test_consumer_example_rejects_a_path_state_restored_after_open(
+@pytest.mark.parametrize("changed_call", (2, 3))
+def test_consumer_example_rejects_a_path_state_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    changed_call: int,
 ) -> None:
     path = tmp_path / "restored-input.json"
     payload = b"stable"
@@ -172,9 +179,35 @@ def test_consumer_example_rejects_a_path_state_restored_after_open(
         if Path(selected_path) != path:
             return metadata
         calls += 1
-        return _offset_stat(metadata, nanoseconds=100 if calls == 2 else 0)
+        return _offset_stat(metadata, nanoseconds=100 if calls == changed_call else 0)
 
     monkeypatch.setattr(consumer.os, "lstat", changed_then_restored_lstat)
+
+    with pytest.raises(ValueError, match="test input changed while it was read"):
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
+
+
+def test_consumer_example_rejects_a_cross_interface_size_difference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "size-mismatch.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    real_lstat = consumer.os.lstat
+
+    def lstat_with_other_size(selected_path: Path) -> os.stat_result:
+        metadata = real_lstat(selected_path)
+        if Path(selected_path) != path:
+            return metadata
+        return _offset_stat(metadata, size=len(payload) - 1)
+
+    monkeypatch.setattr(consumer.os, "lstat", lstat_with_other_size)
 
     with pytest.raises(ValueError, match="test input changed while it was read"):
         consumer._read_bounded_file(

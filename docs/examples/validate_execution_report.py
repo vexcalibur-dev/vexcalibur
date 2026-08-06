@@ -34,9 +34,8 @@ def _reject_external_schema_reference(uri: str) -> NoReturn:
 SCHEMA_REGISTRY: Registry[Any] = Registry(retrieve=_reject_external_schema_reference)
 
 
-def _file_state(metadata: os.stat_result) -> tuple[int, int, int]:
+def _file_timestamps(metadata: os.stat_result) -> tuple[int, int]:
     return (
-        metadata.st_size,
         metadata.st_mtime_ns,
         metadata.st_ctime_ns,
     )
@@ -87,11 +86,14 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
                 raise ValueError(f"{role} changed while it was read")
             if any(not os.path.samestat(metadata, snapshot) for snapshot in snapshots):
                 raise ValueError(f"{role} changed while it was read")
-            path_state = _file_state(before_open)
+            all_snapshots = (before_open, metadata, after_open, after_read, current_path)
+            if any(snapshot.st_size != metadata.st_size for snapshot in all_snapshots):
+                raise ValueError(f"{role} changed while it was read")
+            path_timestamps = _file_timestamps(before_open)
             if (
-                _file_state(metadata) != _file_state(after_read)
-                or _file_state(after_open) != path_state
-                or _file_state(current_path) != path_state
+                _file_timestamps(metadata) != _file_timestamps(after_read)
+                or _file_timestamps(after_open) != path_timestamps
+                or _file_timestamps(current_path) != path_timestamps
             ):
                 raise ValueError(f"{role} changed while it was read")
     finally:
