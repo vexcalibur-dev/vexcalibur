@@ -34,6 +34,14 @@ def _reject_external_schema_reference(uri: str) -> NoReturn:
 SCHEMA_REGISTRY: Registry[Any] = Registry(retrieve=_reject_external_schema_reference)
 
 
+def _file_state(metadata: os.stat_result) -> tuple[int, int, int]:
+    return (
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -79,20 +87,9 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
                 raise ValueError(f"{role} changed while it was read")
             if any(not os.path.samestat(metadata, snapshot) for snapshot in snapshots):
                 raise ValueError(f"{role} changed while it was read")
-            expected_state = (
-                metadata.st_size,
-                metadata.st_mtime_ns,
-                metadata.st_ctime_ns,
-            )
-            if any(
-                (
-                    snapshot.st_size,
-                    snapshot.st_mtime_ns,
-                    snapshot.st_ctime_ns,
-                )
-                != expected_state
-                for snapshot in snapshots
-            ):
+            if _file_state(metadata) != _file_state(after_read) or _file_state(
+                before_open
+            ) != _file_state(current_path):
                 raise ValueError(f"{role} changed while it was read")
     finally:
         if descriptor >= 0:

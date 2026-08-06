@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -110,6 +112,42 @@ def test_consumer_example_opens_inputs_in_binary_mode(
 
     assert observed_flags & binary_flag
     assert result == payload
+
+
+def test_consumer_example_compares_timestamps_from_the_same_stat_interface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "stable-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    real_lstat = consumer.os.lstat
+
+    def lstat_with_platform_timestamp(selected_path: Path) -> os.stat_result:
+        metadata = real_lstat(selected_path)
+        return cast(
+            os.stat_result,
+            SimpleNamespace(
+                st_mode=metadata.st_mode,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns + 100,
+                st_ctime_ns=metadata.st_ctime_ns + 100,
+            ),
+        )
+
+    monkeypatch.setattr(consumer.os, "lstat", lstat_with_platform_timestamp)
+
+    assert (
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
+        == payload
+    )
 
 
 @pytest.mark.parametrize(
