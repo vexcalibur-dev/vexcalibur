@@ -5,6 +5,7 @@ import io
 import json
 import os
 import signal
+import sys
 from pathlib import Path
 
 import pytest
@@ -307,6 +308,8 @@ def test_group_does_not_reuse_irreversible_publication_state(
         nonlocal calls
         del group, args, kwargs
         calls += 1
+        if calls == 3:
+            raise KeyboardInterrupt("unpublished interruption")
         if calls == 1:
             cli._generate_irreversible_publication.set(True)
         raise SystemExit(130)
@@ -316,6 +319,48 @@ def test_group_does_not_reuse_irreversible_publication_state(
     assert command.main(args=("generate",)) is None
     with pytest.raises(SystemExit, match="130"):
         command.main(args=("query-osv",))
+    with pytest.raises(KeyboardInterrupt, match="unpublished interruption"):
+        command.main(args=("query-osv",))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process signal contract")
+def test_cli_sigint_during_framework_success_exit_remains_successful(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    real_exit = sys.exit
+    interrupted = False
+
+    def interrupt_success_exit(code: object = None) -> None:
+        nonlocal interrupted
+        if code in {None, 0} and not interrupted:
+            interrupted = True
+            os.kill(os.getpid(), signal.SIGINT)
+        real_exit(code)
+
+    monkeypatch.setattr(sys, "exit", interrupt_success_exit)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert interrupted
+    assert result.exit_code == 0, result.output
+    assert output_path.exists()
+    assert report_path.exists()
 
 
 def test_cli_reports_persistent_abort_failure(

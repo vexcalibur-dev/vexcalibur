@@ -91,6 +91,10 @@ class _VexcaliburGroup(TyperGroup):
                     windows_expand_args=windows_expand_args,
                     **extra,
                 )
+            except KeyboardInterrupt:
+                if _generate_irreversible_publication.get():
+                    return None
+                raise
             except SystemExit as exc:
                 if exc.code == 130 and _generate_irreversible_publication.get():
                     return None
