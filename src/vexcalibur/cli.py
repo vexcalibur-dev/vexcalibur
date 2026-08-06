@@ -59,6 +59,10 @@ _generate_invocation_arguments: ContextVar[tuple[str, ...] | None] = ContextVar(
     "vexcalibur_generate_invocation_arguments",
     default=None,
 )
+_generate_irreversible_publication: ContextVar[bool] = ContextVar(
+    "vexcalibur_generate_irreversible_publication",
+    default=False,
+)
 
 
 class _VexcaliburGroup(TyperGroup):
@@ -75,6 +79,7 @@ class _VexcaliburGroup(TyperGroup):
     ) -> Any:
         arguments_token = _generate_invocation_arguments.set(None)
         command_started_token = _generate_command_started.set(False)
+        publication_token = _generate_irreversible_publication.set(False)
         try:
             try:
                 return super().main(
@@ -86,6 +91,8 @@ class _VexcaliburGroup(TyperGroup):
                     **extra,
                 )
             except SystemExit as exc:
+                if exc.code == 130 and _generate_irreversible_publication.get():
+                    return None
                 arguments = _generate_invocation_arguments.get()
                 if (
                     exc.code not in {None, 0}
@@ -102,6 +109,7 @@ class _VexcaliburGroup(TyperGroup):
                         )
                 raise
         finally:
+            _generate_irreversible_publication.reset(publication_token)
             _generate_command_started.reset(command_started_token)
             _generate_invocation_arguments.reset(arguments_token)
 
@@ -533,8 +541,18 @@ def generate(
                 isinstance(failure, KeyboardInterrupt)
                 and output_transaction._publication_succeeded_irreversibly
             ):
+                _record_irreversible_publication(output_transaction)
                 return
         raise
+    else:
+        _record_irreversible_publication(output_transaction)
+
+
+def _record_irreversible_publication(
+    transaction: GenerationOutputTransaction | None,
+) -> None:
+    if transaction is not None and transaction._publication_succeeded_irreversibly:
+        _generate_irreversible_publication.set(True)
 
 
 def _renderer_from_generate_options(

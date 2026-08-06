@@ -249,6 +249,72 @@ def test_cli_interruption_after_transaction_close_exits_successfully(
     assert report_path.exists()
 
 
+def test_cli_interruption_at_callback_return_exits_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    real_record = cli._record_irreversible_publication
+    interrupted = False
+
+    def record_then_interrupt(
+        transaction: GenerationOutputTransaction | None,
+    ) -> None:
+        nonlocal interrupted
+        real_record(transaction)
+        interrupted = True
+        raise KeyboardInterrupt("callback return interruption")
+
+    monkeypatch.setattr(cli, "_record_irreversible_publication", record_then_interrupt)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert interrupted
+    assert result.exit_code == 0, result.output
+    assert output_path.exists()
+    assert report_path.exists()
+
+
+def test_group_does_not_reuse_irreversible_publication_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command = get_command(cli.app)
+    assert isinstance(command, cli._VexcaliburGroup)
+    calls = 0
+
+    def interrupt_after_optional_publication(
+        group: TyperGroup,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal calls
+        del group, args, kwargs
+        calls += 1
+        if calls == 1:
+            cli._generate_irreversible_publication.set(True)
+        raise SystemExit(130)
+
+    monkeypatch.setattr(TyperGroup, "main", interrupt_after_optional_publication)
+
+    assert command.main(args=("generate",)) is None
+    with pytest.raises(SystemExit, match="130"):
+        command.main(args=("query-osv",))
+
+
 def test_cli_reports_persistent_abort_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
