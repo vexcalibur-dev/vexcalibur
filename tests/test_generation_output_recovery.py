@@ -713,6 +713,56 @@ def test_persistent_release_failure_after_point_of_no_return_stays_finalizing(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_rollback_release_stops_while_complete_authority_remains(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    rollback = transaction._report_rollback
+    published_descriptor = rollback.published_fd
+    real_release = staging_module._close_descriptor_retryable
+
+    def fail_published_release(descriptor: int) -> object:
+        if descriptor == published_descriptor:
+            return filesystem_module._DescriptorCloseOutcome(
+                released=False,
+                unchanged=True,
+                failure=OSError(errno.EMFILE, "synthetic descriptor exhaustion"),
+            )
+        return real_release(descriptor)
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        fail_published_release,
+    )
+
+    with pytest.raises(OSError, match="synthetic descriptor exhaustion"):
+        rollback.close()
+
+    assert rollback._published_fd_ownership is DescriptorOwnership.OWNED
+    assert rollback._parent_fd_ownership is DescriptorOwnership.OWNED
+    assert rollback._lock_fd_ownership is DescriptorOwnership.OWNED
+    assert rollback.can_discard
+
+    monkeypatch.setattr(
+        staging_module,
+        "_close_descriptor_retryable",
+        real_release,
+    )
+    transaction.abort()
+
+    assert transaction.closed
+    assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
 def test_cleanup_retries_a_transient_report_rollback_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

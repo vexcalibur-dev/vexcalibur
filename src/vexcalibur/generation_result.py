@@ -347,8 +347,7 @@ class GenerationExecutionReport:
     ``analysis_state_counts`` contains unique, positive-count pairs in this
     order: ``RESOLVED``, ``EXPLOITABLE``, ``IN_TRIAGE``, ``FALSE_POSITIVE``,
     then ``NOT_AFFECTED``. Omit states with a zero count. Each count must be no
-    greater than ``MAX_EXECUTION_REPORT_COUNT``, and their sum must equal
-    ``finding_count``.
+    greater than ``10,000,000``, and their sum must equal ``finding_count``.
 
     Raises:
         TypeError: A field or nested value has the wrong type.

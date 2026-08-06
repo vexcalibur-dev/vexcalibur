@@ -602,6 +602,26 @@ class PublishedFileRollback:
         expected = self.expected
         return expected is not None and _same_identity(retained, expected)
 
+    @property
+    def publication_irreversible(self) -> bool:
+        """Return whether publication occurred and rollback authority is lost."""
+        if self._state is PublishedRollbackState.PUBLICATION_RELEASED:
+            return True
+        if self._state not in {
+            PublishedRollbackState.PUBLICATION_PENDING,
+            PublishedRollbackState.PUBLISHED,
+            PublishedRollbackState.REMOVAL_PENDING,
+        }:
+            return False
+        return any(
+            ownership is not DescriptorOwnership.OWNED
+            for ownership in (
+                self._published_fd_ownership,
+                self._parent_fd_ownership,
+                self._lock_fd_ownership,
+            )
+        )
+
     def begin_publication(self) -> None:
         """Record a publication attempt before the replace operation starts."""
         self._transition(PublishedRollbackState.PUBLICATION_PENDING)
@@ -624,6 +644,9 @@ class PublishedFileRollback:
                 _close_owned_descriptor(self, attribute)
             except BaseException as failure:
                 failures.append(failure)
+                state: DescriptorState = getattr(self, f"_{attribute}_state")
+                if state.ownership is DescriptorOwnership.OWNED:
+                    break
 
         ownerships = (
             self._published_fd_ownership,
@@ -677,16 +700,16 @@ def stage_destination_bytes(
     serialized: bytes,
 ) -> Iterator[StagedFileWrite]:
     """Yield flushed private temporary bytes and reclaim their handles."""
-    try:
-        with _defer_keyboard_interrupt():
-            parent_fd = destination._open_parent()
-    except OSError as exc:
-        msg = "destination parent directory changed before write"
-        raise BoundFileDestinationError(msg) from exc
-
+    parent_fd = -1
     temporary_name = ""
     file_descriptor = -1
     try:
+        try:
+            with _defer_keyboard_interrupt():
+                parent_fd = destination._open_parent()
+        except OSError as exc:
+            msg = "destination parent directory changed before write"
+            raise BoundFileDestinationError(msg) from exc
         with _defer_keyboard_interrupt():
             file_descriptor, temporary_name = destination._create_temporary_file(parent_fd)
         with os.fdopen(file_descriptor, "wb", closefd=False) as stream:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -138,6 +139,36 @@ def test_validator_opens_report_inputs_in_binary_mode(
 
     assert observed_flags & binary_flag
     assert result == payload
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signal contract")
+def test_validator_closes_descriptor_after_pending_sigint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    path.write_bytes(b"{}\n")
+    real_open = validation_module.os.open
+    observed_descriptors: list[int] = []
+
+    def open_then_interrupt(selected_path: Path, flags: int) -> int:
+        descriptor = real_open(selected_path, flags)
+        observed_descriptors.append(descriptor)
+        os.kill(os.getpid(), signal.SIGINT)
+        return descriptor
+
+    monkeypatch.setattr(validation_module.os, "open", open_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        validation_module._read_regular_file(
+            path,
+            maximum_bytes=16,
+            field="execution report",
+        )
+
+    assert len(observed_descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(observed_descriptors[0])
 
 
 def test_validator_rejects_noncanonical_report_bytes(tmp_path: Path) -> None:

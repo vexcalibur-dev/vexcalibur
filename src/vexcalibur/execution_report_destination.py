@@ -283,10 +283,11 @@ class BoundFileDestination:
 
     def remove_existing(self, *, destination_lock_held: bool = False) -> None:
         """Remove and durably clear a non-directory destination."""
+        parent_fd = -1
         try:
-            with _defer_keyboard_interrupt():
-                parent_fd = self._open_parent()
             try:
+                with _defer_keyboard_interrupt():
+                    parent_fd = self._open_parent()
                 lock = (
                     nullcontext()
                     if destination_lock_held
@@ -359,9 +360,10 @@ class BoundFileDestination:
 
     def verify_replaceable_leaf(self) -> None:
         """Require an existing leaf to be a regular file or symbolic link."""
-        with _defer_keyboard_interrupt():
-            parent_fd = self._open_parent()
+        parent_fd = -1
         try:
+            with _defer_keyboard_interrupt():
+                parent_fd = self._open_parent()
             self._verify_replaceable_leaf(parent_fd)
         finally:
             _close_descriptor(parent_fd)

@@ -1,4 +1,5 @@
 import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,32 @@ def test_bounded_reader_opens_inputs_in_binary_mode(
 
     assert observed_flags & binary_flag
     assert result == payload
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signal contract")
+def test_bounded_reader_closes_descriptor_after_pending_sigint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "input.json"
+    path.write_bytes(b"payload")
+    real_open = input_file_module.os.open
+    observed_descriptors: list[int] = []
+
+    def open_then_interrupt(selected_path: Path, flags: int) -> int:
+        descriptor = real_open(selected_path, flags)
+        observed_descriptors.append(descriptor)
+        os.kill(os.getpid(), signal.SIGINT)
+        return descriptor
+
+    monkeypatch.setattr(input_file_module.os, "open", open_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        _read(path, limit=10)
+
+    assert len(observed_descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(observed_descriptors[0])
 
 
 def test_bounded_reader_rejects_limit_plus_one(tmp_path: Path) -> None:

@@ -217,6 +217,45 @@ def test_pending_sigint_after_temporary_open_has_a_cleanup_owner(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+@pytest.mark.parametrize(
+    "operation",
+    ("remove_existing", "verify_replaceable_leaf", "stage_bytes"),
+)
+def test_pending_sigint_after_parent_open_closes_descriptor(
+    operation: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    path.write_bytes(b"stale report")
+    destination = BoundFileDestination.prepare(path)
+    real_open_parent = BoundFileDestination._open_parent
+    observed_descriptors: list[int] = []
+
+    def open_then_interrupt(selected: BoundFileDestination) -> int:
+        descriptor = real_open_parent(selected)
+        observed_descriptors.append(descriptor)
+        os.kill(os.getpid(), signal.SIGINT)
+        return descriptor
+
+    monkeypatch.setattr(BoundFileDestination, "_open_parent", open_then_interrupt)
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            if operation == "stage_bytes":
+                with destination.stage_bytes(b"private report"):
+                    pytest.fail("staging unexpectedly reached the context body")
+            else:
+                getattr(destination, operation)()
+
+        assert len(observed_descriptors) == 1
+        with pytest.raises(OSError):
+            os.fstat(observed_descriptors[0])
+    finally:
+        destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 def test_temporary_setup_preserves_primary_and_cleanup_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

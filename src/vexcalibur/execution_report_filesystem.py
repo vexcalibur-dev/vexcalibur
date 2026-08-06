@@ -6,9 +6,11 @@ import errno
 import os
 import signal
 import stat
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from types import FrameType
 
 from vexcalibur.execution_report_errors import BoundFileDestinationError
 
@@ -16,14 +18,44 @@ from vexcalibur.execution_report_errors import BoundFileDestinationError
 @contextmanager
 def _defer_keyboard_interrupt() -> Iterator[None]:
     """Defer SIGINT until a returned descriptor has a recorded owner."""
-    if os.name == "nt" or not hasattr(signal, "pthread_sigmask"):
+    if threading.current_thread() is not threading.main_thread():
         yield
         return
-    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+
+    pending: tuple[int, FrameType | None] | None = None
+
+    def defer_signal(signum: int, frame: FrameType | None) -> None:
+        nonlocal pending
+        pending = (signum, frame)
+
+    previous_mask = None
+    if hasattr(signal, "pthread_sigmask"):
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    previous_handler = signal.signal(signal.SIGINT, defer_signal)
     try:
         yield
     finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        if previous_mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        signal.signal(signal.SIGINT, previous_handler)
+        if pending is not None:
+            _replay_signal(previous_handler, *pending)
+
+
+def _replay_signal(
+    handler: signal.Handlers | int | Callable[[int, FrameType | None], object] | None,
+    signum: int,
+    frame: FrameType | None,
+) -> None:
+    """Replay one deferred signal through the handler it displaced."""
+    if handler is None or handler == signal.SIG_IGN:
+        return
+    if handler is signal.SIG_DFL:
+        signal.raise_signal(signum)
+        return
+    if not callable(handler):
+        raise RuntimeError("SIGINT had an unsupported signal handler")
+    handler(signum, frame)
 
 
 def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:

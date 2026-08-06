@@ -208,6 +208,47 @@ def test_cli_interruption_after_rollback_release_exits_successfully(
     assert report_path.exists()
 
 
+def test_cli_interruption_after_transaction_close_exits_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    real_close = GenerationOutputTransaction.close
+    interrupted = False
+
+    def close_then_interrupt(transaction: GenerationOutputTransaction) -> None:
+        nonlocal interrupted
+        if transaction.closed:
+            return
+        real_close(transaction)
+        assert transaction.closed
+        interrupted = True
+        raise KeyboardInterrupt("post-close interruption")
+
+    monkeypatch.setattr(GenerationOutputTransaction, "close", close_then_interrupt)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert interrupted
+    assert result.exit_code == 0, result.output
+    assert output_path.exists()
+    assert report_path.exists()
+
+
 def test_cli_reports_persistent_abort_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

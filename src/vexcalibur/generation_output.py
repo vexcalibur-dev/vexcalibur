@@ -144,6 +144,11 @@ class GenerationOutputTransaction:
         return self._state is GenerationOutputState.CLOSED
 
     @property
+    def _publication_succeeded_irreversibly(self) -> bool:
+        """Return whether a success report exists beyond rollback authority."""
+        return self._report_rollback.publication_irreversible
+
+    @property
     def state(self) -> GenerationOutputState:
         """Return the transaction's current lifecycle state."""
         return self._state
@@ -530,7 +535,7 @@ class GenerationOutputTransaction:
 
     def _finish_irreversible_publication(self) -> bool:
         """Finish success after an interruption beyond rollback authority."""
-        if self._report_rollback.state is not PublishedRollbackState.PUBLICATION_RELEASED:
+        if not self._report_rollback.publication_irreversible:
             return False
         destinations_closed = all(
             destination is None or destination.closed

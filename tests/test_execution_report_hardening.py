@@ -7,6 +7,7 @@ import io
 import os
 import pickle
 import signal
+import threading
 from contextlib import ExitStack, contextmanager, suppress
 from pathlib import Path
 
@@ -505,6 +506,66 @@ def test_descriptor_owner_is_recorded_before_pending_sigint() -> None:
         os.fstat(owner._candidate_fd_state.descriptor)
     finally:
         staging_module._close_owned_descriptor(owner, "candidate_fd")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process signal contract")
+def test_sigint_delivered_to_existing_worker_is_deferred_on_main_thread() -> None:
+    worker_ready = threading.Event()
+    send_signal = threading.Event()
+    signal_sent = threading.Event()
+    stop_worker = threading.Event()
+
+    def wait_for_stop() -> None:
+        worker_ready.set()
+        send_signal.wait()
+        os.kill(os.getpid(), signal.SIGINT)
+        signal_sent.set()
+        stop_worker.wait()
+
+    worker = threading.Thread(target=wait_for_stop)
+    worker.start()
+    worker_ready.wait()
+    descriptor = -1
+    owner = -1
+    try:
+        with (
+            pytest.raises(KeyboardInterrupt),
+            filesystem_module._defer_keyboard_interrupt(),
+        ):
+            descriptor = os.open(os.devnull, os.O_RDONLY)
+            send_signal.set()
+            assert signal_sent.wait(timeout=1)
+            owner = descriptor
+
+        assert owner == descriptor
+        os.fstat(owner)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        stop_worker.set()
+        worker.join()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process signal contract")
+def test_sigint_deferral_restores_and_chains_custom_handler() -> None:
+    observed: list[tuple[int, object]] = []
+
+    def custom_handler(signum: int, frame: object) -> None:
+        observed.append((signum, frame))
+
+    previous_handler = signal.signal(signal.SIGINT, custom_handler)
+    acquired = False
+    try:
+        with filesystem_module._defer_keyboard_interrupt():
+            os.kill(os.getpid(), signal.SIGINT)
+            acquired = True
+
+        assert acquired
+        assert len(observed) == 1
+        assert observed[0][0] == signal.SIGINT
+        assert signal.getsignal(signal.SIGINT) is custom_handler
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

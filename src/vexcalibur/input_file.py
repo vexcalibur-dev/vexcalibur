@@ -6,7 +6,10 @@ import os
 import stat
 from pathlib import Path
 
-from vexcalibur.execution_report_filesystem import _defer_keyboard_interrupt
+from vexcalibur.execution_report_filesystem import (
+    _close_descriptor,
+    _defer_keyboard_interrupt,
+)
 
 _READ_CHUNK_BYTES = 64 * 1024
 
@@ -32,14 +35,14 @@ def read_bounded_regular_file(
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
 
+    descriptor = -1
     try:
-        with _defer_keyboard_interrupt():
-            descriptor = os.open(path, flags)
-    except OSError as exc:
-        msg = f"Could not read {description}: {exc}"
-        raise BoundedFileReadError(msg) from exc
-
-    try:
+        try:
+            with _defer_keyboard_interrupt():
+                descriptor = os.open(path, flags)
+        except OSError as exc:
+            msg = f"Could not read {description}: {exc}"
+            raise BoundedFileReadError(msg) from exc
         try:
             file_status = os.fstat(descriptor)
         except OSError as exc:
@@ -71,4 +74,4 @@ def read_bounded_regular_file(
             raise BoundedFileReadError(msg)
         return bytes(content)
     finally:
-        os.close(descriptor)
+        _close_descriptor(descriptor)

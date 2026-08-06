@@ -10,7 +10,10 @@ import stat
 from collections.abc import Sequence
 from pathlib import Path
 
-from vexcalibur.execution_report_filesystem import _defer_keyboard_interrupt
+from vexcalibur.execution_report_filesystem import (
+    _close_descriptor,
+    _defer_keyboard_interrupt,
+)
 from vexcalibur.generation_context import ExecutionReportOutputFormat
 from vexcalibur.generation_result import (
     MAX_EXECUTION_REPORT_BYTES,
@@ -52,12 +55,13 @@ def _read_regular_file(path: Path, *, maximum_bytes: int, field: str) -> bytes:
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
+    descriptor = -1
     try:
-        with _defer_keyboard_interrupt():
-            descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise ExecutionReportValidationError(f"cannot open {field}: {exc}") from exc
-    try:
+        try:
+            with _defer_keyboard_interrupt():
+                descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise ExecutionReportValidationError(f"cannot open {field}: {exc}") from exc
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode):
             raise ExecutionReportValidationError(f"{field} must be a regular file")
@@ -78,7 +82,7 @@ def _read_regular_file(path: Path, *, maximum_bytes: int, field: str) -> bytes:
     except OSError as exc:
         raise ExecutionReportValidationError(f"cannot read {field}: {exc}") from exc
     finally:
-        os.close(descriptor)
+        _close_descriptor(descriptor)
 
     if len(content) > maximum_bytes:
         raise ExecutionReportValidationError(f"{field} exceeds the {maximum_bytes} byte limit")

@@ -103,12 +103,6 @@ report contract.
 .. autoclass:: GenerationExecutionReport
    :members:
 
-``GenerationExecutionReport.analysis_state_counts`` is a tuple of unique,
-positive-count pairs. Supply present states in this order: ``RESOLVED``,
-``EXPLOITABLE``, ``IN_TRIAGE``, ``FALSE_POSITIVE``, then ``NOT_AFFECTED``.
-Omit zero-count states. Each count must be no greater than
-``MAX_EXECUTION_REPORT_COUNT``, and the counts must sum to ``finding_count``.
-
 .. autoclass:: GeneratedDocumentMetadata
 
 .. autoclass:: GeneratedDocumentMetadataDict

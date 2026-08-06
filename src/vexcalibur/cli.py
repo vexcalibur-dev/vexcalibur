@@ -529,6 +529,11 @@ def generate(
                     f"Could not finalize generate outputs: {cleanup_failure}",
                     err=True,
                 )
+            elif (
+                isinstance(failure, KeyboardInterrupt)
+                and output_transaction._publication_succeeded_irreversibly
+            ):
+                return
         raise
 
 
