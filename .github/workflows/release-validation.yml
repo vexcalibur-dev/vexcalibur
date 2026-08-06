@@ -1591,7 +1591,7 @@ jobs:
             --format
             csaf
             --csaf-document-id
-            vexcalibur-synthetic-conformance
+            vexcalibur-vex
             --csaf-document-title
             Vexcalibur synthetic report conformance
             --csaf-publisher-name

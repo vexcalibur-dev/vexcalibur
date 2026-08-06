@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
@@ -11,6 +12,20 @@ import pytest
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 def test_cli_accepts_non_utf8_posix_output_filenames(tmp_path: Path) -> None:
     fixture_root = Path(__file__).parent / "fixtures"
+    probe_path = os.fsencode(tmp_path) + b"/probe-\xff"
+    try:
+        probe_descriptor = os.open(
+            probe_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except OSError as exc:
+        if exc.errno == errno.EILSEQ:
+            pytest.skip("filesystem rejects non-UTF-8 filenames")
+        raise
+    else:
+        os.close(probe_descriptor)
+        os.unlink(probe_path)
     output_path = os.fsencode(tmp_path) + b"/vex-\xff.json"
     report_path = os.fsencode(tmp_path) + b"/report-\xfe.json"
     command = [

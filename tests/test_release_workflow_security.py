@@ -633,6 +633,12 @@ def test_pinned_action_consumer_validates_success_and_failure_reports() -> None:
         "Generate synthetic CSAF report through the pinned Action",
     ):
         assert "if:" not in _step(action, step_name)
+    synthetic_csaf = _step(
+        action,
+        "Generate synthetic CSAF report through the pinned Action",
+    )
+    assert "--csaf-document-id\n            vexcalibur-vex" in synthetic_csaf
+    assert "action-report-conformance/vexcalibur-vex.json" in synthetic_csaf
     assert final_validation.count("expected_vex_files=") == 2
     assert final_validation.count("vex.cdx.execution.json") == 2
     assert final_validation.count("vex.openvex.execution.json") == 1
