@@ -21,6 +21,7 @@ from vexcalibur.csaf import (
     csaf_filename,
 )
 from vexcalibur.execution_report_errors import _retain_cleanup_failures
+from vexcalibur.execution_report_filesystem import _defer_keyboard_interrupt
 from vexcalibur.generate_command import GenerateCommandRequest
 from vexcalibur.generation_output import (
     GenerationDocumentWriteError,
@@ -508,11 +509,13 @@ def generate(
                     write_text_stdout=lambda text: typer.echo(text, nl=False),
                 )
             else:
-                with output_transaction:
-                    output_transaction.commit(
-                        generation,
-                        binary_stdout=(_binary_standard_output() if output_file is None else None),
-                    )
+                output_transaction.commit(
+                    generation,
+                    binary_stdout=(_binary_standard_output() if output_file is None else None),
+                )
+                with _defer_keyboard_interrupt():
+                    output_transaction.close()
+                    _record_irreversible_publication(output_transaction)
         except GenerationReportConstructionError as exc:
             typer.echo(f"Could not create execution report: {exc}", err=True)
             raise typer.Exit(code=1) from exc
@@ -544,8 +547,6 @@ def generate(
                 _record_irreversible_publication(output_transaction)
                 return
         raise
-    else:
-        _record_irreversible_publication(output_transaction)
 
 
 def _record_irreversible_publication(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -249,7 +251,8 @@ def test_cli_interruption_after_transaction_close_exits_successfully(
     assert report_path.exists()
 
 
-def test_cli_interruption_at_callback_return_exits_successfully(
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process signal contract")
+def test_cli_interruption_before_irreversible_marker_exits_successfully(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -258,15 +261,15 @@ def test_cli_interruption_at_callback_return_exits_successfully(
     real_record = cli._record_irreversible_publication
     interrupted = False
 
-    def record_then_interrupt(
+    def interrupt_then_record(
         transaction: GenerationOutputTransaction | None,
     ) -> None:
         nonlocal interrupted
-        real_record(transaction)
         interrupted = True
-        raise KeyboardInterrupt("callback return interruption")
+        os.kill(os.getpid(), signal.SIGINT)
+        real_record(transaction)
 
-    monkeypatch.setattr(cli, "_record_irreversible_publication", record_then_interrupt)
+    monkeypatch.setattr(cli, "_record_irreversible_publication", interrupt_then_record)
 
     result = runner.invoke(
         cli.app,
