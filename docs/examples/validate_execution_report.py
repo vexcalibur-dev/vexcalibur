@@ -87,9 +87,12 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
                 raise ValueError(f"{role} changed while it was read")
             if any(not os.path.samestat(metadata, snapshot) for snapshot in snapshots):
                 raise ValueError(f"{role} changed while it was read")
-            if _file_state(metadata) != _file_state(after_read) or _file_state(
-                before_open
-            ) != _file_state(current_path):
+            path_state = _file_state(before_open)
+            if (
+                _file_state(metadata) != _file_state(after_read)
+                or _file_state(after_open) != path_state
+                or _file_state(current_path) != path_state
+            ):
                 raise ValueError(f"{role} changed while it was read")
     finally:
         if descriptor >= 0:

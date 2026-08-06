@@ -60,6 +60,20 @@ def _write_pair(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     return report_path, document_path, report
 
 
+def _offset_stat(metadata: os.stat_result, *, nanoseconds: int) -> os.stat_result:
+    return cast(
+        os.stat_result,
+        SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_dev=metadata.st_dev,
+            st_ino=metadata.st_ino,
+            st_size=metadata.st_size,
+            st_mtime_ns=metadata.st_mtime_ns + nanoseconds,
+            st_ctime_ns=metadata.st_ctime_ns + nanoseconds,
+        ),
+    )
+
+
 def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
     report_path, document_path, expected_report = _write_pair(tmp_path)
 
@@ -125,17 +139,9 @@ def test_consumer_example_compares_timestamps_from_the_same_stat_interface(
 
     def lstat_with_platform_timestamp(selected_path: Path) -> os.stat_result:
         metadata = real_lstat(selected_path)
-        return cast(
-            os.stat_result,
-            SimpleNamespace(
-                st_mode=metadata.st_mode,
-                st_dev=metadata.st_dev,
-                st_ino=metadata.st_ino,
-                st_size=metadata.st_size,
-                st_mtime_ns=metadata.st_mtime_ns + 100,
-                st_ctime_ns=metadata.st_ctime_ns + 100,
-            ),
-        )
+        if Path(selected_path) != path:
+            return metadata
+        return _offset_stat(metadata, nanoseconds=100)
 
     monkeypatch.setattr(consumer.os, "lstat", lstat_with_platform_timestamp)
 
@@ -148,6 +154,65 @@ def test_consumer_example_compares_timestamps_from_the_same_stat_interface(
         )
         == payload
     )
+
+
+def test_consumer_example_rejects_a_path_state_restored_after_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "restored-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    real_lstat = consumer.os.lstat
+    calls = 0
+
+    def changed_then_restored_lstat(selected_path: Path) -> os.stat_result:
+        nonlocal calls
+        metadata = real_lstat(selected_path)
+        if Path(selected_path) != path:
+            return metadata
+        calls += 1
+        return _offset_stat(metadata, nanoseconds=100 if calls == 2 else 0)
+
+    monkeypatch.setattr(consumer.os, "lstat", changed_then_restored_lstat)
+
+    with pytest.raises(ValueError, match="test input changed while it was read"):
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
+
+
+def test_consumer_example_rejects_a_descriptor_state_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "changed-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    path_metadata = path.stat()
+    real_fstat = consumer.os.fstat
+    calls = 0
+
+    def changed_descriptor_fstat(descriptor: int) -> os.stat_result:
+        nonlocal calls
+        metadata = real_fstat(descriptor)
+        if not os.path.samestat(metadata, path_metadata):
+            return metadata
+        calls += 1
+        return _offset_stat(metadata, nanoseconds=100 if calls == 2 else 0)
+
+    monkeypatch.setattr(consumer.os, "fstat", changed_descriptor_fstat)
+
+    with pytest.raises(ValueError, match="test input changed while it was read"):
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
 
 
 @pytest.mark.parametrize(
