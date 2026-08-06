@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
+from typer.core import TyperGroup
+from typer.main import get_command
 from typer.testing import CliRunner
 
 import vexcalibur.execution_report_destination as destination_module
@@ -14,10 +16,7 @@ import vexcalibur.generate_command as generate_command
 from vexcalibur import cli
 from vexcalibur.domain import ComponentIdentity, VulnerabilityFinding
 from vexcalibur.execution_report_destination import BoundFileDestinationError
-from vexcalibur.generation_output import (
-    GenerationOutputError,
-    GenerationOutputTransaction,
-)
+from vexcalibur.generation_output import GenerationOutputTransaction
 from vexcalibur.generation_result import (
     ExecutionReportOutputFormat,
     FindingSourceCategory,
@@ -122,6 +121,93 @@ def test_cli_interruption_after_commit_removes_the_success_report(
     assert not report_path.exists()
 
 
+def test_cli_interruption_preserves_a_newer_report_writer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    replacement_path = tmp_path / "replacement.json"
+    replacement = b'{"writer":"newer"}\n'
+    real_commit = GenerationOutputTransaction.commit
+
+    def commit_replace_then_interrupt(
+        transaction: GenerationOutputTransaction,
+        result: GenerationResult,
+        *,
+        binary_stdout: io.BufferedIOBase | None = None,
+    ) -> None:
+        real_commit(transaction, result, binary_stdout=binary_stdout)
+        replacement_path.write_bytes(replacement)
+        replacement_path.chmod(0o600)
+        replacement_path.replace(report_path)
+        raise KeyboardInterrupt("post-commit interruption")
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "commit",
+        commit_replace_then_interrupt,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 130
+    assert output_path.exists()
+    assert report_path.read_bytes() == replacement
+
+
+def test_cli_interruption_after_rollback_release_exits_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "vex.json"
+    report_path = tmp_path / "execution-report.json"
+    real_release = GenerationOutputTransaction._release_report_rollback
+
+    def release_then_interrupt(transaction: GenerationOutputTransaction) -> bool:
+        released = real_release(transaction)
+        assert released
+        raise KeyboardInterrupt("post-release interruption")
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "_release_report_rollback",
+        release_then_interrupt,
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--output",
+            str(output_path),
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert output_path.exists()
+    assert report_path.exists()
+
+
 def test_cli_reports_persistent_abort_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -168,7 +254,7 @@ def test_cli_reports_persistent_abort_failure(
     assert expected_error in result.output
     assert "Traceback" not in result.output
     assert output_path.exists()
-    assert not report_path.exists()
+    assert report_path.exists()
 
 
 def test_cli_reports_finalization_failure_without_a_traceback(
@@ -576,6 +662,49 @@ def test_parser_failure_removes_stale_execution_report(
     assert not report_path.exists()
 
 
+def test_parser_cleanup_uses_arguments_received_by_typer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    raw_report = "%VEXCALIBUR_REPORT%"
+    expanded_report = str(tmp_path / "expanded-report.json")
+    raw_arguments = ("generate", "--execution-report", raw_report, "--unknown-option")
+    expanded_arguments = (
+        "generate",
+        "--execution-report",
+        expanded_report,
+        "--unknown-option",
+    )
+    observed: list[tuple[str, ...]] = []
+    command = get_command(cli.app)
+    assert isinstance(command, cli._VexcaliburGroup)
+
+    def expand_then_fail(
+        group: TyperGroup,
+        args: object = None,
+        **kwargs: object,
+    ) -> object:
+        del args, kwargs
+        group.make_context("vexcalibur", list(expanded_arguments))
+        raise SystemExit(2)
+
+    def observe_cleanup(
+        group: cli._VexcaliburGroup,
+        arguments: tuple[str, ...],
+    ) -> BaseException | None:
+        assert group is command
+        observed.append(arguments)
+        return None
+
+    monkeypatch.setattr(TyperGroup, "main", expand_then_fail)
+    monkeypatch.setattr(cli, "_remove_failed_generate_report", observe_cleanup)
+
+    with pytest.raises(SystemExit, match="2"):
+        command.main(args=raw_arguments)
+
+    assert observed == [expanded_arguments]
+
+
 def test_option_scanning_stops_at_the_positional_terminator(tmp_path: Path) -> None:
     sentinel_path = tmp_path / "sentinel.json"
     sentinel_path.write_text('{"keep":true}\n', encoding="utf-8")
@@ -592,6 +721,27 @@ def test_option_scanning_stops_at_the_positional_terminator(tmp_path: Path) -> N
 
     assert result.exit_code != 0
     assert sentinel_path.read_text(encoding="utf-8") == '{"keep":true}\n'
+
+
+def test_group_positional_terminator_still_removes_stale_report(tmp_path: Path) -> None:
+    report_path = tmp_path / "execution-report.json"
+    report_path.write_text('{"stale":true}\n', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "--",
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--format",
+            "invalid",
+            "--execution-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert not report_path.exists()
 
 
 def test_known_non_path_option_does_not_protect_stale_report(tmp_path: Path) -> None:
@@ -641,7 +791,7 @@ def test_parser_cleanup_failure_emits_sanitized_diagnostic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cleanup_failure = GenerationOutputError("sensitive path detail")
+    cleanup_failure = KeyboardInterrupt("sensitive path detail")
 
     def fail_cleanup_prepare(
         cls: type[GenerationOutputTransaction],

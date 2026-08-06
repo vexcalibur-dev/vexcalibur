@@ -18,6 +18,7 @@ from vexcalibur.execution_report_errors import (
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
     _close_descriptor_retryable,
+    _defer_keyboard_interrupt,
     _remove_matching_destination,
     _require_path_identity,
     _require_private_regular_file,
@@ -86,15 +87,9 @@ def _close_owned_descriptor(owner: object, attribute: str) -> None:
 
 
 def _adopt_owned_descriptor(owner: object, attribute: str, descriptor: int) -> None:
-    """Install descriptor ownership or release a failed handoff."""
+    """Install descriptor ownership after acquisition by the caller."""
     state_attribute = f"_{attribute}_state"
-    state = DescriptorState.owned(descriptor)
-    try:
-        object.__setattr__(owner, state_attribute, state)
-    except BaseException:
-        if getattr(owner, state_attribute) is not state:
-            _close_descriptor(descriptor)
-        raise
+    object.__setattr__(owner, state_attribute, DescriptorState.owned(descriptor))
 
 
 def _acquire_owned_descriptor(
@@ -105,8 +100,9 @@ def _acquire_owned_descriptor(
     """Acquire and hand off a descriptor without an unguarded local owner."""
     descriptor = -1
     try:
-        descriptor = acquire()
-        _adopt_owned_descriptor(owner, attribute, descriptor)
+        with _defer_keyboard_interrupt():
+            descriptor = acquire()
+            _adopt_owned_descriptor(owner, attribute, descriptor)
     except BaseException as primary:
         state: DescriptorState = getattr(owner, f"_{attribute}_state")
         adopted = state.ownership is DescriptorOwnership.OWNED and state.descriptor == descriptor
@@ -278,7 +274,8 @@ class StagedFileWrite:
             self._transition(StagedFileState.ROLLBACK_REQUIRED)
         parent_fd = -1
         try:
-            parent_fd = os.dup(self.destination._require_parent_descriptor())
+            with _defer_keyboard_interrupt():
+                parent_fd = os.dup(self.destination._require_parent_descriptor())
             removed = _remove_matching_destination(
                 parent_fd=parent_fd,
                 name=self.destination._name_bytes,
@@ -621,8 +618,12 @@ class PublishedFileRollback:
             PublishedRollbackState.RELEASED,
         }:
             return
+        failures: list[BaseException] = []
         for attribute in ("published_fd", "parent_fd", "lock_fd"):
-            _close_owned_descriptor(self, attribute)
+            try:
+                _close_owned_descriptor(self, attribute)
+            except BaseException as failure:
+                failures.append(failure)
 
         ownerships = (
             self._published_fd_ownership,
@@ -641,6 +642,10 @@ class PublishedFileRollback:
             else:
                 target = PublishedRollbackState.RELEASED
             self._transition(target)
+        if failures:
+            primary = failures[0]
+            _retain_cleanup_failures(primary, tuple(failures[1:]))
+            raise primary
 
     @property
     def closed(self) -> bool:
@@ -673,7 +678,8 @@ def stage_destination_bytes(
 ) -> Iterator[StagedFileWrite]:
     """Yield flushed private temporary bytes and reclaim their handles."""
     try:
-        parent_fd = destination._open_parent()
+        with _defer_keyboard_interrupt():
+            parent_fd = destination._open_parent()
     except OSError as exc:
         msg = "destination parent directory changed before write"
         raise BoundFileDestinationError(msg) from exc
@@ -681,7 +687,8 @@ def stage_destination_bytes(
     temporary_name = ""
     file_descriptor = -1
     try:
-        file_descriptor, temporary_name = destination._create_temporary_file(parent_fd)
+        with _defer_keyboard_interrupt():
+            file_descriptor, temporary_name = destination._create_temporary_file(parent_fd)
         with os.fdopen(file_descriptor, "wb", closefd=False) as stream:
             stream.write(serialized)
             stream.flush()
@@ -736,7 +743,8 @@ def _create_temporary_file(parent_fd: int) -> tuple[int, str]:
     for _ in range(128):
         name = f".vexcalibur-{secrets.token_hex(16)}.tmp"
         try:
-            descriptor = os.open(name, flags, 0o600, dir_fd=parent_fd)
+            with _defer_keyboard_interrupt():
+                descriptor = os.open(name, flags, 0o600, dir_fd=parent_fd)
         except FileExistsError:
             continue
         try:

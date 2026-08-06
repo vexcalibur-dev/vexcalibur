@@ -2,12 +2,14 @@
 
 import sys
 from collections.abc import Sequence
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, BinaryIO, cast
 
 import typer
 from packageurl import PackageURL
 from rich.console import Console
+from typer._click import Context as ClickContext
 from typer.core import TyperGroup
 
 from vexcalibur.csaf import (
@@ -49,6 +51,15 @@ from vexcalibur.sources.osv import (
 )
 from vexcalibur.vex import VexRenderError, parse_timestamp
 
+_generate_command_started: ContextVar[bool] = ContextVar(
+    "vexcalibur_generate_command_started",
+    default=False,
+)
+_generate_invocation_arguments: ContextVar[tuple[str, ...] | None] = ContextVar(
+    "vexcalibur_generate_invocation_arguments",
+    default=None,
+)
+
 
 class _VexcaliburGroup(TyperGroup):
     """Ensure failed generate parsing cannot leave a stale success marker."""
@@ -62,27 +73,48 @@ class _VexcaliburGroup(TyperGroup):
         windows_expand_args: bool = True,
         **extra: Any,
     ) -> Any:
-        raw_args = tuple(sys.argv[1:] if args is None else args)
+        arguments_token = _generate_invocation_arguments.set(None)
+        command_started_token = _generate_command_started.set(False)
         try:
-            return super().main(
-                args=args,
-                prog_name=prog_name,
-                complete_var=complete_var,
-                standalone_mode=standalone_mode,
-                windows_expand_args=windows_expand_args,
-                **extra,
-            )
-        except SystemExit as exc:
-            if exc.code not in {None, 0}:
-                cleanup_failure = _remove_failed_generate_report(self, raw_args)
-                if cleanup_failure is not None:
-                    _retain_cleanup_failures(exc, (cleanup_failure,))
-                    typer.echo(
-                        "Could not remove the stale execution report after "
-                        "argument validation failed.",
-                        err=True,
-                    )
-            raise
+            try:
+                return super().main(
+                    args=args,
+                    prog_name=prog_name,
+                    complete_var=complete_var,
+                    standalone_mode=standalone_mode,
+                    windows_expand_args=windows_expand_args,
+                    **extra,
+                )
+            except SystemExit as exc:
+                arguments = _generate_invocation_arguments.get()
+                if (
+                    exc.code not in {None, 0}
+                    and not _generate_command_started.get()
+                    and arguments is not None
+                ):
+                    cleanup_failure = _remove_failed_generate_report(self, arguments)
+                    if cleanup_failure is not None:
+                        _retain_cleanup_failures(exc, (cleanup_failure,))
+                        typer.echo(
+                            "Could not remove the stale execution report after "
+                            "argument validation failed.",
+                            err=True,
+                        )
+                raise
+        finally:
+            _generate_command_started.reset(command_started_token)
+            _generate_invocation_arguments.reset(arguments_token)
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: ClickContext | None = None,
+        **extra: Any,
+    ) -> ClickContext:
+        """Capture the exact argument sequence that Typer sends to parsing."""
+        _generate_invocation_arguments.set(tuple(args))
+        return super().make_context(info_name, args, parent=parent, **extra)
 
 
 app = typer.Typer(
@@ -97,22 +129,29 @@ console = Console()
 def _remove_failed_generate_report(
     group: _VexcaliburGroup,
     arguments: tuple[str, ...],
-) -> GenerationOutputError | None:
-    if not arguments or arguments[0] != "generate":
-        return None
-    command = group.commands.get("generate")
-    if command is None:
-        return None
+) -> BaseException | None:
     try:
+        group_context = group.context_class(
+            group,
+            resilient_parsing=True,
+            ignore_unknown_options=True,
+            allow_extra_args=True,
+        )
+        _, command_arguments, _ = group.make_parser(group_context).parse_args(list(arguments))
+        if not command_arguments or command_arguments[0] != "generate":
+            return None
+        command = group.commands.get("generate")
+        if command is None:
+            return None
         context = command.context_class(
             command,
             resilient_parsing=True,
             ignore_unknown_options=True,
             allow_extra_args=True,
         )
-        values, remaining, _ = command.make_parser(context).parse_args(list(arguments[1:]))
-    except Exception:
-        return None
+        values, remaining, _ = command.make_parser(context).parse_args(command_arguments[1:])
+    except BaseException as cleanup_failure:
+        return cleanup_failure
     report_value = values.get("execution_report")
     if not isinstance(report_value, str) or not report_value:
         return None
@@ -138,11 +177,11 @@ def _remove_failed_generate_report(
                 *_standard_error_descriptor(),
             ),
         )
-    except GenerationOutputError as cleanup_failure:
+    except BaseException as cleanup_failure:
         return cleanup_failure
     try:
         transaction.abort()
-    except GenerationOutputError as cleanup_failure:
+    except BaseException as cleanup_failure:
         return cleanup_failure
     return None
 
@@ -369,6 +408,7 @@ def generate(
     ] = True,
 ) -> None:
     """Generate VEX JSON from local or GitHub-hosted SBOM input."""
+    _generate_command_started.set(True)
     output_transaction: GenerationOutputTransaction | None = None
     if execution_report is not None:
         try:

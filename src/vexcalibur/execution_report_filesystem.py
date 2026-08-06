@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import errno
 import os
+import signal
 import stat
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 
 from vexcalibur.execution_report_errors import BoundFileDestinationError
+
+
+@contextmanager
+def _defer_keyboard_interrupt() -> Iterator[None]:
+    """Defer SIGINT until a returned descriptor has a recorded owner."""
+    if os.name == "nt" or not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
 def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
@@ -125,7 +140,8 @@ def _close_descriptor_retryable(descriptor: int) -> _DescriptorCloseOutcome:
     failure: BaseException | None = None
     try:
         try:
-            pipe_reader, pipe_writer = os.pipe()
+            with _defer_keyboard_interrupt():
+                pipe_reader, pipe_writer = os.pipe()
         except BaseException as exc:
             return _DescriptorCloseOutcome(
                 released=False,

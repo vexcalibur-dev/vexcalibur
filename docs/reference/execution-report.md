@@ -130,13 +130,19 @@ pretending the extension is CycloneDX, OSV, or a built-in VEX format.
 
 ## Write behavior
 
-Vexcalibur removes a stale report before generation, including when the normal
-command parser rejects an unknown option or missing input. On a nonzero
-`generate` exit, it reads the raw `--execution-report` and `--output` values,
-treats every other non-option token as a possible input, and runs the same
-path-binding and alias checks used by a parsed command. It removes the candidate
-only when those checks prove that the path is not an input, VEX output, or
-redirected standard stream.
+Vexcalibur removes a stale report before generation. When the command parser
+rejects an unknown option or missing input before the `generate` callback
+starts, recovery uses the group and command Click parsers to identify the
+`--execution-report` and `--output` values. Parsed path parameters and
+unconsumed operands remain protected as possible inputs. Vexcalibur then runs
+the same path-binding and alias checks used by a successful parse. It removes
+the candidate only when those checks prove that the path is not an input, VEX
+output, or redirected standard stream.
+
+After the callback starts, only the prepared transaction may remove a report.
+Its rollback guard checks the published file identity, so a later writer's
+replacement remains in place. Parser recovery does not rebind the report path
+after a runtime failure.
 
 Help and completion exit successfully, so they leave the candidate path
 unchanged. An unsafe or invalid report destination also remains unchanged; the

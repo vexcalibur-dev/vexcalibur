@@ -10,6 +10,7 @@ import stat
 from collections.abc import Sequence
 from pathlib import Path
 
+from vexcalibur.execution_report_filesystem import _defer_keyboard_interrupt
 from vexcalibur.generation_context import ExecutionReportOutputFormat
 from vexcalibur.generation_result import (
     MAX_EXECUTION_REPORT_BYTES,
@@ -52,7 +53,8 @@ def _read_regular_file(path: Path, *, maximum_bytes: int, field: str) -> bytes:
     flags |= getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_NONBLOCK", 0)
     try:
-        descriptor = os.open(path, flags)
+        with _defer_keyboard_interrupt():
+            descriptor = os.open(path, flags)
     except OSError as exc:
         raise ExecutionReportValidationError(f"cannot open {field}: {exc}") from exc
     try:

@@ -17,6 +17,7 @@ from vexcalibur.execution_report_errors import (
 )
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
+    _defer_keyboard_interrupt,
     _same_identity,
 )
 
@@ -127,14 +128,15 @@ def _exclusive_named_destination_lock(
             metadata = os.fstat(parent_descriptor)
             if not stat.S_ISDIR(metadata.st_mode):
                 raise OSError("destination parent is not a directory")
-            lock_descriptor = (
-                _open_private_destination_lock(parent_descriptor)
-                if lock_file_name == LOCK_FILE_NAME
-                else _open_private_named_destination_lock(
-                    parent_descriptor,
-                    lock_file_name,
+            with _defer_keyboard_interrupt():
+                lock_descriptor = (
+                    _open_private_destination_lock(parent_descriptor)
+                    if lock_file_name == LOCK_FILE_NAME
+                    else _open_private_named_destination_lock(
+                        parent_descriptor,
+                        lock_file_name,
+                    )
                 )
-            )
         except (
             BoundFileDestinationError,
             NotImplementedError,
@@ -230,11 +232,12 @@ def _open_private_named_destination_lock(
         directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
         directory_flags |= getattr(os, "O_DIRECTORY", 0)
         directory_flags |= getattr(os, "O_NOFOLLOW", 0)
-        lock_directory_descriptor = os.open(
-            LOCK_DIRECTORY_NAME,
-            directory_flags,
-            dir_fd=parent_descriptor,
-        )
+        with _defer_keyboard_interrupt():
+            lock_directory_descriptor = os.open(
+                LOCK_DIRECTORY_NAME,
+                directory_flags,
+                dir_fd=parent_descriptor,
+            )
         lock_directory_metadata = os.fstat(lock_directory_descriptor)
         if (
             not stat.S_ISDIR(lock_directory_metadata.st_mode)
@@ -254,12 +257,13 @@ def _open_private_named_destination_lock(
         lock_flags = os.O_RDWR | os.O_CREAT
         lock_flags |= getattr(os, "O_CLOEXEC", 0)
         lock_flags |= getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(
-            lock_file_name,
-            lock_flags,
-            0o600,
-            dir_fd=lock_directory_descriptor,
-        )
+        with _defer_keyboard_interrupt():
+            descriptor = os.open(
+                lock_file_name,
+                lock_flags,
+                0o600,
+                dir_fd=lock_directory_descriptor,
+            )
         lock_metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(lock_metadata.st_mode)

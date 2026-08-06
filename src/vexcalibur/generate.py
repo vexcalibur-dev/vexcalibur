@@ -208,15 +208,14 @@ def _render_legacy_generation(
     input_snapshot = GenerationInputSnapshot.capture_components(components)
     source_findings = _findings_for_components(source, components)
     input_snapshot = input_snapshot.capture_findings(source_findings)
-    rendered = _render_generation_document(
+    rendered, canonical_rendered = _render_generation_document(
         components=components,
         findings=source_findings,
         timestamp=timestamp,
         renderer=select_renderer(renderer),
-        preserve_extension_value=True,
     )
     result = GenerationResult._from_compatibility_snapshot(
-        rendered_document=_canonical_rendered_text(rendered),
+        rendered_document=canonical_rendered,
         compatibility_rendered_document=rendered,
         input_snapshot=input_snapshot,
     )
@@ -237,15 +236,14 @@ def _generate_result(
     source_components = input_snapshot.materialize_components()
     source_findings = _findings_for_components(source, source_components)
     input_snapshot = input_snapshot.capture_findings(source_findings)
-    rendered = _render_generation_document(
+    _, canonical_rendered = _render_generation_document(
         components=input_snapshot.materialize_components(),
         findings=input_snapshot.materialize_findings(),
         timestamp=timestamp,
         renderer=renderer,
-        preserve_extension_value=False,
     )
     return GenerationResult._from_report_snapshot(
-        rendered_document=_canonical_rendered_text(rendered),
+        rendered_document=canonical_rendered,
         input_snapshot=input_snapshot,
         execution_context=execution_context,
     )
@@ -257,16 +255,14 @@ def _render_generation_document(
     findings: tuple[VulnerabilityFinding, ...],
     timestamp: datetime | None,
     renderer: VexRenderer,
-    preserve_extension_value: bool,
-) -> str:
-    """Render and validate a document for either public generation path."""
+) -> tuple[str, str]:
+    """Return the renderer value and its validated built-in text snapshot."""
     rendered = renderer.render(
         components=components,
         findings=findings,
         timestamp=timestamp,
     )
-    canonical = _canonical_rendered_text(rendered)
-    return rendered if preserve_extension_value else canonical
+    return rendered, _canonical_rendered_text(rendered)
 
 
 def _findings_for_components(

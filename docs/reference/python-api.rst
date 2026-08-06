@@ -66,6 +66,13 @@ rendered bytes and the normalized values needed to build a versioned execution
 report, so callers do not need to parse VEX output to calculate counts or a
 digest.
 
+Built-in sources and renderers supply their execution-report categories. When
+a result uses a custom source or renderer, pass ``GenerationExecutionContext``
+with the corresponding ``custom`` category before calling
+``GenerationResult.execution_report()``. Generation can succeed without that
+context, but the result cannot produce an execution report and the method
+raises ``ValueError``.
+
 ``EXECUTION_REPORT_SCHEMA_VERSION`` is the feature-detection constant for this
 contract. Require the exact integer value your application supports. A missing,
 mistyped, or different value means the installed package does not provide that
@@ -95,6 +102,12 @@ report contract.
 
 .. autoclass:: GenerationExecutionReport
    :members:
+
+``GenerationExecutionReport.analysis_state_counts`` is a tuple of unique,
+positive-count pairs. Supply present states in this order: ``RESOLVED``,
+``EXPLOITABLE``, ``IN_TRIAGE``, ``FALSE_POSITIVE``, then ``NOT_AFFECTED``.
+Omit zero-count states. Each count must be no greater than
+``MAX_EXECUTION_REPORT_COUNT``, and the counts must sum to ``finding_count``.
 
 .. autoclass:: GeneratedDocumentMetadata
 

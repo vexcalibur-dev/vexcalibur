@@ -489,6 +489,8 @@ def test_interrupted_rollback_descriptor_release_becomes_ambiguous(
     ownership = getattr(rollback, f"_{descriptor_role}_ownership")
     assert ownership is DescriptorOwnership.AMBIGUOUS
     assert getattr(rollback, descriptor_role) == -1
+    for other_role in {"published_fd", "parent_fd", "lock_fd"} - {descriptor_role}:
+        assert getattr(rollback, f"_{other_role}_ownership") is DescriptorOwnership.RELEASED
     assert transaction._report_rollback is rollback
     assert transaction.state is GenerationOutputState.FINALIZING
     assert not transaction.closed
@@ -535,6 +537,128 @@ def test_interruption_after_physical_rollback_release_keeps_success_report(
     assert transaction.closed
     assert transaction._report_rollback.closed
     assert output_path.exists()
+    assert report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_interruption_after_rollback_release_returns_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    real_release = GenerationOutputTransaction._release_report_rollback
+
+    def release_then_interrupt(candidate: GenerationOutputTransaction) -> bool:
+        released = real_release(candidate)
+        assert candidate._report_rollback.state is PublishedRollbackState.PUBLICATION_RELEASED
+        assert released
+        raise KeyboardInterrupt("post-release interruption")
+
+    monkeypatch.setattr(
+        GenerationOutputTransaction,
+        "_release_report_rollback",
+        release_then_interrupt,
+    )
+
+    transaction.close()
+
+    assert transaction.closed
+    assert report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_release_probe_failure_retains_interrupt_as_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    rollback = transaction._report_rollback
+    real_close = staging_module.PublishedFileRollback.close
+    real_fstat = staging_module.os.fstat
+
+    def interrupt_release(candidate: staging_module.PublishedFileRollback) -> None:
+        del candidate
+        raise KeyboardInterrupt("synthetic rollback release cancellation")
+
+    def fail_probe(descriptor: int) -> os.stat_result:
+        if descriptor == rollback.published_fd:
+            raise OSError(errno.EIO, "synthetic rollback probe failure")
+        return real_fstat(descriptor)
+
+    monkeypatch.setattr(staging_module.PublishedFileRollback, "close", interrupt_release)
+    monkeypatch.setattr(staging_module.os, "fstat", fail_probe)
+
+    with pytest.raises(KeyboardInterrupt, match="release cancellation") as captured:
+        transaction.close()
+
+    cleanup_failures = captured.value.vexcalibur_cleanup_failures  # type: ignore[attr-defined]
+    assert any("could not inspect" in str(failure) for failure in cleanup_failures)
+    assert transaction.state is GenerationOutputState.ABORT_REQUIRED
+    assert report_path.exists()
+
+    monkeypatch.setattr(staging_module.PublishedFileRollback, "close", real_close)
+    monkeypatch.setattr(staging_module.os, "fstat", real_fstat)
+    transaction.abort()
+
+    assert transaction.closed
+    assert not report_path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX report transaction")
+def test_abort_after_rollback_point_of_no_return_finishes_release(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "execution-report.json"
+    transaction = GenerationOutputTransaction.prepare(
+        output_path=tmp_path / "vex.json",
+        report_path=report_path,
+        protected_paths=(),
+    )
+    transaction.commit(_generation_result(monkeypatch), binary_stdout=None)
+    rollback = transaction._report_rollback
+    real_close = staging_module.PublishedFileRollback.close
+    interrupted = False
+
+    def release_publication_then_interrupt(
+        candidate: staging_module.PublishedFileRollback,
+    ) -> None:
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            staging_module._close_owned_descriptor(candidate, "published_fd")
+            raise KeyboardInterrupt("publication descriptor released")
+        real_close(candidate)
+
+    monkeypatch.setattr(
+        staging_module.PublishedFileRollback,
+        "close",
+        release_publication_then_interrupt,
+    )
+
+    transaction.close()
+
+    assert transaction.state is GenerationOutputState.FINALIZING
+    assert rollback._published_fd_ownership is DescriptorOwnership.RELEASED
+    assert rollback._parent_fd_ownership is DescriptorOwnership.OWNED
+    assert rollback._lock_fd_ownership is DescriptorOwnership.OWNED
+
+    monkeypatch.setattr(staging_module.PublishedFileRollback, "close", real_close)
+    transaction.abort()
+
+    assert transaction.closed
     assert report_path.exists()
 
 

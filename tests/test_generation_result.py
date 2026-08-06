@@ -7,6 +7,7 @@ from typing import Literal
 import pytest
 from packageurl import PackageURL
 
+import vexcalibur.generate as generate_module
 from vexcalibur.csaf import (
     Csaf20DocumentMetadata,
     Csaf20VexJsonRenderer,
@@ -213,6 +214,38 @@ def test_legacy_generation_preserves_extension_objects() -> None:
     )
 
     assert result is rendered
+
+
+def test_each_generation_path_validates_rendered_text_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    canonical_rendered_text = generate_module._canonical_rendered_text
+
+    def count_validation(rendered: object) -> str:
+        nonlocal calls
+        calls += 1
+        return canonical_rendered_text(rendered)
+
+    monkeypatch.setattr(generate_module, "_canonical_rendered_text", count_validation)
+    component = _component()
+    source = FakeVulnerabilitySource(())
+
+    generate_vex_from_components(
+        components=(component,),
+        source=source,
+        renderer=CustomRenderer(),
+    )
+    assert calls == 1
+
+    calls = 0
+    generate_vex_from_components_result(
+        components=(component,),
+        source=source,
+        timestamp=None,
+        renderer=CustomRenderer(),
+    )
+    assert calls == 1
 
 
 def test_legacy_generation_does_not_read_extensions_after_rendering() -> None:

@@ -6,7 +6,8 @@ import errno
 import io
 import os
 import pickle
-from contextlib import ExitStack, contextmanager
+import signal
+from contextlib import ExitStack, contextmanager, suppress
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from vexcalibur.execution_report_destination import (
     BoundFileDestination,
     BoundFileDestinationError,
 )
-from vexcalibur.execution_report_lifecycle import DescriptorOwnership
+from vexcalibur.execution_report_lifecycle import DescriptorOwnership, DescriptorState
 from vexcalibur.generation_output import (
     GenerationOutputError,
     GenerationOutputTransaction,
@@ -431,6 +432,79 @@ def test_rollback_acquisition_closes_descriptor_when_adoption_is_cancelled(
     with pytest.raises(OSError):
         os.fstat(acquired[0])
     destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_failed_descriptor_adoption_has_one_cleanup_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RejectingOwner:
+        __slots__ = ()
+
+        @property
+        def _candidate_fd_state(self) -> DescriptorState:
+            return DescriptorState.released()
+
+    descriptor = os.open(os.devnull, os.O_RDONLY)
+    replacement = -1
+    close_calls = 0
+    real_close = staging_module._close_descriptor
+
+    def close_and_reuse(candidate: int) -> None:
+        nonlocal close_calls, replacement
+        close_calls += 1
+        if close_calls == 1:
+            os.close(candidate)
+            replacement = os.open(os.devnull, os.O_RDONLY)
+            return
+        real_close(candidate)
+
+    monkeypatch.setattr(staging_module, "_close_descriptor", close_and_reuse)
+
+    with pytest.raises(AttributeError):
+        staging_module._acquire_owned_descriptor(
+            RejectingOwner(),
+            "candidate_fd",
+            lambda: descriptor,
+        )
+
+    try:
+        assert close_calls == 1
+        assert replacement == descriptor
+        os.fstat(replacement)
+    finally:
+        if replacement >= 0:
+            with suppress(OSError):
+                os.close(replacement)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_descriptor_owner_is_recorded_before_pending_sigint() -> None:
+    class Owner:
+        __slots__ = ("_candidate_fd_state",)
+
+        def __init__(self) -> None:
+            self._candidate_fd_state = DescriptorState.released()
+
+    owner = Owner()
+
+    def acquire_then_interrupt() -> int:
+        descriptor = os.open(os.devnull, os.O_RDONLY)
+        os.kill(os.getpid(), signal.SIGINT)
+        return descriptor
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            staging_module._acquire_owned_descriptor(
+                owner,
+                "candidate_fd",
+                acquire_then_interrupt,
+            )
+
+        assert owner._candidate_fd_state.ownership is DescriptorOwnership.OWNED
+        os.fstat(owner._candidate_fd_state.descriptor)
+    finally:
+        staging_module._close_owned_descriptor(owner, "candidate_fd")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

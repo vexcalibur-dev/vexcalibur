@@ -321,6 +321,10 @@ def generate_vex_from_github_source_result(
     credentials or creates a client. The custom source owns its network and
     disclosure policy. Its documented exceptions propagate unchanged unless it
     raises ``VulnerabilitySourceInputError``, which becomes ``SbomError``.
+    Pass an ``execution_context`` that classifies custom source or renderer
+    boundaries before calling ``execution_report()`` on the result. Without
+    that context, generation succeeds but ``execution_report()`` raises
+    ``ValueError``.
 
     Returns:
         The rendered document and immutable inputs needed to derive its report.
@@ -368,6 +372,10 @@ def generate_vex_from_source_result(
     The source owns its network, authentication, and disclosure policy. Its
     documented exceptions propagate unchanged unless it raises
     ``VulnerabilitySourceInputError``, which becomes ``SbomError``.
+    Pass an ``execution_context`` that classifies custom source or renderer
+    boundaries before calling ``execution_report()`` on the result. Without
+    that context, generation succeeds but ``execution_report()`` raises
+    ``ValueError``.
 
     Returns:
         The rendered document and immutable inputs needed to derive its report.
@@ -401,6 +409,10 @@ def generate_vex_from_components_result(
 
     Direct component input has the ``CUSTOM`` inventory category. The source
     owns its network, authentication, and disclosure policy.
+    Pass an ``execution_context`` that classifies custom source or renderer
+    boundaries before calling ``execution_report()`` on the result. Without
+    that context, generation succeeds but ``execution_report()`` raises
+    ``ValueError``.
 
     Returns:
         The rendered document and immutable inputs needed to derive its report.

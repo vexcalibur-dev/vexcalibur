@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -184,6 +185,35 @@ def test_cancellation_during_temporary_file_setup_removes_temporary_file(
     assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
     with pytest.raises(OSError):
         os.fstat(parent_descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_pending_sigint_after_temporary_open_has_a_cleanup_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "execution-report.json"
+    destination = BoundFileDestination.prepare(path)
+    real_open = staging_module.os.open
+    interrupted = False
+
+    def open_then_interrupt(*args: object, **kwargs: object) -> int:
+        nonlocal interrupted
+        descriptor = real_open(*args, **kwargs)
+        if not interrupted:
+            interrupted = True
+            os.kill(os.getpid(), signal.SIGINT)
+        return descriptor
+
+    monkeypatch.setattr(staging_module.os, "open", open_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        destination.write_bytes(b"private report")
+
+    assert interrupted
+    assert not path.exists()
+    assert list(tmp_path.glob(".vexcalibur-*.tmp")) == []
+    assert destination.closed
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

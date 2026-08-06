@@ -17,6 +17,7 @@ from vexcalibur.execution_report_destination import (
     acquire_stdout_sequence_lock,
 )
 from vexcalibur.execution_report_errors import _retain_cleanup_failures
+from vexcalibur.execution_report_filesystem import _defer_keyboard_interrupt
 from vexcalibur.execution_report_lifecycle import (
     GenerationOutputState,
     PublishedRollbackState,
@@ -456,7 +457,20 @@ class GenerationOutputTransaction:
     def _cleanup(self, *, abort: bool) -> None:
         if self.closed:
             return
-        if abort or self._state in {
+        finalizing_publication = self._state in {
+            GenerationOutputState.COMMITTED,
+            GenerationOutputState.FINALIZING,
+        }
+        try:
+            with _defer_keyboard_interrupt() if finalizing_publication else nullcontext():
+                self._cleanup_guarded(abort=abort)
+        except BaseException:
+            if self._finish_irreversible_publication():
+                return
+            raise
+
+    def _cleanup_guarded(self, *, abort: bool) -> None:
+        if (abort and self._state is not GenerationOutputState.FINALIZING) or self._state in {
             GenerationOutputState.COMMITTING,
             GenerationOutputState.REPORT_GUARD_ARMING,
             GenerationOutputState.REPORT_GUARDED,
@@ -472,7 +486,7 @@ class GenerationOutputTransaction:
             except BaseException as exc:
                 failures.append(exc)
 
-        if failures:
+        if failures and self._state is not GenerationOutputState.FINALIZING:
             self._require_abort()
 
         if self._state is GenerationOutputState.ABORT_REQUIRED:
@@ -486,6 +500,8 @@ class GenerationOutputTransaction:
             try:
                 rollback_released = self._release_report_rollback()
             except BaseException as exc:
+                if self._finish_irreversible_publication():
+                    return
                 failures.append(exc)
                 self._require_abort()
                 try:
@@ -511,6 +527,20 @@ class GenerationOutputTransaction:
             raise GenerationOutputCleanupError(
                 "generate output cleanup did not reach a final state"
             )
+
+    def _finish_irreversible_publication(self) -> bool:
+        """Finish success after an interruption beyond rollback authority."""
+        if self._report_rollback.state is not PublishedRollbackState.PUBLICATION_RELEASED:
+            return False
+        destinations_closed = all(
+            destination is None or destination.closed
+            for destination in (self.output_destination, self.report_destination)
+        )
+        if not destinations_closed:
+            return False
+        if self._state is GenerationOutputState.FINALIZING:
+            self._transition(GenerationOutputState.CLOSED)
+        return self.closed
 
     def _require_abort(self) -> None:
         if self._state in {
@@ -625,16 +655,24 @@ class GenerationOutputTransaction:
                 if self._report_rollback.closed:
                     return True
                 if not isinstance(exc, Exception):
-                    if self._report_rollback.can_discard:
+                    if self._can_discard_retaining_release_failure(exc):
                         raise
                     return False
                 if first_failure is None:
                     first_failure = exc
-        if not self._report_rollback.can_discard:
-            return False
         if first_failure is None:
             raise RuntimeError("rollback release failed without an exception")
+        if not self._can_discard_retaining_release_failure(first_failure):
+            return False
         raise first_failure
+
+    def _can_discard_retaining_release_failure(self, failure: BaseException) -> bool:
+        """Probe rollback authority without replacing the release failure."""
+        try:
+            return self._report_rollback.can_discard
+        except BaseException as probe_failure:
+            _retain_cleanup_failures(failure, (probe_failure,))
+            raise failure.with_traceback(failure.__traceback__) from None
 
 
 def _label_destination_error(

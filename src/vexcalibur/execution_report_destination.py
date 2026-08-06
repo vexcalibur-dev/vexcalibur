@@ -21,6 +21,7 @@ from vexcalibur.execution_report_errors import DestinationLockError as Destinati
 from vexcalibur.execution_report_errors import _retain_cleanup_failures
 from vexcalibur.execution_report_filesystem import (
     _close_descriptor,
+    _defer_keyboard_interrupt,
     _require_replaceable_leaf,
     _same_identity,
 )
@@ -161,7 +162,8 @@ class BoundFileDestination:
             access_parent_path = path.absolute().parent
             flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
             flags |= getattr(os, "O_DIRECTORY", 0)
-            parent_descriptor = os.open(access_parent_path, flags)
+            with _defer_keyboard_interrupt():
+                parent_descriptor = os.open(access_parent_path, flags)
             parent_stat = os.fstat(parent_descriptor)
             parent_path = access_parent_path.resolve(strict=True)
             if _contains_reserved_lock_namespace(parent_path):
@@ -282,7 +284,8 @@ class BoundFileDestination:
     def remove_existing(self, *, destination_lock_held: bool = False) -> None:
         """Remove and durably clear a non-directory destination."""
         try:
-            parent_fd = self._open_parent()
+            with _defer_keyboard_interrupt():
+                parent_fd = self._open_parent()
             try:
                 lock = (
                     nullcontext()
@@ -338,7 +341,8 @@ class BoundFileDestination:
         try:
             flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
             flags |= getattr(os, "O_DIRECTORY", 0)
-            descriptor = os.open(self.access_parent_path, flags)
+            with _defer_keyboard_interrupt():
+                descriptor = os.open(self.access_parent_path, flags)
             parent_stat = os.fstat(descriptor)
             bound_parent_stat = self._bound_parent_stat()
             if (
@@ -355,7 +359,8 @@ class BoundFileDestination:
 
     def verify_replaceable_leaf(self) -> None:
         """Require an existing leaf to be a regular file or symbolic link."""
-        parent_fd = self._open_parent()
+        with _defer_keyboard_interrupt():
+            parent_fd = self._open_parent()
         try:
             self._verify_replaceable_leaf(parent_fd)
         finally:

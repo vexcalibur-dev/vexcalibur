@@ -344,6 +344,12 @@ class GenerationExecutionReport:
     Constructor values must satisfy the schema-version-1 enums, limits,
     analysis-state order, and count relationships.
 
+    ``analysis_state_counts`` contains unique, positive-count pairs in this
+    order: ``RESOLVED``, ``EXPLOITABLE``, ``IN_TRIAGE``, ``FALSE_POSITIVE``,
+    then ``NOT_AFFECTED``. Omit states with a zero count. Each count must be no
+    greater than ``MAX_EXECUTION_REPORT_COUNT``, and their sum must equal
+    ``finding_count``.
+
     Raises:
         TypeError: A field or nested value has the wrong type.
         ValueError: A value violates the schema-version-1 invariants.
