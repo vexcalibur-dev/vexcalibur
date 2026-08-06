@@ -1,0 +1,20 @@
+{%- if pagename != "search" and builder != "singlehtml" %}
+<search id="searchbox" style="display: none" role="search">
+  <div class="searchformwrapper">
+    <form class="search" action="{{ pathto('search') }}" method="get">
+      <label for="documentation-search">{{ _('Search documentation') }}</label>
+      <input
+        id="documentation-search"
+        type="text"
+        name="q"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+      />
+      <input type="submit" value="{{ _('Go') }}" />
+    </form>
+  </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+{%- endif %}

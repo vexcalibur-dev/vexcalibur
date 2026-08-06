@@ -123,6 +123,7 @@ statement or vulnerability assertion.
 | Option | Default | Description |
 | --- | --- | --- |
 | `--output PATH`, `-o PATH` | Standard output | Write VEX JSON to a file. |
+| `--execution-report PATH` | — | On Linux and macOS, atomically write a bounded, versioned generation summary. |
 | `--timestamp TEXT` | Current UTC time | ISO-8601 document timestamp. |
 | `--format cyclonedx\|openvex\|csaf` | `cyclonedx` | Select the output format. |
 | `--author TEXT` | — | OpenVEX document author; required for OpenVEX. |
@@ -179,8 +180,25 @@ would be smaller than 25 MiB. Every renderer, including a custom Python
 renderer, remains subject to the exact post-render UTF-8 limit.
 
 `--output` overwrites an existing file without prompting. Its parent directory
-must already exist, and there is no `--force` or atomic-write option. The
-`vexy` compatibility command differs: it refuses an existing file unless
+must already exist. When `--execution-report` is absent, the write is not
+atomic.
+
+When report mode also uses `--output`, Vexcalibur binds both paths to verified
+parent directories on Linux and macOS, then replaces them from private
+temporary files. Each
+published file has mode `0600`; existing ownership and mode are not preserved.
+Replacing a symbolic link or hard-link path replaces that directory entry
+rather than writing through it. An existing output or report path must be a
+regular file or symbolic link. Directories, FIFOs, sockets, and devices fail
+before generation with a `Could not prepare generate outputs:` error.
+The parent filesystem must support descriptor-relative file operations and a
+directory `fsync`. A failure to flush a directory makes the command fail.
+
+Without `--output`, VEX bytes go directly to standard output and are flushed
+before the report is published. Vexcalibur does not stage that stream and
+cannot set the mode of a shell redirection target.
+
+The `vexy` compatibility command differs: it refuses an existing file unless
 `--force` is present.
 
 CSAF file output also enforces the standard basename derived from the document
@@ -189,6 +207,17 @@ underscore, and append `.json`. For example, `ACME VEX:2026/001` requires
 `acme_vex_2026_001.json`. The rule does not apply to standard output.
 
 OSV-derived entries use analysis state `in_triage`. Local findings may set any supported domain state.
+
+`--execution-report` writes a bounded JSON summary after the selected VEX
+document has been rendered and emitted. The summary contains counts, source
+categories, the output format, the installed package version, and the exact
+document digest and byte size. It omits package names and URLs, vulnerability
+IDs, repository names, filesystem paths, provider URLs, credentials, and
+exception text.
+
+The option fails on Windows before it touches the requested report. See the
+[generation execution report](execution-report.md) for the schema and failure
+behavior.
 
 CycloneDX output preserves those state names. OpenVEX maps them to its
 four-status model and requires state-specific evidence. CSAF maps them to
@@ -213,7 +242,18 @@ pair. Read the
 | Public OSV without consent or invalid OSV URL | `1` | `VEX generation failed:` |
 | OSV request or response failure | `1` | `OSV query failed:` |
 | Findings cannot form the selected VEX format | `1` | `VEX generation failed:` |
+| Missing or nonreplaceable VEX output destination in report mode | `1` | `Could not prepare generate outputs:` |
 | Output write failure | `1` | `Could not write VEX output` |
+| Unsafe, missing-parent, or unsupported execution report destination | `1` | `Could not prepare generate outputs:` |
+| Execution report requested on Windows | `1` | `Could not prepare generate outputs:` |
+| Execution report construction failure | `1` | `Could not create execution report:` |
+| Execution report write failure | `1` | `Could not write execution report` |
+| Output finalization or cleanup failure | `1` | `Could not finalize generate outputs:` |
+
+A finalization failure can leave the VEX document in place. Vexcalibur removes
+its published report when it can, but a cleanup failure makes either
+destination indeterminate. Treat the operation as failed and inspect both paths
+before reusing the directory.
 
 ### Resource limits
 
@@ -232,9 +272,11 @@ The CLI uses these fixed client defaults:
 | OSV vulnerability data | IDs no longer than 512 characters; 10,000 unique IDs per query; 100,000 query-and-ID results per operation |
 | OSV-to-component expansion | 100,000 findings, checked before findings are materialized |
 | Built-in pre-render estimate and exact serialized VEX | 25 MiB UTF-8 budget; the conservative estimate may reject earlier |
+| Generation execution report | 16 KiB UTF-8, including its trailing newline |
+| Report-mode coordination lock | 10-second wait for each destination directory or per-report stdout sequence lock |
 | GitHub SBOM API and report download | 30 seconds per request; at most 30 report polls; one-second default delay; numeric `Retry-After` capped at 10 seconds; report polling is the only retry |
 
-`OsvClient` callers may tighten or raise its constructor limits. Encoded and
+`OsvClient` callers may lower or raise its constructor limits. Encoded and
 decoded response limits are configured independently. The 1,000-query
 chunk size, 100,000-finding expansion limit, and 25 MiB output limit are fixed
 generation boundaries in this release.

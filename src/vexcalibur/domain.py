@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from packageurl import PackageURL
 
@@ -133,3 +133,17 @@ class VulnerabilitySource(Protocol):
         Raises:
             VulnerabilitySourceError: The source cannot produce findings.
         """
+
+
+@runtime_checkable
+class GenerationSourcePreflight(Protocol):
+    """Source policy checks that must run before loading remote inventory."""
+
+    def validate_before_inventory_load(self) -> None:
+        """Validate source policy without making a request."""
+
+
+def validate_source_before_inventory_load(source: VulnerabilitySource) -> None:
+    """Run a source-owned preflight when the source provides one."""
+    if isinstance(source, GenerationSourcePreflight):
+        source.validate_before_inventory_load()

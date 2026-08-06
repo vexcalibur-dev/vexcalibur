@@ -104,7 +104,7 @@ staging_dir="$(mktemp -d "$output_parent/.release-evidence.XXXXXX")"
 
 venv_dir="$temporary_root/venv"
 install_requirements="$temporary_root/install-requirements.txt"
-scripts/install-locked-wheel.sh "$venv_dir" "$wheel" "$install_requirements"
+scripts/install-locked-distribution.sh "$venv_dir" "$wheel" "$install_requirements"
 installed_python="$venv_dir/bin/python"
 installed_cli="$venv_dir/bin/vexcalibur"
 

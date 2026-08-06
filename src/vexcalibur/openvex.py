@@ -21,6 +21,7 @@ from vexcalibur.document import (
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
 from vexcalibur.render import VexRenderError
+from vexcalibur.render_budget import enforce_builtin_render_input_budget
 
 OPENVEX_SPEC_VERSION = "0.2.0"
 OPENVEX_CONTEXT = f"https://openvex.dev/ns/v{OPENVEX_SPEC_VERSION}"
@@ -95,6 +96,14 @@ class OpenVexJsonRenderer:
         Raises:
             OpenVexRenderError: The values cannot form a valid document.
         """
+        if type(self)._render_document is OpenVexJsonRenderer._render_document:
+            enforce_builtin_render_input_budget(
+                components=components,
+                findings=findings,
+                component_purl_copies=1,
+                finding_component_purl_copies=2,
+                additional_text=(self.author, self.role),
+            )
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:

@@ -11,6 +11,17 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
+try:
+    from scripts.archive_limits import (
+        ArchivePreflightError,
+        preflight_tar_gzip_stream,
+    )
+except ModuleNotFoundError:
+    from archive_limits import (  # type: ignore[no-redef]
+        ArchivePreflightError,
+        preflight_tar_gzip_stream,
+    )
+
 MAX_INPUT_BYTES = 32 * 1024 * 1024
 MAX_MEMBERS = 10_000
 MAX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
@@ -54,12 +65,22 @@ def _read_members(path: Path) -> list[Member]:
         raise NormalizationError(f"input must be a regular, non-symlink file: {path}")
     if path.stat().st_size > MAX_INPUT_BYTES:
         raise NormalizationError(f"input exceeds the {MAX_INPUT_BYTES}-byte limit: {path}")
+    try:
+        snapshot = preflight_tar_gzip_stream(
+            path,
+            artifact="sdist",
+            maximum_members=MAX_MEMBERS,
+            maximum_file_bytes=MAX_UNCOMPRESSED_BYTES,
+            maximum_archive_bytes=MAX_INPUT_BYTES,
+        )
+    except ArchivePreflightError as exc:
+        raise NormalizationError(str(exc)) from exc
 
     result: list[Member] = []
     names: set[str] = set()
     uncompressed_bytes = 0
     try:
-        with tarfile.open(path, "r:gz") as archive:
+        with snapshot.open() as stream, tarfile.open(fileobj=stream, mode="r:gz") as archive:
             for index, member in enumerate(archive):
                 if index >= MAX_MEMBERS:
                     raise NormalizationError("sdist contains too many members")

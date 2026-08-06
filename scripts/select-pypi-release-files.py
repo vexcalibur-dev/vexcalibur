@@ -69,7 +69,12 @@ def _directory_flags() -> int:
 
 
 def _file_read_flags() -> int:
-    return os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
 
 
 def _open_directory(path: Path, *, label: str) -> int:
@@ -316,6 +321,7 @@ def _copy_distributions_exclusively(
                 os.O_WRONLY
                 | os.O_CREAT
                 | os.O_EXCL
+                | getattr(os, "O_BINARY", 0)
                 | getattr(os, "O_CLOEXEC", 0)
                 | getattr(os, "O_NOFOLLOW", 0)
             )
@@ -358,6 +364,7 @@ def _write_github_output(path: Path, result: dict[str, Any]) -> None:
         os.O_WRONLY
         | os.O_APPEND
         | os.O_CREAT
+        | getattr(os, "O_BINARY", 0)
         | getattr(os, "O_CLOEXEC", 0)
         | getattr(os, "O_NOFOLLOW", 0)
     )

@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "next-release-tag.sh"
 GIT = shutil.which("git")
@@ -151,17 +153,40 @@ def test_only_malformed_release_like_tags_do_not_block_initial_release(tmp_path:
     }
 
 
-def test_manual_release_can_exceed_tag_on_current_head(tmp_path: Path) -> None:
+def test_manual_release_rejects_a_second_tag_on_current_head(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")
 
-    assert run_release_script(repo, "0.2.0") == {
-        "skip": "false",
-        "tag": "v0.2.0",
-        "version": "0.2.0",
-        "previous_tag": "v0.1.0",
-        "bump": "manual",
-    }
+    result = run_release_script_failure(repo, "0.2.0")
+
+    assert result.returncode == 1
+    assert "manual version cannot add a second release tag to HEAD" in result.stderr
+    assert "v0.1.0" in result.stderr
+
+
+def test_multiple_release_tags_on_current_head_are_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")
+    run_git(repo, "tag", "-a", "v0.2.0", "-m", "Release v0.2.0")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release SHA already has competing version tags" in result.stderr
+    assert "v0.1.0 v0.2.0" in result.stderr
+
+
+def test_automatic_release_rejects_a_lower_tag_on_current_head(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v2.0.0", "-m", "Release v2.0.0")
+    commit(repo, "fix: update after major release")
+    run_git(repo, "tag", "-a", "v1.5.0", "-m", "Conflicting lower release")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release SHA already has a non-latest version tag: v1.5.0" in result.stderr
+    assert "latest merged tag: v2.0.0" in result.stderr
 
 
 def test_manual_release_rejects_lower_version(tmp_path: Path) -> None:
@@ -219,6 +244,52 @@ def test_outputs_can_be_written_to_github_output_file(tmp_path: Path) -> None:
     }
 
 
+@pytest.mark.parametrize("failure_phase", ("all", "merged"))
+def test_failed_tag_enumeration_writes_no_release_outputs(
+    failure_phase: str,
+    tmp_path: Path,
+) -> None:
+    repo = init_repo(tmp_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "tag" ]] &&
+   {{ [[ "${{FAILURE_PHASE}}" == "all" ]] || [[ "${{2:-}}" == "--merged" ]]; }}; then
+  printf 'synthetic tag enumeration failure\\n' >&2
+  exit 73
+fi
+exec {GIT} "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    output_path = repo / "github-output.txt"
+    env = {
+        **os.environ,
+        "FAILURE_PHASE": failure_phase,
+        "GITHUB_OUTPUT": str(output_path),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(  # noqa: S603 - test-owned Git wrapper
+        [BASH, "next-release-tag.sh"],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "synthetic tag enumeration failure" in result.stderr
+    assert "could not enumerate release tags" in result.stderr
+    assert not output_path.exists()
+
+
 def test_existing_head_tag_can_create_missing_release(tmp_path: Path) -> None:
     repo = init_repo(tmp_path)
     run_git(repo, "tag", "-a", "v0.1.0", "-m", "Release v0.1.0")
@@ -228,6 +299,113 @@ def test_existing_head_tag_can_create_missing_release(tmp_path: Path) -> None:
         "tag": "v0.1.0",
         "version": "0.1.0",
         "previous_tag": "",
+        "bump": "existing",
+    }
+
+
+def test_existing_head_tag_rejects_unbounded_version_component(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v1000000.0.0", "-m", "Invalid release tag")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "version component 1000000 must be less than or equal to 999999" in result.stderr
+
+
+def test_valid_head_tag_does_not_mask_unbounded_head_tag(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v1.0.0", "-m", "Release v1.0.0")
+    run_git(repo, "tag", "-a", "v0.1000000.0", "-m", "Invalid release tag")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "version component 1000000 must be less than or equal to 999999" in result.stderr
+
+
+def test_nested_annotated_head_tag_is_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "intermediate", "-m", "Intermediate tag")
+    run_git(repo, "tag", "-a", "v1.2.3", "intermediate", "-m", "Nested release tag")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v1.2.3 must directly annotate a commit" in result.stderr
+
+
+def test_unbounded_nested_annotated_head_tag_is_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "intermediate", "-m", "Intermediate tag")
+    run_git(repo, "tag", "-a", "v1000000.0.0", "intermediate", "-m", "Nested release tag")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v1000000.0.0 must directly annotate a commit" in result.stderr
+
+
+def test_lightweight_head_tag_is_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "v1.2.3")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v1.2.3 must be annotated" in result.stderr
+
+
+@pytest.mark.parametrize("object_spec", ["HEAD:README.md", "HEAD^{tree}"])
+def test_annotated_noncommit_release_tag_is_rejected(
+    tmp_path: Path,
+    object_spec: str,
+) -> None:
+    repo = init_repo(tmp_path)
+    object_id = run_git(repo, "rev-parse", object_spec)
+    run_git(repo, "tag", "-a", "v1.2.3", object_id, "-m", "Invalid release tag")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v1.2.3 must directly annotate a commit" in result.stderr
+
+
+def test_lightweight_noncommit_release_tag_is_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    blob_id = run_git(repo, "rev-parse", "HEAD:README.md")
+    run_git(repo, "tag", "v1.2.3", blob_id)
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v1.2.3 must be annotated" in result.stderr
+
+
+def test_nested_annotated_historical_tag_is_rejected(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v1.0.0", "-m", "Release v1.0.0")
+    run_git(repo, "tag", "-a", "v9.0.0", "v1.0.0", "-m", "Nested release tag")
+    commit(repo, "feat: prepare next release")
+
+    result = run_release_script_failure(repo, "")
+
+    assert result.returncode == 1
+    assert "release tag v9.0.0 must directly annotate a commit" in result.stderr
+
+
+def test_existing_head_tag_ignores_unbounded_historical_tag(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    run_git(repo, "tag", "-a", "v1.0.0", "-m", "Release v1.0.0")
+    run_git(repo, "tag", "-a", "v1.1000000.0", "-m", "Invalid historical tag")
+    commit(repo, "feat: prepare second major release")
+    run_git(repo, "tag", "-a", "v2.0.0", "-m", "Release v2.0.0")
+
+    assert run_release_script(repo) == {
+        "skip": "false",
+        "tag": "v2.0.0",
+        "version": "2.0.0",
+        "previous_tag": "v1.0.0",
         "bump": "existing",
     }
 

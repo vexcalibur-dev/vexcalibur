@@ -24,7 +24,7 @@ Before a pull request that changes packaging or documentation, also check the lo
 ```bash
 uv lock --check
 uv sync --frozen --extra docs
-uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
+uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py
 make check
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 make docs

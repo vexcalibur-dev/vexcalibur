@@ -8,7 +8,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import ParseResult, quote, urlparse
 
 import httpx
@@ -39,6 +39,14 @@ class GithubSbomConfigurationError(GithubSbomError):
 
 class GithubSbomClientError(GithubSbomError):
     """Raised when GitHub's SBOM API cannot return usable data."""
+
+
+class GithubSbomComponentLoader(Protocol):
+    """Load normalized components from one GitHub repository SBOM."""
+
+    def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
+        """Return normalized components for ``OWNER/REPO``."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -393,7 +401,7 @@ def resolve_github_token(
     if not allow_gh_cli:
         return None
 
-    return _gh_auth_token(api_url)
+    return _gh_auth_token(api_url, environ=environment)
 
 
 def _validated_github_token(token: str | None) -> str | None:
@@ -698,14 +706,27 @@ def _github_cli_hostname(api_url: str) -> str:
     return normalized_hostname
 
 
-def _gh_auth_token(api_url: str) -> str | None:
+def _gh_auth_token(
+    api_url: str,
+    *,
+    environ: Mapping[str, str],
+) -> str | None:
     hostname = _github_cli_hostname(api_url)
+    gh_environment = dict(environ)
+    for variable_name in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+    ):
+        gh_environment.pop(variable_name, None)
     try:
         completed = subprocess.run(  # noqa: S603
             # `gh` is intentionally resolved from PATH to match the user's CLI setup.
             ["gh", "auth", "token", "--hostname", hostname],  # noqa: S607
             check=False,
             capture_output=True,
+            env=gh_environment,
             text=True,
             timeout=5,
         )

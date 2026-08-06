@@ -12,6 +12,7 @@ CSAF_SCHEMA := tests/fixtures/schemas/csaf-2.0.schema.json
 CSAF_SCHEMA_SHA256 := 29c114b35b0a30831f1674f2ab8b3ed9b2890cfeaa63b924ac6ed9d70ef44262
 RELEASE_EVIDENCE_OUTPUT ?= build/release-evidence
 RELEASE_SHA ?= $(shell git rev-parse --verify HEAD)
+PYTHON_QUALITY_PATHS := src tests scripts/*.py docs/conf.py docs/examples/*.py
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,7 +36,7 @@ fuzz-coverage: ## Run bounded Atheris targets (set FUZZ_TARGET to select one)
 	$(UV) sync --frozen --group fuzz
 	scripts/run-atheris.sh
 
-installed-cli-check: ## Build, install, and test console scripts from the wheel
+installed-cli-check: ## Build, install, and test console scripts from a distribution
 	scripts/check-installed-cli.sh
 
 installed-csaf-check: csaf-schema-check ## Generate and validate CSAF with an installed wheel
@@ -65,7 +66,7 @@ release-evidence-check: csaf-validator-install ## Check deterministic zero and a
 	scripts/check-release-evidence.sh
 
 lint: ## Run ruff checks
-	$(UV) run --frozen ruff check src tests scripts/*.py docs/conf.py docs/examples/*.py
+	$(UV) run --frozen ruff check $(PYTHON_QUALITY_PATHS)
 
 workflow-lint: ## Lint GitHub Actions workflows and shell scripts
 	$(SHELLCHECK) --version >/dev/null
@@ -73,8 +74,8 @@ workflow-lint: ## Lint GitHub Actions workflows and shell scripts
 	$(SHELLCHECK) scripts/*.sh
 
 format: ## Format source and tests
-	$(UV) run --frozen ruff format src tests scripts/*.py docs/conf.py docs/examples/*.py
-	$(UV) run --frozen ruff check --fix src tests scripts/*.py docs/conf.py docs/examples/*.py
+	$(UV) run --frozen ruff format $(PYTHON_QUALITY_PATHS)
+	$(UV) run --frozen ruff check --fix $(PYTHON_QUALITY_PATHS)
 
 typecheck: ## Run mypy
 	$(UV) run --frozen mypy src
@@ -96,6 +97,10 @@ check: lint workflow-lint typecheck audit secrets test fuzz-smoke ## Run local q
 
 docs: ## Build Sphinx documentation
 	$(UV) run --frozen --extra docs sphinx-build -W --keep-going -b html docs docs/_build/html
+	cmp -- docs/execution-report-v1.schema.json docs/_build/html/execution-report-v1.schema.json
+	$(UV) run --frozen python scripts/check_docs_accessibility.py docs/_build/html
+	VEXCALIBUR_EXECUTION_REPORT_SCHEMA=docs/_build/html/execution-report-v1.schema.json \
+		$(UV) run --frozen pytest -q --no-cov tests/test_execution_report_consumer_example.py
 
 build: ## Build source and wheel distributions
 	$(UV) build --clear --no-create-gitignore --no-sources

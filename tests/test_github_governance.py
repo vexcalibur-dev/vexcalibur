@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +52,24 @@ def test_expected_snapshot_matches_policy() -> None:
     snapshot = governance.load_snapshot(FIXTURE)
 
     assert governance.validate_snapshot(snapshot) == ()
+
+
+def test_release_workflow_app_permissions_match_governance_policy() -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    token_start = workflow.rindex("- name: Generate app token")
+    token_end = workflow.index("\n      - name:", token_start + 1)
+    token_step = workflow[token_start:token_end]
+    requested = dict(re.findall(r"permission-([a-z-]+): ([a-z]+)", token_step))
+    requested["metadata"] = "read"
+
+    snapshot = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    installations = cast(
+        dict[str, list[dict[str, object]]],
+        snapshot["organization_installations"],
+    )["installations"]
+    expected = cast(dict[str, str], installations[0]["permissions"])
+
+    assert requested == expected
 
 
 def test_offline_cli_accepts_expected_snapshot(capsys: pytest.CaptureFixture[str]) -> None:

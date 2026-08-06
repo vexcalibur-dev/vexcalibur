@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vexcalibur-dev.github.io/vexcalibur/execution-report-v1.schema.json",
+  "title": "Vexcalibur generation execution report",
+  "description": "Schema version 1 report for one successful Vexcalibur generate operation.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "command",
+    "vexcalibur_version",
+    "inventory_source",
+    "finding_source",
+    "output_format",
+    "component_count",
+    "finding_count",
+    "analysis_state_counts",
+    "document"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "command": {
+      "const": "generate"
+    },
+    "vexcalibur_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z.!+_-]*$",
+      "not": {
+        "pattern": "[^0-9A-Za-z.!+_-]"
+      }
+    },
+    "inventory_source": {
+      "enum": [
+        "sbom_file",
+        "github_dependency_graph",
+        "custom"
+      ]
+    },
+    "finding_source": {
+      "enum": [
+        "local_file",
+        "public_osv",
+        "custom_osv",
+        "custom"
+      ]
+    },
+    "output_format": {
+      "enum": [
+        "cyclonedx",
+        "openvex",
+        "csaf",
+        "custom"
+      ]
+    },
+    "component_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000000
+    },
+    "finding_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000000
+    },
+    "analysis_state_counts": {
+      "type": "object",
+      "properties": {
+        "resolved": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "exploitable": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "in_triage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "false_positive": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "not_affected": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "document": {
+      "type": "object",
+      "required": [
+        "sha256",
+        "bytes"
+      ],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 26214400
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

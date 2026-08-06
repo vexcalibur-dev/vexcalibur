@@ -5,15 +5,17 @@ A provider turns normalized SBOM components into `VulnerabilityFinding` values. 
 The compatibility guarantee for this contract begins with Vexcalibur 1.0.
 Before 1.0, pin an exact release.
 
+This reference covers both first-party sources maintained with Vexcalibur and
+external sources owned by an embedding application. External source code stays
+in the embedding's package and implements the same public protocol.
+
 ## Protocol
 
-A source implements `vexcalibur.api.VulnerabilitySource`. This complete local
-example reports one reviewed finding when the matching package is present:
+A source implements `vexcalibur.api.VulnerabilitySource`:
 
 ```python
 from vexcalibur.api import (
     ComponentIdentity,
-    VexAnalysisState,
     VulnerabilityFinding,
 )
 
@@ -23,23 +25,68 @@ class ExampleSource:
         self,
         components: tuple[ComponentIdentity, ...],
     ) -> tuple[VulnerabilityFinding, ...]:
-        return tuple(
-            VulnerabilityFinding(
-                id="CVE-2026-0001",
-                source_name="Example Security Review",
-                source_url="https://security.example.test/CVE-2026-0001",
-                component_ref=component.ref,
-                purl=component.purl.to_string(),
-                analysis_state=VexAnalysisState.NOT_AFFECTED,
-                analysis_detail="The affected feature is disabled.",
-                impact_statement="The affected feature is disabled.",
-            )
-            for component in components
-            if component.purl.to_string() == "pkg:pypi/example@1.0.0"
-        )
+        return ()
 ```
 
-The method receives the complete normalized component tuple and returns zero or more immutable findings.
+`findings_for_components` receives the complete normalized component tuple and
+returns zero or more immutable findings.
+
+See the tested [custom generation
+example](../examples/generate_custom_execution_report.py) for a provider that
+returns no findings and prints a custom execution report.
+
+Custom providers cannot assign their own report category. The caller must pass
+a complete `GenerationExecutionContext` with
+`FindingSourceCategory.CUSTOM` before it requests a report. Vexcalibur records
+`custom` without exposing the provider name or endpoint.
+
+Vexcalibur reserves `local_file`, `public_osv`, and `custom_osv` for exact
+built-in source implementations. An injected OSV client is an extension and
+therefore records `custom`, regardless of the endpoint it contacts.
+
+## Optional preflight protocol
+
+A source that must validate policy before Vexcalibur loads remote inventory can
+also implement `GenerationSourcePreflight`:
+
+```python
+from dataclasses import dataclass
+
+from vexcalibur.api import (
+    ComponentIdentity,
+    GenerationSourcePreflight,
+    VulnerabilityFinding,
+    VulnerabilitySourceInputError,
+)
+
+
+@dataclass(frozen=True)
+class ExampleSource(GenerationSourcePreflight):
+    public_data_sharing_allowed: bool
+
+    def validate_before_inventory_load(self) -> None:
+        if not self.public_data_sharing_allowed:
+            raise VulnerabilitySourceInputError(
+                "public data sharing requires explicit consent"
+            )
+
+    def findings_for_components(
+        self,
+        components: tuple[ComponentIdentity, ...],
+    ) -> tuple[VulnerabilityFinding, ...]:
+        return ()
+```
+
+`generate_vex_from_github_source_result`, `generate_vex_from_github_sbom`, and
+`generate_vex_from_github_sbom_result` call this hook before they construct a
+GitHub client or request the repository inventory. The hook must only inspect
+local configuration. It must not open a file, create a network client, or make
+a request.
+
+Raise `VulnerabilitySourceInputError` when the selected inventory makes the
+source configuration invalid. Vexcalibur reports that exception as an
+`SbomError` and retains the original exception as its cause. Other exceptions
+propagate unchanged. A source with no preflight work can omit the method.
 
 ## Component identity
 
@@ -122,11 +169,11 @@ The OSV source implements this policy with `--allow-public-osv` and `--osv-url`.
 
 An offline source should not create a network client. It should define limits for local data and reject ambiguous component matches.
 
-## Implementation shape
+## Implementation contract
 
-First-party provider code belongs under `vexcalibur.sources`. External
-applications and packages must keep providers in their own package namespace;
-the `vexcalibur` namespace is reserved for this distribution.
+First-party provider code belongs under `src/vexcalibur/sources`. An external
+provider remains in the embedding's package; it does not need to modify or
+install modules into the `vexcalibur` namespace.
 
 1. Validate configuration before I/O.
 2. Map `ComponentIdentity` values to provider queries or lookup keys.
@@ -143,6 +190,14 @@ mapping, and CLI error reporting. A paginated network source also needs
 exact-limit and limit-plus-one body tests, compressed and chunked responses,
 error-body limits, repeated and oversized tokens, pagination floods, record
 deduplication, total deadlines, and expansion-limit tests.
+
+When a provider implements `GenerationSourcePreflight`, add an ordering test
+that makes the hook fail. Assert that Vexcalibur did not call the selected
+GitHub client factory or inventory loader.
+
+First-party providers put these tests in the Vexcalibur suite. External
+providers run the equivalent contract and integration tests in their owning
+package.
 
 Run offline tests before opening a pull request:
 

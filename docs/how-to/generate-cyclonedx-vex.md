@@ -133,43 +133,59 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-The companion Action accepts the same command arguments. Run **Find the latest
-tested pair** from its [compatibility
-reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
-to obtain an Action tag, its exact commit, and the tested package requirement.
-Replace `ACTION_COMMIT_SHA`, `ACTION_TAG`, and `PACKAGE_SPEC` below with those
-three values. This production example also expects a reviewed, complete pip
-constraints file at `.github/vexcalibur-constraints.txt`; the file keeps
-transitive package versions stable between runs. The Action's [input
-reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/action.md)
-defines the constraints path and installation behavior.
+## Run the released GitHub Action
+
+This workflow uses the tested `v0.2.2` Action pair: Action commit
+`80c930ee228c2757a4aadb51ce29a79c5066d6ca` and `vexcalibur==0.3.1`. It keeps
+the vulnerability lookup local and uploads the generated VEX file only after
+the generation step succeeds.
 
 ```yaml
+name: Generate VEX
+
+on:
+  workflow_dispatch:
+
 permissions:
   contents: read
 
-steps:
-  - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-    with:
-      persist-credentials: false
+jobs:
+  vex:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-  - uses: vexcalibur-dev/vexcalibur-action@ACTION_COMMIT_SHA # ACTION_TAG
-    with:
-      package-spec: PACKAGE_SPEC
-      constraints-file: ${{ github.workspace }}/.github/vexcalibur-constraints.txt
-      args: |
-        generate
-        --github-repo
-        ${{ github.repository }}
-        --github-token-env
-        GITHUB_TOKEN
-        --osv-url
-        https://osv.internal.example
-        --output
-        ${{ runner.temp }}/vex.json
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
+      - name: Generate CycloneDX VEX
+        uses: vexcalibur-dev/vexcalibur-action@80c930ee228c2757a4aadb51ce29a79c5066d6ca # v0.2.2
+        with:
+          package-spec: vexcalibur==0.3.1
+          args: |
+            generate
+            ${{ github.workspace }}/path/to/sbom.json
+            --offline
+            --findings-file
+            ${{ github.workspace }}/path/to/findings.json
+            --output
+            ${{ runner.temp }}/vex.json
+
+      - name: Upload VEX
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cyclonedx-vex
+          path: ${{ runner.temp }}/vex.json
+          if-no-files-found: error
 ```
+
+Replace both `path/to` values with files in your repository. A passing
+**Generate CycloneDX VEX** step followed by a `cyclonedx-vex` artifact is the
+success signal.
+
+The Action and package are separate trust decisions. To update either pin, use
+the Action release's compatibility declaration, pinned here to immutable
+Action commit `80c930ee228c2757a4aadb51ce29a79c5066d6ca`, to select a package
+version and Action commit tested together:
+[compatibility declaration](https://github.com/vexcalibur-dev/vexcalibur-action/blob/80c930ee228c2757a4aadb51ce29a79c5066d6ca/docs/reference/compatibility.md)
 
 ## Read XML input
 

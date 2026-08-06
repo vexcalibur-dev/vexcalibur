@@ -1,3 +1,4 @@
+import importlib.metadata
 import json
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,7 @@ class FakeOsvClient:
         self,
         results: list[OsvQueryResult] | None = None,
         *,
+        base_url: str | None = None,
         max_vulnerability_id_length: int = 512,
         **kwargs,
     ) -> None:
@@ -50,6 +52,9 @@ class FakeOsvClient:
         self.kwargs = kwargs
         self._results = results or []
         self.max_vulnerability_id_length = max_vulnerability_id_length
+        if base_url is not None:
+            self.base_url = base_url
+            self.kwargs["base_url"] = base_url
 
     def query_batch_packages(self, queries: list[OsvPackageQuery]) -> list[OsvQueryResult]:
         self.queries.extend(queries)
@@ -67,6 +72,19 @@ class FakeVulnerabilitySource:
     ) -> tuple[VulnerabilityFinding, ...]:
         self.components = components
         return self._findings
+
+
+class FakeGithubSbomClient:
+    def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
+        assert repository == "vexcalibur-dev/vexcalibur"
+        return (
+            ComponentIdentity(
+                ref="SPDXRef-pypi-django-1.2",
+                name="django",
+                version="1.2",
+                purl=PackageURL.from_string("pkg:pypi/django@1.2"),
+            ),
+        )
 
 
 def test_generate_vex_from_source_uses_provider_neutral_source() -> None:
@@ -110,6 +128,40 @@ def test_generate_vex_from_source_accepts_cyclonedx_xml_sbom() -> None:
     assert [(component.ref, component.purl.to_string()) for component in source.components] == [
         ("component:django", "pkg:pypi/django@1.2")
     ]
+    assert VALIDATOR.validate_str(generated) is None
+
+
+def test_compatibility_generation_does_not_require_package_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing_version(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(
+        "vexcalibur.generation_result.importlib.metadata.version",
+        missing_version,
+    )
+
+    generated = generate_vex_from_local_findings(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        findings_file=FINDINGS_ROOT / "all-analysis-states.json",
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
+    assert VALIDATOR.validate_str(generated) is None
+
+
+def test_compatibility_generation_does_not_validate_report_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("vexcalibur.__version__", "not report safe")
+
+    generated = generate_vex_from_local_findings(
+        input_file=FIXTURE_ROOT / "cyclonedx-json-simple.json",
+        findings_file=FINDINGS_ROOT / "all-analysis-states.json",
+        timestamp=parse_timestamp("2026-06-23T00:00:00Z"),
+    )
+
     assert VALIDATOR.validate_str(generated) is None
 
 
@@ -229,6 +281,42 @@ def test_generate_vex_from_components_enforces_utf8_output_byte_limit(monkeypatc
             source=source,
             timestamp=None,
             renderer=CustomRenderer("\ud800"),
+        )
+
+
+def test_output_limit_does_not_dispatch_to_a_str_subclass_encode(monkeypatch) -> None:
+    component = ComponentIdentity(
+        ref="component:demo",
+        name="demo",
+        version="1.0.0",
+        purl=PackageURL.from_string("pkg:pypi/demo@1.0.0"),
+    )
+
+    class HostileText(str):
+        def __len__(self) -> int:
+            return 0
+
+        def encode(self, *args: object, **kwargs: object) -> bytes:
+            return b"x"
+
+    class CustomRenderer:
+        def render(
+            self,
+            *,
+            components: tuple[ComponentIdentity, ...],
+            findings: tuple[VulnerabilityFinding, ...],
+            timestamp: datetime | None = None,
+        ) -> str:
+            return HostileText("\N{LATIN SMALL LETTER E WITH ACUTE}x")
+
+    monkeypatch.setattr("vexcalibur.generate.MAX_VEX_OUTPUT_BYTES", 2)
+
+    with pytest.raises(VexRenderError, match="2 byte output limit"):
+        generate_vex_from_components(
+            components=(component,),
+            source=FakeVulnerabilitySource(()),
+            timestamp=None,
+            renderer=CustomRenderer(),
         )
 
 
@@ -534,18 +622,6 @@ def test_generate_vex_from_sbom_queries_osv_and_renders_vex() -> None:
 
 
 def test_generate_vex_from_github_sbom_queries_osv() -> None:
-    class FakeGithubSbomClient:
-        def component_identities(self, repository: str) -> tuple[ComponentIdentity, ...]:
-            assert repository == "vexcalibur-dev/vexcalibur"
-            return (
-                ComponentIdentity(
-                    ref="SPDXRef-pypi-django-1.2",
-                    name="django",
-                    version="1.2",
-                    purl=PackageURL.from_string("pkg:pypi/django@1.2"),
-                ),
-            )
-
     osv_client = FakeOsvClient()
 
     generated = generate_vex_from_github_sbom(

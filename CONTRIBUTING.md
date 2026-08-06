@@ -42,7 +42,7 @@ make governance-check
 CI also checks formatting and enforces 75 percent branch coverage. Run those two policies explicitly:
 
 ```bash
-uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
+uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py
 uv run --frozen pytest -m "not live and not fuzz" --cov-fail-under=75
 make fuzz-smoke
 ```
@@ -104,6 +104,13 @@ Build the manual after changing documentation, CLI behavior, package metadata, o
 ```bash
 uv sync --extra docs
 make docs
+```
+
+Run the installed-wheel CLI check after changing generation output,
+execution-report transactions, entry points, or packaging:
+
+```bash
+make installed-cli-check
 ```
 
 ## Follow the project conventions

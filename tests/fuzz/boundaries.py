@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import importlib.util
 import json
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator
@@ -13,21 +14,80 @@ from typing import Any
 from xml.sax.saxutils import escape, quoteattr
 
 import httpx
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
 from packageurl import PackageURL
 
 from vexcalibur.domain import ComponentIdentity
+from vexcalibur.generation_result import (
+    MAX_EXECUTION_REPORT_BYTES,
+    ExecutionReportOutputFormat,
+    FindingSourceCategory,
+    GenerationExecutionContext,
+    GenerationResult,
+    InventorySourceCategory,
+)
 from vexcalibur.github_sbom import (
     GithubSbomClientError,
     component_identities_from_github_spdx_sbom,
 )
 from vexcalibur.json_boundary import StrictJsonError, strict_json_loads
+from vexcalibur.render import VexRenderError
 from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
 from vexcalibur.sources.local import LocalFindingsError, load_local_findings
 from vexcalibur.sources.osv import OsvClient, OsvClientError
 
 MAX_FUZZ_INPUT_BYTES = 64 * 1024
 OSV_PAGE_SEPARATOR = b"\n--vexcalibur-fuzz-page--\n"
-FUZZ_TARGETS = ("json", "sbom", "github", "local", "osv", "identity")
+FUZZ_TARGETS = (
+    "json",
+    "sbom",
+    "github",
+    "local",
+    "osv",
+    "identity",
+    "report",
+    "consumer",
+)
+_REPORT_CONSUMER_PATH = (
+    Path(__file__).parents[2] / "docs" / "examples" / "validate_execution_report.py"
+)
+_REPORT_CONSUMER_SPEC = importlib.util.spec_from_file_location(
+    "vexcalibur_fuzz_execution_report_consumer",
+    _REPORT_CONSUMER_PATH,
+)
+if _REPORT_CONSUMER_SPEC is None or _REPORT_CONSUMER_SPEC.loader is None:
+    raise RuntimeError("could not load execution-report consumer example")
+_REPORT_CONSUMER = importlib.util.module_from_spec(_REPORT_CONSUMER_SPEC)
+_REPORT_CONSUMER_SPEC.loader.exec_module(_REPORT_CONSUMER)
+_REPORT_SCHEMA_BYTES = (
+    Path(__file__).parents[2] / "docs" / "execution-report-v1.schema.json"
+).read_bytes()
+_REPORT_SCHEMA = json.loads(_REPORT_SCHEMA_BYTES)
+_REPORT_VALIDATOR = Draft202012Validator(_REPORT_SCHEMA)
+_CONSUMER_DOCUMENT = b"{}\n"
+_CONSUMER_REPORT = (
+    json.dumps(
+        {
+            "schema_version": 1,
+            "command": "generate",
+            "vexcalibur_version": "fuzz",
+            "inventory_source": "custom",
+            "finding_source": "custom",
+            "output_format": "custom",
+            "component_count": 0,
+            "finding_count": 0,
+            "analysis_state_counts": {},
+            "document": {
+                "sha256": hashlib.sha256(_CONSUMER_DOCUMENT).hexdigest(),
+                "bytes": len(_CONSUMER_DOCUMENT),
+            },
+        },
+        separators=(",", ":"),
+    )
+    + "\n"
+).encode("ascii")
+VALID_CONSUMER_SEED = b"R" + _CONSUMER_REPORT
 
 Outcome = tuple[str, str]
 Exercise = Callable[[bytes], str]
@@ -267,6 +327,64 @@ def _exercise_identity(data: bytes) -> str:
     return json_signature
 
 
+def _exercise_report(data: bytes) -> str:
+    rendered = data.decode("utf-8", errors="surrogateescape")
+    result = GenerationResult(
+        rendered_document=rendered,
+        components=(),
+        findings=(),
+        execution_context=GenerationExecutionContext(
+            inventory_source=InventorySourceCategory.CUSTOM,
+            finding_source=FindingSourceCategory.CUSTOM,
+            output_format=ExecutionReportOutputFormat.CUSTOM,
+        ),
+    )
+    report = result.execution_report()
+    serialized = report.to_json().encode("ascii")
+    document = json.loads(serialized)
+    _REPORT_VALIDATOR.validate(document)
+
+    canonical = (
+        json.dumps(
+            document,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("ascii")
+    if serialized != canonical:
+        raise AssertionError("execution report is not canonical JSON")
+    if len(serialized) > MAX_EXECUTION_REPORT_BYTES:
+        raise AssertionError("execution report exceeded its production size limit")
+    if report.document.bytes != len(data):
+        raise AssertionError("execution report byte count does not match rendered UTF-8")
+    if report.document.sha256 != hashlib.sha256(data).hexdigest():
+        raise AssertionError("execution report digest does not match rendered UTF-8")
+    return _digest(serialized)
+
+
+def _exercise_consumer(data: bytes) -> str:
+    selector = data[0] if data else 0
+    payload = data[1:] if data else b""
+    with TemporaryDirectory(prefix="vexcalibur-fuzz-report-consumer-") as directory:
+        root = Path(directory)
+        report_path = root / "execution-report.json"
+        schema_path = root / "execution-report.schema.json"
+        document_path = root / "vex.json"
+        report_path.write_bytes(_CONSUMER_REPORT)
+        schema_path.write_bytes(_REPORT_SCHEMA_BYTES)
+        document_path.write_bytes(_CONSUMER_DOCUMENT)
+        selected_path = report_path if selector % 2 == 0 else schema_path
+        selected_path.write_bytes(payload)
+        _REPORT_CONSUMER.validate_execution_report(
+            report_path,
+            document_path,
+            schema_path,
+        )
+    return _digest(bytes((selector,)) + payload)
+
+
 def _identity_token(value: str, *, fallback: str, max_length: int) -> str:
     allowed = "._+-"
     normalized = unicodedata.normalize("NFC", value)
@@ -325,6 +443,8 @@ _EXERCISES: dict[str, Exercise] = {
     "local": _exercise_local,
     "osv": _exercise_osv,
     "identity": _exercise_identity,
+    "report": _exercise_report,
+    "consumer": _exercise_consumer,
 }
 
 _EXPECTED_ERRORS: dict[str, tuple[type[Exception], ...]] = {
@@ -334,4 +454,11 @@ _EXPECTED_ERRORS: dict[str, tuple[type[Exception], ...]] = {
     "local": (LocalFindingsError,),
     "osv": (OsvClientError,),
     "identity": (),
+    "report": (VexRenderError,),
+    "consumer": (
+        SchemaError,
+        UnicodeError,
+        ValidationError,
+        ValueError,
+    ),
 }

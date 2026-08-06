@@ -1,6 +1,6 @@
 # Vexcalibur
 
-![Vexcalibur wordmark and sword logo](docs/assets/vexcalibur-banner.png)
+![Vexcalibur wordmark and sword logo](https://raw.githubusercontent.com/vexcalibur-dev/vexcalibur/400083ecc7061cea5aff63305ae9d06a7dc9c3f5/docs/assets/vexcalibur-banner.png)
 
 [![CI](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/ci.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/codeql.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/codeql.yml)
@@ -9,8 +9,8 @@
 
 Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
-Vexcalibur writes CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF output
-uses the `csaf_vex` profile.
+Current releases write CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
+output uses the `csaf_vex` profile.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
@@ -21,42 +21,62 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 | SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
 | VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile |
-| Automation targets | Released [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action); [CircleCI orb](#run-in-ci) |
+| Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |
 | Migration | A narrow `vexy` command-line compatibility layer |
 | Python | 3.10–3.14 |
 
-## Run in CI
-
-The companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action)
-runs Vexcalibur in GitHub Actions. Its release tags are permanent, and the
-current release workflow creates immutable GitHub Releases. The Action's
-[compatibility
-reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
-explains the legacy releases and shows how to resolve the latest tested Action
-commit and Vexcalibur package.
-
-The [CircleCI orb](https://github.com/vexcalibur-dev/vexcalibur-orb) README owns
-its current release status and supported references. Treat any development
-reference as mutable and use it only to inspect the interface. Do not import a
-development reference into a CircleCI project with environment variables,
-contexts, private source, or other credentials. [Orb issue
-#22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) records the
-App-backed production automation plan.
-
 ## Install a release
 
-Choose an exact release that is available in the
-[PyPI release history](https://pypi.org/project/vexcalibur/#history). Review the
-corresponding [GitHub Release](https://github.com/vexcalibur-dev/vexcalibur/releases),
-then replace `X.Y.Z` below with that release number:
+Open the [release page](https://github.com/vexcalibur-dev/vexcalibur/releases)
+and choose an exact version. The commands prompt for that version so an
+unresolved placeholder cannot reach `pip`:
 
 ```bash
-python -m venv .venv
-.venv/bin/python -m pip install "vexcalibur==X.Y.Z"
-.venv/bin/vexcalibur --help
+set -euo pipefail
+
+read -r -p "Vexcalibur version from the release page: " VEXCALIBUR_VERSION
+if [[ ! "$VEXCALIBUR_VERSION" =~ ^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  printf 'Enter a MAJOR.MINOR.PATCH release version\n' >&2
+  exit 2
+fi
+VEXCALIBUR_VENV=".venv-vexcalibur-${VEXCALIBUR_VERSION}"
+if [[ -e "$VEXCALIBUR_VENV" ]]; then
+  printf 'Refusing to reuse %s\n' "$VEXCALIBUR_VENV" >&2
+  exit 2
+fi
+python -m venv "$VEXCALIBUR_VENV"
+"$VEXCALIBUR_VENV/bin/python" -m pip install \
+  "vexcalibur==${VEXCALIBUR_VERSION}"
+INSTALLED_VERSION="$("$VEXCALIBUR_VENV/bin/python" -c \
+  'from importlib.metadata import version; print(version("vexcalibur"))')"
+test "$INSTALLED_VERSION" = "$VEXCALIBUR_VERSION"
+"$VEXCALIBUR_VENV/bin/vexcalibur" --help
 ```
 
-On Windows, use `.venv\Scripts\python` and `.venv\Scripts\vexcalibur`.
+In PowerShell 7.3 or newer, use:
+
+```powershell
+$ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
+$VEXCALIBUR_VERSION = Read-Host "Vexcalibur version from the release page"
+if ($VEXCALIBUR_VERSION -notmatch '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$') {
+    throw "Enter a MAJOR.MINOR.PATCH release version"
+}
+$VEXCALIBUR_VENV = ".venv-vexcalibur-$VEXCALIBUR_VERSION"
+if (Test-Path -LiteralPath $VEXCALIBUR_VENV) {
+    throw "Refusing to reuse $VEXCALIBUR_VENV"
+}
+py -m venv $VEXCALIBUR_VENV
+$PYTHON = Join-Path $VEXCALIBUR_VENV "Scripts/python.exe"
+$VEXCALIBUR = Join-Path $VEXCALIBUR_VENV "Scripts/vexcalibur.exe"
+& $PYTHON -m pip install "vexcalibur==$VEXCALIBUR_VERSION"
+$INSTALLED_VERSION = & $PYTHON -c `
+    'from importlib.metadata import version; print(version("vexcalibur"))'
+if ($INSTALLED_VERSION -ne $VEXCALIBUR_VERSION) {
+    throw "Installed $INSTALLED_VERSION instead of $VEXCALIBUR_VERSION"
+}
+& $VEXCALIBUR --help
+```
 
 ## Try local generation
 
@@ -121,10 +141,12 @@ The default public endpoint fails closed without that flag. Fetching an SBOM fro
 ## Documentation
 
 - Start with the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html).
-- Follow the [Python API how-to](https://vexcalibur-dev.github.io/vexcalibur/how-to/use-python-api.html) to generate and verify VEX from application code.
 - Follow the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html) generation guide.
 - Use the [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html) for flags and failure behavior.
-- Use `vexcalibur.api` as the supported application and extension entrypoint. Its [Python reference](https://vexcalibur-dev.github.io/vexcalibur/reference/python-api.html), [provider contract](https://vexcalibur-dev.github.io/vexcalibur/reference/provider-contract.html), and [renderer contract](https://vexcalibur-dev.github.io/vexcalibur/reference/renderer-contract.html) define the 1.x compatibility surface.
+- Use the [Python API guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/use-python-api.html) and [API reference](https://vexcalibur-dev.github.io/vexcalibur/reference/python-api.html) when embedding Vexcalibur.
+- The default-branch [execution report reference](https://vexcalibur-dev.github.io/vexcalibur/reference/execution-report.html) covers machine-readable generation metadata. The [Python report guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-execution-report-from-python.html) covers the cross-platform API. Before using either path, verify that the selected release contains the report API or lists `--execution-report` in `vexcalibur generate --help`.
+- The CLI report transaction supports Linux and macOS. Windows embeddings can construct and validate the same report through the supported Python facade.
+- Read the [provider contract](https://vexcalibur-dev.github.io/vexcalibur/reference/provider-contract.html) and [renderer contract](https://vexcalibur-dev.github.io/vexcalibur/reference/renderer-contract.html) before adding an integration.
 - Read the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/reference/csaf-output.html) output contract before consuming generated files.
 - Read the [architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html) before adding a source or output format.
 - Read the [self-release evidence design](https://vexcalibur-dev.github.io/vexcalibur/explanation/self-release-evidence.html), inspect a [local bundle](https://vexcalibur-dev.github.io/vexcalibur/how-to/build-release-evidence.html), or follow the [immutable release runbook](https://vexcalibur-dev.github.io/vexcalibur/how-to/publish-to-pypi.html).
@@ -154,13 +176,14 @@ the deterministic fuzz smoke profile:
 make fuzz-smoke
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), the [security policy](SECURITY.md), the
+See the [contribution guide](https://github.com/vexcalibur-dev/vexcalibur/blob/main/CONTRIBUTING.md),
+the [security policy](https://github.com/vexcalibur-dev/vexcalibur/security/policy), the
 [fuzzing guide](https://vexcalibur-dev.github.io/vexcalibur/development/fuzzing.html),
 and the [Python style policy](https://vexcalibur-dev.github.io/vexcalibur/development/python-style.html)
 before opening a pull request.
 
 Use the [issue forms](https://github.com/vexcalibur-dev/vexcalibur/issues) for questions, bugs, and feature requests. The organization [support policy](https://github.com/vexcalibur-dev/.github/blob/main/SUPPORT.md) explains which public route to use, and the [code of conduct](https://github.com/vexcalibur-dev/.github/blob/main/CODE_OF_CONDUCT.md) applies to project spaces.
 
-Vexcalibur is licensed under the [Apache License 2.0](LICENSE).
+Vexcalibur is licensed under the [Apache License 2.0](https://github.com/vexcalibur-dev/vexcalibur/blob/400083ecc7061cea5aff63305ae9d06a7dc9c3f5/LICENSE).
 
 [vexcalibur-docs]: https://vexcalibur-dev.github.io/vexcalibur/

@@ -9,12 +9,15 @@ import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.metadata import version as distribution_version
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = ROOT / "tests" / "fixtures"
+PYTHON_API_REPORT_EXAMPLE = ROOT / "docs" / "examples" / "generate_execution_report.py"
 COMMAND_TIMEOUT_SECONDS = 30
 EXPECTED_ANALYSIS_STATES = [
     "resolved",
@@ -38,12 +41,29 @@ def main() -> None:
     vexcalibur = _console_script(bin_dir, "vexcalibur")
     vexy = _console_script(bin_dir, "vexy")
     _assert_installed_version()
-    _assert_installed_api()
+    with TemporaryDirectory(prefix="vexcalibur-installed-python-api-") as directory:
+        output_directory = Path(directory) / "generated"
+        output_path = output_directory / "vex.json"
+        report_path = output_directory / "execution-report.json"
+        _expect(
+            [
+                sys.executable,
+                str(PYTHON_API_REPORT_EXAMPLE),
+                str(output_directory),
+            ],
+            returncode=0,
+            stdout_contains=[str(output_path), str(report_path)],
+            stderr_equals="",
+        )
+        _assert_execution_report_bytes(
+            output_bytes=output_path.read_bytes(),
+            report_path=report_path,
+        )
 
     _expect(
         [str(vexcalibur), "--help"],
         returncode=0,
-        stdout_contains=["Generate and transform VEX"],
+        stdout_contains=["Generate VEX documents"],
         stderr_equals="",
     )
     _expect(
@@ -114,28 +134,88 @@ def main() -> None:
     )
     _assert_generated_vex_shape(generated.stdout)
 
-    openvex_generated = _expect(
-        [
-            str(vexcalibur),
-            "generate",
-            str(FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml"),
-            "--findings-file",
-            str(FIXTURE_ROOT / "findings" / "all-analysis-states.json"),
-            "--offline",
-            "--format",
-            "openvex",
-            "--author",
-            "Vexcalibur installed CLI test",
-            "--author-role",
-            "Test producer",
-            "--timestamp",
-            "2026-06-23T00:00:00Z",
-        ],
-        returncode=0,
-        stdout_contains=['"@context": "https://openvex.dev/ns/v0.2.0"'],
-        stderr_equals="",
-    )
-    _assert_generated_openvex_shape(openvex_generated.stdout)
+    with TemporaryDirectory(prefix="vexcalibur-installed-report-") as temporary_directory:
+        output_path = Path(temporary_directory) / "vex.json"
+        report_path = Path(temporary_directory) / "execution-report.json"
+        _expect(
+            [
+                str(vexcalibur),
+                "generate",
+                str(FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml"),
+                "--findings-file",
+                str(FIXTURE_ROOT / "findings" / "all-analysis-states.json"),
+                "--offline",
+                "--timestamp",
+                "2026-06-23T00:00:00Z",
+                "--output",
+                str(output_path),
+                "--execution-report",
+                str(report_path),
+            ],
+            returncode=0,
+            stdout_equals="",
+            stderr_equals="",
+        )
+        _assert_execution_report(output_path=output_path, report_path=report_path)
+
+    with TemporaryDirectory(prefix="vexcalibur-installed-stdout-report-") as temporary_directory:
+        report_path = Path(temporary_directory) / "execution-report.json"
+        generated_with_report = _expect(
+            [
+                str(vexcalibur),
+                "generate",
+                str(FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml"),
+                "--findings-file",
+                str(FIXTURE_ROOT / "findings" / "all-analysis-states.json"),
+                "--offline",
+                "--timestamp",
+                "2026-06-23T00:00:00Z",
+                "--execution-report",
+                str(report_path),
+            ],
+            returncode=0,
+            stdout_contains=['"bomFormat": "CycloneDX"'],
+            stderr_equals="",
+        )
+        _assert_execution_report_bytes(
+            output_bytes=generated_with_report.stdout.encode("utf-8"),
+            report_path=report_path,
+        )
+
+    with TemporaryDirectory(prefix="vexcalibur-installed-openvex-report-") as directory:
+        output_path = Path(directory) / "openvex.json"
+        report_path = Path(directory) / "execution-report.json"
+        _expect(
+            [
+                str(vexcalibur),
+                "generate",
+                str(FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml"),
+                "--findings-file",
+                str(FIXTURE_ROOT / "findings" / "all-analysis-states.json"),
+                "--offline",
+                "--format",
+                "openvex",
+                "--author",
+                "Vexcalibur installed CLI test",
+                "--author-role",
+                "Test producer",
+                "--timestamp",
+                "2026-06-23T00:00:00Z",
+                "--output",
+                str(output_path),
+                "--execution-report",
+                str(report_path),
+            ],
+            returncode=0,
+            stdout_equals="",
+            stderr_equals="",
+        )
+        _assert_generated_openvex_shape(output_path.read_text(encoding="utf-8"))
+        _assert_execution_report(
+            output_path=output_path,
+            report_path=report_path,
+            output_format="openvex",
+        )
 
     _expect(
         [
@@ -205,6 +285,35 @@ def _console_script(bin_dir: Path, name: str) -> Path:
 
 
 def _assert_installed_version() -> None:
+    import vexcalibur
+
+    expected_python = os.environ.get("VEXCALIBUR_EXPECTED_PYTHON")
+    if expected_python is not None:
+        try:
+            expected_python_info = tuple(int(value) for value in expected_python.split("."))
+        except ValueError:
+            print(f"Invalid expected Python version: {expected_python!r}", file=sys.stderr)
+            raise SystemExit(2) from None
+        if len(expected_python_info) != 2:
+            print(f"Invalid expected Python version: {expected_python!r}", file=sys.stderr)
+            raise SystemExit(2)
+        if sys.version_info[:2] != expected_python_info:
+            actual = f"{sys.version_info.major}.{sys.version_info.minor}"
+            print(
+                f"Installed checks used Python {actual} instead of {expected_python}.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+    installed_package = Path(vexcalibur.__file__).resolve()
+    installed_prefix = Path(sys.prefix).resolve()
+    if not installed_package.is_relative_to(installed_prefix):
+        print(
+            f"Imported Vexcalibur from outside the installed environment: {installed_package}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     expected_version = os.environ.get("VEXCALIBUR_EXPECTED_VERSION")
     if expected_version is None:
         return
@@ -218,8 +327,6 @@ def _assert_installed_version() -> None:
         )
         raise SystemExit(1)
 
-    import vexcalibur
-
     if vexcalibur.__version__ != expected_version:
         print(
             f"vexcalibur.__version__ {vexcalibur.__version__!r} "
@@ -227,31 +334,6 @@ def _assert_installed_version() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-
-
-def _assert_installed_api() -> None:
-    """Import and exercise the supported facade from the installed wheel."""
-    from vexcalibur import api
-
-    required_names = {
-        "ComponentIdentity",
-        "VexRenderer",
-        "VulnerabilitySource",
-        "generate_vex_from_local_findings",
-    }
-    missing_names = required_names.difference(api.__all__)
-    if missing_names:
-        print(
-            f"Installed Python API is missing supported names: {sorted(missing_names)}",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    rendered = api.generate_vex_from_local_findings(
-        input_file=FIXTURE_ROOT / "sbom" / "cyclonedx-xml-1.5-simple.xml",
-        findings_file=FIXTURE_ROOT / "findings" / "all-analysis-states.json",
-    )
-    _assert_generated_vex_shape(rendered)
 
 
 def _expect(
@@ -381,6 +463,71 @@ def _assert_generated_openvex_shape(generated: str) -> None:
         print(
             "Generated not-affected OpenVEX statement did not explain its impact.", file=sys.stderr
         )
+        raise SystemExit(1)
+
+
+def _assert_execution_report(
+    *,
+    output_path: Path,
+    report_path: Path,
+    output_format: str = "cyclonedx",
+) -> None:
+    _assert_execution_report_bytes(
+        output_bytes=output_path.read_bytes(),
+        report_path=report_path,
+        output_format=output_format,
+    )
+    if os.name != "nt":
+        for path in (output_path, report_path):
+            if path.stat().st_mode & 0o777 != 0o600:
+                print(f"Installed CLI output mode was not 0600: {path}", file=sys.stderr)
+                raise SystemExit(1)
+
+
+def _assert_execution_report_bytes(
+    *,
+    output_bytes: bytes,
+    report_path: Path,
+    output_format: str = "cyclonedx",
+) -> None:
+    report_bytes = report_path.read_bytes()
+    report = json.loads(report_bytes)
+    expected = {
+        "schema_version": 1,
+        "command": "generate",
+        "vexcalibur_version": distribution_version("vexcalibur"),
+        "inventory_source": "sbom_file",
+        "finding_source": "local_file",
+        "output_format": output_format,
+        "component_count": 2,
+        "finding_count": 5,
+        "analysis_state_counts": {
+            "resolved": 1,
+            "exploitable": 1,
+            "in_triage": 1,
+            "false_positive": 1,
+            "not_affected": 1,
+        },
+        "document": {
+            "sha256": sha256(output_bytes).hexdigest(),
+            "bytes": len(output_bytes),
+        },
+    }
+    if report != expected:
+        print("Installed CLI execution report did not match generated VEX.", file=sys.stderr)
+        print(json.dumps(report, indent=2, sort_keys=True), file=sys.stderr)
+        raise SystemExit(1)
+    canonical = (
+        json.dumps(
+            expected,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("ascii")
+    if report_bytes != canonical:
+        print("Installed CLI execution report bytes were not canonical.", file=sys.stderr)
         raise SystemExit(1)
 
 

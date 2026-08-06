@@ -13,20 +13,29 @@ The `CI` workflow runs on pull requests and pushes to `main`:
 | --- | --- |
 | Quality | Frozen lock, Ruff formatting and linting, strict MyPy |
 | Tests | Offline suite on Python 3.10 through 3.14 |
+| Native report behavior | Fail-closed source checks plus installed wheel and source distribution checks on Windows; report transactions and installed wheel and source distribution checks on macOS with Python 3.10 and 3.14 |
 | Parser properties | Deterministic Hypothesis smoke profile with a five-minute bound |
 | Packaging | Wheel and source distribution, installed `vexcalibur` and `vexy` entry points |
 | OpenVEX | Generated and installed-wheel output through pinned `go-vex` 0.2.8 |
-| CSAF | OASIS schema plus all 42 mandatory tests from pinned `@secvisogram/csaf-validator-lib` 2.0.27 on Node 24 |
+| CSAF | OASIS schema plus all 42 mandatory tests from pinned `@secvisogram/csaf-validator-lib` 2.0.27 on Node 24; installed wheel and source distribution checks on Python 3.10 and 3.14 |
 | Local evidence | Schema-1 zero-finding and synthetic all-format bundles, generated twice and byte-compared |
-| Publication contract | Publication-only run using synthetic tag `v0.0.0` and only read-only, unprivileged `GITHUB_TOKEN` permissions; builds schema-2 assets but does not publish |
-| Documentation | Warning-free Sphinx build |
+| Documentation | Warning-free Sphinx build, published-schema check, rendered accessibility checks, and executable execution-report examples |
 | Security | `pip-audit`, base-branch-aware secret scanning, and dedicated CodeQL/dependency-review workflows |
 
-The publication-contract caller grants only `contents: read` and
-`actions: read`. The reusable workflow skips duplicate quality, matrix, and
-documentation work in `publication-only` mode but still executes its build,
-inventory, direct CLI, pinned Action, and fresh-finalizer boundaries. No App
-token or PyPI OIDC permission exists in that path.
+Ordinary non-scheduled CI runs the unprivileged publication contract in
+publication-only mode. An untagged candidate gets an ephemeral local `v0.0.0`
+tag; a rerun on a released commit uses that commit's single annotated release
+tag. The contract uploads the lock-derived inventory, generated VEX documents,
+and execution reports as GitHub Actions artifacts retained for 14 days. Its
+caller explicitly sets `allow-public-evidence-upload: true`.
+
+The unprivileged contract has no publication credentials. It does not create a
+GitHub Release or perform a PyPI OIDC exchange.
+
+During a release, the pinned Action runs one synthetic finding through
+CycloneDX, OpenVEX, and CSAF. That check does not depend on the production
+review's finding count, so a zero-finding release still exercises every report
+format.
 
 The `CI result` job combines all ordinary required results into the status
 selected by the protected `main` ruleset. `Analyze Python`, `dependency-review`,
@@ -42,6 +51,36 @@ Run the complete offline test suite:
 uv sync --frozen
 uv run --frozen pytest -m "not live" --cov-fail-under=75
 ```
+
+`setuptools-scm` derives the package version from the Git commit and tags, so
+the uv cache key includes both. Vexcalibur also asks uv to reinstall the local
+package on each sync. This fallback covers linked worktrees and older uv
+versions that don't invalidate an editable build when a ref changes.
+
+Execution-report changes have three native gates:
+
+| Environment | Prerequisite | Command | Success signal |
+| --- | --- | --- | --- |
+| Linux or macOS source checkout | Bash, GNU Make, Python, and `uv sync --frozen` | `scripts/check-execution-report-posix.sh dist` | Native transaction tests pass; the wheel and sdist-derived wheel both generate valid reports |
+| Windows source checkout | PowerShell 7.3 or newer, Python, and `uv sync --frozen` | `./scripts/check-execution-report-windows.ps1 -DistributionDirectory dist` | Native fail-closed tests pass; the wheel and sdist-derived wheel both generate valid output without reports |
+
+Build the distributions before running either helper:
+
+```bash
+uv build --clear --no-create-gitignore --no-sources
+scripts/check-execution-report-posix.sh dist
+```
+
+On Windows, use the same distributions:
+
+```powershell
+uv build --clear --no-create-gitignore --no-sources
+./scripts/check-execution-report-windows.ps1 -DistributionDirectory dist
+```
+
+Both helpers own the test inventory and installed-distribution procedure used
+by CI and release validation. Release jobs pass the expected package version
+and distribution digests to the same helpers.
 
 Run CSAF conformance:
 
@@ -64,7 +103,12 @@ make release-evidence-check
 See [Build and review local release
 evidence](../how-to/build-release-evidence.md) for input review, expected files,
 and failure recovery. The full schema-2 graph is intentionally exercised on
-hosted runners because it verifies GitHub artifact IDs and transport digests.
+hosted pull-request runners because it verifies GitHub artifact IDs and
+transport digests. An untagged candidate gets an ephemeral local `v0.0.0` tag;
+a rerun on a released commit uses the existing annotated release tag. The
+credentialless checkout never pushes, moves, or deletes an existing tag. It
+removes an ephemeral local candidate if version verification fails. Its caller
+explicitly permits uploads derived from this public repository.
 
 ## Scheduled and live checks
 
@@ -95,30 +139,76 @@ reproduce CI.
 
 `.github/workflows/release-validation.yml` accepts an exact commit, tag, and
 version. Its ordinary mode runs repository gates before publication jobs. Its
-publication-only mode runs just the immutable-asset contract.
+publication-only mode runs just the immutable-asset contract. Both modes
+require the caller to consent explicitly to uploading the dependency inventory
+and generated evidence.
+
+The release and recovery workflows also require the release-platform
+contracts. They rerun the exact commit on Windows and macOS with Python 3.10
+and 3.14. The installed CLI matrix runs the exact wheel on every supported
+Python version. A separate companion matrix passes each version to the pinned
+Action and independently verifies the generated VEX and execution report.
+Publication assets are not finalized until those jobs pass. Pull-request CI
+does not repeat that matrix inside its unprivileged publication rehearsal
+because the parent CI workflow already requires the same native checks.
+
+The Action commit and `actions/setup-python` are the trust basis for interpreter
+selection in the companion matrix. Candidate code runs with the job's user
+permissions, so a runtime file produced after that code exits would only be a
+self-attestation. The release gate does not create or consume one. Instead, the
+installed CLI matrix supplies independent interpreter coverage, while the
+companion matrix checks the Action integration and verifies candidate output in
+a fresh job.
 
 The publication graph has five independent roles:
 
-1. `build` checks out the exact source, creates a temporary local release tag,
-   builds once with commit-derived `SOURCE_DATE_EPOCH`, validates both archives,
-   and exports their exact hashes.
+1. `build` checks out the exact source and verifies or creates the intended
+   release tag on that commit without deleting or reassigning any existing tag.
+   It hash-syncs the PEP 517 backend, builds offline with the commit-derived
+   `SOURCE_DATE_EPOCH`, compares the wheel and sdist package metadata with
+   `pyproject.toml`, validates both archives, and exports their exact hashes.
 2. `publication-inventory` does not download, install, or execute either
    distribution and does not invoke the Action. It exports strict constraints
    and a normalized SBOM from `uv.lock`, then prepares the reviewed oracle.
 3. `direct-vex` has no repository checkout or GitHub permission. It installs
-   the hash-bound wheel with the oracle constraints and emits only VEX files.
+   the hash-bound wheel with the oracle constraints, then emits VEX files and
+   their execution reports.
 4. `action-vex` also has no checkout or GitHub permission. It runs the companion
-Action at a full commit and requires missing or incorrect wheel hashes to fail,
-including an unhashed source-distribution fallback attempt. It then emits only
-VEX files from the correctly hash-bound wheel.
+   Action at a full commit and requires missing or incorrect wheel hashes to
+   fail, including an unhashed source-distribution fallback attempt. A failed
+   generation must remove its stale report. Successful generations emit the
+   same VEX files and reports as the direct CLI.
 5. `publication-assets` runs fresh with `contents: read` and `actions: read`. It
    verifies every producer artifact through GitHub's API and archive digest,
-   independently reproduces the lock exports, requires direct/Action byte
-   equivalence, runs official validators, and creates a fresh flat asset set.
+   independently reproduces the lock exports, validates each report's counts
+   and document digest, requires direct/Action byte equivalence, runs official
+   validators, and creates a fresh flat asset set.
+
+Every distribution-metadata check runs through
+`scripts/run-dist-metadata-verifier.sh`. The wrapper uses an isolated
+`dist-verify` environment from `uv.lock`, so the verifier never depends on
+packages that happen to exist in a runner's system Python or in the environment
+that built the artifact.
+
+Each source-distribution matrix cell also uses two environments. The first
+hash-syncs the exact PEP 517 tools from the `sdist-build` lock group and builds
+the candidate sdist into a wheel with `uv` in offline, no-isolation mode. The
+second gives `uv` only the hash-bound derived wheel as an installation
+requirement. The runtime lock export supplies constraints, not a list of
+packages to preinstall. The wheel metadata must therefore declare every
+dependency and console script needed by the installed CLI checks. This also
+prevents an index from selecting unreviewed build or runtime versions during
+validation.
+
+The canonical release build uses the same backend rule. It hash-syncs the
+`sdist-build` group before the build, then disables build isolation and network
+access. The release digests therefore bind artifacts produced by the reviewed
+backend bytes, not another copy selected from an index during the build.
 
 GitHub archive digests are same-run transport checks. The published schema-2
-manifest records stable canonical payload digests so retrying validation for an
-older recovery tag produces identical release assets.
+manifest records stable canonical payload digests so retrying validation for a
+tag with the current recovery-contract marker produces identical release
+assets.
 
 The reusable outputs bind the exact wheel and source-distribution hashes, the
 unique distribution and release-asset artifact names, the release-asset
@@ -130,7 +220,8 @@ consumers.
 `.github/workflows/release.yml` runs after a push to `main` or a manual
 dispatch. Normal mode computes or accepts the next version and repeatedly
 requires the target to equal the tip of `main`. Recovery mode accepts an
-existing annotated `recovery-tag` whose commit is still an ancestor of `main`.
+existing annotated `recovery-tag` whose commit is still an ancestor of `main`
+and declares the recovery-contract schema supported by the current workflow.
 
 Release notes are generated, digest-bound, and secret-scanned across separate
 runners. Two isolated jobs mint separate short-lived Contents-write App tokens:

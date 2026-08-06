@@ -32,6 +32,7 @@ from vexcalibur.document import (
     vex_document_from_findings,
 )
 from vexcalibur.domain import ComponentIdentity, VexAnalysisState, VulnerabilityFinding
+from vexcalibur.render_budget import enforce_builtin_render_input_budget
 
 VexRenderError = _render.VexRenderError
 
@@ -76,6 +77,12 @@ class CycloneDxJsonRenderer:
         Raises:
             VexRenderError: The values cannot form a valid document.
         """
+        if type(self)._render_document is CycloneDxJsonRenderer._render_document:
+            enforce_builtin_render_input_budget(
+                components=components,
+                findings=findings,
+                component_purl_copies=2,
+            )
         return self._render_document(
             document=vex_document_from_findings(components=components, findings=findings),
             timestamp=timestamp,

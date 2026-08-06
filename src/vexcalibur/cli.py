@@ -1,12 +1,16 @@
 """Command-line entrypoint for Vexcalibur."""
 
-from datetime import datetime
+import sys
+from collections.abc import Sequence
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, BinaryIO, cast
 
 import typer
 from packageurl import PackageURL
 from rich.console import Console
+from typer._click import Context as ClickContext
+from typer.core import TyperGroup
 
 from vexcalibur.csaf import (
     CSAF_VERSION,
@@ -16,48 +20,188 @@ from vexcalibur.csaf import (
     CsafPublisherCategory,
     csaf_filename,
 )
-from vexcalibur.domain import VulnerabilitySource
-from vexcalibur.generate import (
-    generate_vex_from_components,
-    generate_vex_from_local_findings,
-    generate_vex_from_sbom,
+from vexcalibur.execution_report_errors import _retain_cleanup_failures
+from vexcalibur.execution_report_filesystem import _defer_keyboard_interrupt
+from vexcalibur.generate_command import GenerateCommandRequest
+from vexcalibur.generation_output import (
+    GenerationDocumentWriteError,
+    GenerationOutputError,
+    GenerationOutputPreparationError,
+    GenerationOutputTransaction,
+    GenerationReportConstructionError,
+    GenerationReportWriteError,
+    write_generation_document,
 )
 from vexcalibur.github_sbom import (
     DEFAULT_GITHUB_API_URL,
-    GithubSbomClient,
     GithubSbomError,
-    resolve_github_token,
 )
 from vexcalibur.openvex import OpenVexJsonRenderer
 from vexcalibur.render import VexOutputFormat, VexRenderer
 from vexcalibur.sbom import SbomError
 from vexcalibur.source_options import (
     GenerateSourceOptionError,
-    GenerateSourceOptions,
     resolve_generate_source_options,
 )
-from vexcalibur.sources.local import LocalFindingsError, LocalFindingsSource
+from vexcalibur.sources.local import LocalFindingsError
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
     OsvClientError,
     OsvConfigurationError,
-    OsvSource,
-    ensure_osv_url_allowed,
     osv_client_for_url,
 )
 from vexcalibur.vex import VexRenderError, parse_timestamp
 
+_generate_command_started: ContextVar[bool] = ContextVar(
+    "vexcalibur_generate_command_started",
+    default=False,
+)
+_generate_invocation_arguments: ContextVar[tuple[str, ...] | None] = ContextVar(
+    "vexcalibur_generate_invocation_arguments",
+    default=None,
+)
+_generate_irreversible_publication: ContextVar[bool] = ContextVar(
+    "vexcalibur_generate_irreversible_publication",
+    default=False,
+)
+
+
+class _VexcaliburGroup(TyperGroup):
+    """Ensure failed generate parsing cannot leave a stale success marker."""
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: Any,
+    ) -> Any:
+        arguments_token = _generate_invocation_arguments.set(None)
+        command_started_token = _generate_command_started.set(False)
+        publication_token = _generate_irreversible_publication.set(False)
+        try:
+            try:
+                return super().main(
+                    args=args,
+                    prog_name=prog_name,
+                    complete_var=complete_var,
+                    standalone_mode=standalone_mode,
+                    windows_expand_args=windows_expand_args,
+                    **extra,
+                )
+            except KeyboardInterrupt:
+                if _generate_irreversible_publication.get():
+                    return None
+                raise
+            except SystemExit as exc:
+                if exc.code == 130 and _generate_irreversible_publication.get():
+                    return None
+                arguments = _generate_invocation_arguments.get()
+                if (
+                    exc.code not in {None, 0}
+                    and not _generate_command_started.get()
+                    and arguments is not None
+                ):
+                    cleanup_failure = _remove_failed_generate_report(self, arguments)
+                    if cleanup_failure is not None:
+                        _retain_cleanup_failures(exc, (cleanup_failure,))
+                        typer.echo(
+                            "Could not remove the stale execution report after "
+                            "argument validation failed.",
+                            err=True,
+                        )
+                raise
+        finally:
+            _generate_irreversible_publication.reset(publication_token)
+            _generate_command_started.reset(command_started_token)
+            _generate_invocation_arguments.reset(arguments_token)
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: ClickContext | None = None,
+        **extra: Any,
+    ) -> ClickContext:
+        """Capture the exact argument sequence that Typer sends to parsing."""
+        _generate_invocation_arguments.set(tuple(args))
+        return super().make_context(info_name, args, parent=parent, **extra)
+
+
 app = typer.Typer(
     name="vexcalibur",
-    help="Generate and transform VEX documents from SBOMs and vulnerability sources.",
+    cls=_VexcaliburGroup,
+    help="Generate VEX documents from SBOMs and vulnerability findings.",
     no_args_is_help=True,
 )
 console = Console()
 
 
+def _remove_failed_generate_report(
+    group: _VexcaliburGroup,
+    arguments: tuple[str, ...],
+) -> BaseException | None:
+    try:
+        group_context = group.context_class(
+            group,
+            resilient_parsing=True,
+            ignore_unknown_options=True,
+            allow_extra_args=True,
+        )
+        _, command_arguments, _ = group.make_parser(group_context).parse_args(list(arguments))
+        if not command_arguments or command_arguments[0] != "generate":
+            return None
+        command = group.commands.get("generate")
+        if command is None:
+            return None
+        context = command.context_class(
+            command,
+            resilient_parsing=True,
+            ignore_unknown_options=True,
+            allow_extra_args=True,
+        )
+        values, remaining, _ = command.make_parser(context).parse_args(command_arguments[1:])
+    except BaseException as cleanup_failure:
+        return cleanup_failure
+    report_value = values.get("execution_report")
+    if not isinstance(report_value, str) or not report_value:
+        return None
+    report_path = Path(report_value)
+    output_value = values.get("output_file")
+    output_path = Path(output_value) if isinstance(output_value, str) else None
+    protected_values = [
+        values.get("input_file"),
+        values.get("output_file"),
+        values.get("findings_file"),
+        *remaining,
+    ]
+    protected_paths = tuple(
+        Path(value) for value in protected_values if isinstance(value, str) and value
+    )
+    try:
+        transaction = GenerationOutputTransaction.prepare(
+            output_path=output_path,
+            report_path=report_path,
+            protected_paths=protected_paths,
+            protected_descriptors=(
+                *_standard_output_descriptor(),
+                *_standard_error_descriptor(),
+            ),
+        )
+    except BaseException as cleanup_failure:
+        return cleanup_failure
+    try:
+        transaction.abort()
+    except BaseException as cleanup_failure:
+        return cleanup_failure
+    return None
+
+
 @app.callback()
 def main() -> None:
-    """Generate and transform VEX documents."""
+    """Generate VEX documents from SBOMs and vulnerability findings."""
 
 
 @app.command("query-osv")
@@ -116,6 +260,13 @@ def generate(
     output_file: Annotated[
         Path | None,
         typer.Option("--output", "-o", help="Write VEX JSON to this file instead of stdout."),
+    ] = None,
+    execution_report: Annotated[
+        Path | None,
+        typer.Option(
+            "--execution-report",
+            help="Atomically write a bounded JSON generation summary on Linux and macOS.",
+        ),
     ] = None,
     timestamp: Annotated[
         str | None,
@@ -270,127 +421,143 @@ def generate(
     ] = True,
 ) -> None:
     """Generate VEX JSON from local or GitHub-hosted SBOM input."""
-    parsed_timestamp = None
-    if timestamp is not None:
+    _generate_command_started.set(True)
+    output_transaction: GenerationOutputTransaction | None = None
+    if execution_report is not None:
         try:
-            parsed_timestamp = parse_timestamp(timestamp)
-        except ValueError as exc:
-            msg = f"{timestamp!r} is not a valid ISO-8601 timestamp"
-            raise typer.BadParameter(msg) from exc
+            output_transaction = GenerationOutputTransaction.prepare(
+                output_path=output_file,
+                report_path=execution_report,
+                protected_paths=(input_file, findings_file),
+                protected_descriptors=(
+                    *_standard_output_descriptor(),
+                    *_standard_error_descriptor(),
+                ),
+            )
+        except GenerationOutputPreparationError as exc:
+            typer.echo(f"Could not prepare generate outputs: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
 
     try:
-        _validate_generate_input_options(
-            input_file=input_file,
-            github_repo=github_repo,
-            offline=offline,
-        )
-        renderer = _renderer_from_generate_options(
-            output_format=output_format,
-            author=author,
-            author_role=author_role,
-            csaf_version=csaf_version,
-            csaf_document_id=csaf_document_id,
-            csaf_document_title=csaf_document_title,
-            csaf_publisher_name=csaf_publisher_name,
-            csaf_publisher_namespace=csaf_publisher_namespace,
-            csaf_publisher_category=csaf_publisher_category,
-            csaf_document_status=csaf_document_status,
-            output_file=output_file,
-        )
-        source_options = resolve_generate_source_options(
-            findings_file=findings_file,
-            offline=offline,
-            osv_url=osv_url,
-            allow_public_osv=allow_public_osv,
-            osv_source_name=osv_source_name,
-            osv_source_url=osv_source_url,
-        )
-        if github_repo is not None:
-            vex_json = _generate_vex_from_github_input(
-                repository=github_repo,
+        parsed_timestamp = None
+        if timestamp is not None:
+            try:
+                parsed_timestamp = parse_timestamp(timestamp)
+            except ValueError as exc:
+                msg = f"{timestamp!r} is not a valid ISO-8601 timestamp"
+                raise typer.BadParameter(msg) from exc
+
+        try:
+            GenerateCommandRequest.validate_input_selection(
+                input_file=input_file,
+                github_repository=github_repo,
+                offline=offline,
+            )
+            renderer = _renderer_from_generate_options(
+                output_format=output_format,
+                author=author,
+                author_role=author_role,
+                csaf_version=csaf_version,
+                csaf_document_id=csaf_document_id,
+                csaf_document_title=csaf_document_title,
+                csaf_publisher_name=csaf_publisher_name,
+                csaf_publisher_namespace=csaf_publisher_namespace,
+                csaf_publisher_category=csaf_publisher_category,
+                csaf_document_status=csaf_document_status,
+                output_file=output_file,
+            )
+            source_options = resolve_generate_source_options(
+                findings_file=findings_file,
+                offline=offline,
+                osv_url=osv_url,
+                allow_public_osv=allow_public_osv,
+                osv_source_name=osv_source_name,
+                osv_source_url=osv_source_url,
+            )
+            generation = GenerateCommandRequest(
+                input_file=input_file,
+                github_repository=github_repo,
                 github_api_url=github_api_url,
                 github_token_env=github_token_env,
                 use_gh_auth=use_gh_auth,
                 source_options=source_options,
                 timestamp=parsed_timestamp,
                 renderer=renderer,
+            ).execute()
+        except GenerateSourceOptionError as exc:
+            typer.echo(f"Invalid generate options: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except GithubSbomError as exc:
+            typer.echo(f"GitHub SBOM ingest failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except SbomError as exc:
+            typer.echo(f"SBOM ingest failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except LocalFindingsError as exc:
+            typer.echo(f"Local findings ingest failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except OsvConfigurationError as exc:
+            typer.echo(f"VEX generation failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except OsvClientError as exc:
+            typer.echo(f"OSV query failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except VexRenderError as exc:
+            typer.echo(f"VEX generation failed: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        try:
+            if output_transaction is None:
+                write_generation_document(
+                    generation,
+                    output_path=output_file,
+                    write_text_stdout=lambda text: typer.echo(text, nl=False),
+                )
+            else:
+                output_transaction.commit(
+                    generation,
+                    binary_stdout=(_binary_standard_output() if output_file is None else None),
+                )
+                with _defer_keyboard_interrupt():
+                    output_transaction.close()
+                    _record_irreversible_publication(output_transaction)
+        except GenerationReportConstructionError as exc:
+            typer.echo(f"Could not create execution report: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except GenerationDocumentWriteError as exc:
+            destination = "standard output" if exc.destination is None else str(exc.destination)
+            typer.echo(f"Could not write VEX output {destination}: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        except GenerationReportWriteError as exc:
+            typer.echo(
+                f"Could not write execution report {exc.destination}: {exc}",
+                err=True,
             )
-        elif source_options.findings_file is None:
-            if input_file is None:
-                raise AssertionError("input_file validation failed")
-            vex_json = generate_vex_from_sbom(
-                input_file=input_file,
-                timestamp=parsed_timestamp,
-                osv_base_url=(
-                    DEFAULT_OSV_API_URL
-                    if source_options.osv_url is None
-                    else source_options.osv_url
-                ),
-                allow_public_osv=source_options.allow_public_osv,
-                osv_source_name=source_options.osv_source_name,
-                osv_source_url=source_options.osv_source_url,
-                renderer=renderer,
-            )
-        else:
-            if input_file is None:
-                raise AssertionError("input_file validation failed")
-            vex_json = generate_vex_from_local_findings(
-                input_file=input_file,
-                findings_file=source_options.findings_file,
-                timestamp=parsed_timestamp,
-                renderer=renderer,
-            )
-    except GenerateSourceOptionError as exc:
-        typer.echo(f"Invalid generate options: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except GithubSbomError as exc:
-        typer.echo(f"GitHub SBOM ingest failed: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except SbomError as exc:
-        typer.echo(f"SBOM ingest failed: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except LocalFindingsError as exc:
-        typer.echo(f"Local findings ingest failed: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except OsvConfigurationError as exc:
-        typer.echo(f"VEX generation failed: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except OsvClientError as exc:
-        typer.echo(f"OSV query failed: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except VexRenderError as exc:
-        typer.echo(f"VEX generation failed: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-
-    if output_file is None:
-        typer.echo(vex_json, nl=False)
-        return
-
-    try:
-        output_file.write_text(vex_json, encoding="utf-8")
-    except OSError as exc:
-        typer.echo(f"Could not write VEX output {output_file}: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+            raise typer.Exit(code=1) from exc
+        except GenerationOutputError as exc:
+            typer.echo(f"Could not finalize generate outputs: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+    except BaseException as failure:
+        if output_transaction is not None:
+            cleanup_failure = output_transaction.abort_after(failure)
+            if cleanup_failure is not None:
+                typer.echo(
+                    f"Could not finalize generate outputs: {cleanup_failure}",
+                    err=True,
+                )
+            elif (
+                isinstance(failure, KeyboardInterrupt)
+                and output_transaction._publication_succeeded_irreversibly
+            ):
+                _record_irreversible_publication(output_transaction)
+                return
+        raise
 
 
-def _validate_generate_input_options(
-    *,
-    input_file: Path | None,
-    github_repo: str | None,
-    offline: bool,
+def _record_irreversible_publication(
+    transaction: GenerationOutputTransaction | None,
 ) -> None:
-    if input_file is None and github_repo is None:
-        msg = "either INPUT_FILE or --github-repo is required"
-        raise GenerateSourceOptionError(msg)
-    if input_file is not None and github_repo is not None:
-        msg = "INPUT_FILE cannot be combined with --github-repo"
-        raise GenerateSourceOptionError(msg)
-    if github_repo is not None and offline:
-        msg = (
-            "--offline cannot be combined with --github-repo because fetching "
-            "a GitHub SBOM uses network"
-        )
-        raise GenerateSourceOptionError(msg)
+    if transaction is not None and transaction._publication_succeeded_irreversibly:
+        _generate_irreversible_publication.set(True)
 
 
 def _renderer_from_generate_options(
@@ -481,54 +648,31 @@ def _renderer_from_generate_options(
     return None
 
 
-def _generate_vex_from_github_input(
-    *,
-    repository: str,
-    github_api_url: str,
-    github_token_env: str | None,
-    use_gh_auth: bool,
-    source_options: GenerateSourceOptions,
-    timestamp: datetime | None,
-    renderer: VexRenderer | None,
-) -> str:
-    if source_options.findings_file is None:
-        ensure_osv_url_allowed(
-            osv_base_url=_resolved_osv_url(source_options),
-            allow_public_osv=source_options.allow_public_osv,
-        )
-    source = _vulnerability_source_from_options(source_options)
-
-    components = GithubSbomClient(
-        api_url=github_api_url,
-        token=resolve_github_token(
-            api_url=github_api_url,
-            token_env=github_token_env,
-            allow_gh_cli=use_gh_auth,
-        ),
-    ).component_identities(repository)
-    return generate_vex_from_components(
-        components=components,
-        source=source,
-        timestamp=timestamp,
-        renderer=renderer,
-    )
+def _standard_output_descriptor() -> tuple[tuple[int, str], ...]:
+    try:
+        descriptor = sys.stdout.buffer.fileno()
+    except (AttributeError, OSError, ValueError):
+        return ()
+    return _labeled_descriptor(descriptor, "standard output")
 
 
-def _vulnerability_source_from_options(
-    source_options: GenerateSourceOptions,
-) -> VulnerabilitySource:
-    if source_options.findings_file is not None:
-        return LocalFindingsSource(path=source_options.findings_file)
-    return OsvSource(
-        osv_base_url=_resolved_osv_url(source_options),
-        allow_public_osv=source_options.allow_public_osv,
-        source_name=source_options.osv_source_name,
-        source_url=source_options.osv_source_url,
-    )
+def _standard_error_descriptor() -> tuple[tuple[int, str], ...]:
+    try:
+        descriptor = sys.stderr.buffer.fileno()
+    except (AttributeError, OSError, ValueError):
+        return ()
+    return _labeled_descriptor(descriptor, "standard error")
 
 
-def _resolved_osv_url(source_options: GenerateSourceOptions) -> str:
-    return DEFAULT_OSV_API_URL if source_options.osv_url is None else source_options.osv_url
+def _labeled_descriptor(
+    descriptor: object,
+    description: str,
+) -> tuple[tuple[int, str], ...]:
+    return ((descriptor, description),) if type(descriptor) is int and descriptor >= 0 else ()
+
+
+def _binary_standard_output() -> BinaryIO | None:
+    return cast(BinaryIO | None, getattr(sys.stdout, "buffer", None))
 
 
 def _parse_package_urls(values: list[str]) -> list[PackageURL]:

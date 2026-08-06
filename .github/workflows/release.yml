@@ -115,6 +115,10 @@ jobs:
             echo "Recovery tag ${RECOVERY_TAG} is not contained in current main." >&2
             exit 1
           fi
+          if ! python3 -I scripts/check-recovery-contract.py --ref "${release_sha}"; then
+            echo "Recovery tag ${RECOVERY_TAG} predates the current recoverable asset contract." >&2
+            exit 1
+          fi
 
           previous_tag=""
           if parent_sha="$(git rev-parse --verify "${release_sha}^" 2>/dev/null)"; then
@@ -151,6 +155,8 @@ jobs:
       release-tag: ${{ needs.resolve.outputs.tag }}
       release-version: ${{ needs.resolve.outputs.version }}
       publication-only: ${{ needs.resolve.outputs.mode == 'recovery' }}
+      require-release-platform-contracts: true
+      allow-public-evidence-upload: true
 
   generate-release-notes:
     name: Generate release notes
@@ -201,6 +207,24 @@ jobs:
           bot_name="${APP_SLUG}[bot]"
           bot_email="${bot_user_id}+${bot_name}@users.noreply.github.com"
 
+          has_exact_tag_schema_version() {
+            local tag_path="$1"
+            python3 -I - "${tag_path}" 2>/dev/null <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              tag = json.load(stream)
+          message = json.loads(tag["message"])
+          raise SystemExit(
+              not (
+                  type(message.get("schema_version")) is int
+                  and message["schema_version"] == 1
+              )
+          )
+          PY
+          }
+
           recover_tag_notes() {
             local ref_path="$1"
             local tag_object_sha tag_path expected_notes_sha256
@@ -214,7 +238,7 @@ jobs:
             tag_object_sha="$(jq -r .object.sha "${ref_path}")"
             tag_path="${RUNNER_TEMP}/release-notes-tag-object.json"
             gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
-            if ! jq -e \
+            if ! has_exact_tag_schema_version "${tag_path}" || ! jq -e \
               --arg tag "${RELEASE_TAG}" \
               --arg sha "${RELEASE_SHA}" \
               --arg name "${bot_name}" \
@@ -422,11 +446,11 @@ jobs:
 
           matches=0
           observed_artifact_digest=""
-          while IFS=$'\t' read -r name expired digest; do
+          while IFS=$'\t' read -r name expiration_state digest; do
             if [[ "${name}" == "${ARTIFACT_NAME}" ]]; then
               matches=$((matches + 1))
-              if [[ "${expired}" != "false" ]]; then
-                echo "The validated release-asset artifact has expired." >&2
+              if [[ "${expiration_state}" != "current" ]]; then
+                echo "The validated release-asset artifact is expired or malformed." >&2
                 exit 1
               fi
               observed_artifact_digest="${digest#sha256:}"
@@ -434,7 +458,10 @@ jobs:
           done < <(
             gh api --paginate \
               "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
-              --jq '.artifacts[] | [.name, .expired, .digest] | @tsv'
+              --jq '.artifacts[] |
+                    [.name,
+                     (if .expired == false then "current" else "invalid" end),
+                     .digest] | @tsv'
           )
           if ((matches != 1)); then
             echo "Expected exactly one current-run artifact named ${ARTIFACT_NAME}; found ${matches}." >&2
@@ -534,33 +561,42 @@ jobs:
             exit 1
           fi
 
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: read
+          permission-contents: write
+
       - name: Preflight immutable release policy and target
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
           RELEASE_SHA: ${{ needs.validation.outputs.sha }}
           RELEASE_TAG: ${{ needs.validation.outputs.tag }}
         run: |
           set -euo pipefail
 
-          policy_path="${RUNNER_TEMP}/immutable-release-policy.json"
-          policy_error="${RUNNER_TEMP}/immutable-release-policy.error"
-          if gh api \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/${GITHUB_REPOSITORY}/immutable-releases" \
-            > "${policy_path}" 2> "${policy_error}"; then
-            if ! jq -e '.enabled == true and .enforced_by_owner == true' \
-              "${policy_path}" >/dev/null; then
-              echo "Immutable releases are not enabled and owner-enforced for this repository." >&2
-              exit 1
-            fi
-          elif grep -Eq '\(HTTP (401|403)\)|Requires authentication|Resource not accessible' \
-            "${policy_error}"; then
-            echo "::warning title=Immutable release preflight deferred::The read-only workflow token cannot inspect the Administration-read immutable-release endpoint. Publication will still fail unless GitHub reports immutable:true and verifies the release plus every asset."
-          else
+          policy_error="${RUNNER_TEMP}/immutable-release-policy-preflight.error"
+          if ! policy_status="$(
+            gh api \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+              --jq 'if (.enabled == true and .enforced_by_owner == true)
+                    then "verified" else "rejected" end' \
+              2> "${policy_error}"
+          )"; then
             echo "Could not preflight the repository immutable-release policy." >&2
             sed -n '1,5p' "${policy_error}" >&2
+            exit 1
+          fi
+          if [[ "${policy_status}" != "verified" ]]; then
+            echo "Immutable releases are not enabled and owner-enforced for this repository." >&2
             exit 1
           fi
 
@@ -587,16 +623,6 @@ jobs:
             echo "Unknown release mode ${RELEASE_MODE}." >&2
             exit 1
           fi
-
-      - name: Generate app token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.AUTOMATION_CLIENT_ID }}
-          private-key: ${{ secrets.AUTOMATION_SECRET }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
 
       - name: Create release tag
         env:
@@ -629,6 +655,24 @@ jobs:
               release_notes_sha256: $notes_sha256,
               release_notes: $release_notes}' > "${tag_message_path}"
 
+          has_exact_tag_schema_version() {
+            local tag_path="$1"
+            python3 -I - "${tag_path}" 2>/dev/null <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              tag = json.load(stream)
+          message = json.loads(tag["message"])
+          raise SystemExit(
+              not (
+                  type(message.get("schema_version")) is int
+                  and message["schema_version"] == 1
+              )
+          )
+          PY
+          }
+
           validate_tag() {
             local ref_path="$1"
             local tag_object_sha tag_path
@@ -641,7 +685,7 @@ jobs:
             tag_object_sha="$(jq -r '.object.sha' "${ref_path}")"
             tag_path="${RUNNER_TEMP}/release-tag-object.json"
             gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
-            if ! jq -e \
+            if ! has_exact_tag_schema_version "${tag_path}" || ! jq -e \
               --arg tag "${RELEASE_TAG}" \
               --arg sha "${RELEASE_SHA}" \
               --arg name "${bot_name}" \
@@ -1021,6 +1065,24 @@ jobs:
           bot_name="${APP_SLUG}[bot]"
           bot_email="${bot_user_id}+${bot_name}@users.noreply.github.com"
 
+          has_exact_tag_schema_version() {
+            local tag_path="$1"
+            python3 -I - "${tag_path}" 2>/dev/null <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              tag = json.load(stream)
+          message = json.loads(tag["message"])
+          raise SystemExit(
+              not (
+                  type(message.get("schema_version")) is int
+                  and message["schema_version"] == 1
+              )
+          )
+          PY
+          }
+
           validate_tag_contract() {
             local ref_path="${RUNNER_TEMP}/pre-publish-tag-ref.json"
             local tag_path="${RUNNER_TEMP}/pre-publish-tag-object.json"
@@ -1036,7 +1098,8 @@ jobs:
             tag_object_sha="$(jq -r .object.sha "${ref_path}")"
             gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" > "${tag_path}"
             notes_sha256="$(sha256sum "${notes_path}" | awk '{print $1}')"
-            jq -e \
+            has_exact_tag_schema_version "${tag_path}" &&
+              jq -e \
               --arg tag "${RELEASE_TAG}" \
               --arg sha "${RELEASE_SHA}" \
               --arg name "${bot_name}" \
@@ -1166,6 +1229,24 @@ jobs:
               '{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body,
                 draft: false, prerelease: false}' \
               > "${publication_transition}"
+            policy_error="${RUNNER_TEMP}/immutable-release-policy-final.error"
+            if ! policy_status="$(
+              gh api \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2026-03-10' \
+                "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+                --jq 'if (.enabled == true and .enforced_by_owner == true)
+                      then "verified" else "rejected" end' \
+                2> "${policy_error}"
+            )"; then
+              echo "Could not revalidate the repository immutable-release policy." >&2
+              sed -n '1,5p' "${policy_error}" >&2
+              exit 1
+            fi
+            if [[ "${policy_status}" != "verified" ]]; then
+              echo "Immutable releases are no longer enabled and owner-enforced." >&2
+              exit 1
+            fi
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
               --input "${publication_transition}" > /dev/null
           fi

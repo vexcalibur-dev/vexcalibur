@@ -5,7 +5,7 @@ readonly fuzz_entrypoint="tests.fuzz.fuzz_boundaries"
 readonly tracked_corpus="tests/fuzz/corpus"
 readonly generated_corpus="${FUZZ_CORPUS_ROOT:-.fuzz-corpus}"
 readonly artifact_root="${FUZZ_ARTIFACT_ROOT:-fuzz-artifacts}"
-readonly -a all_targets=(json sbom github local osv identity)
+readonly -a all_targets=(json sbom github local osv identity report consumer)
 
 require_positive_integer() {
   local name="$1"
@@ -52,7 +52,12 @@ for target in "${targets[@]}"; do
   corpus_dir="${generated_corpus}/${target}"
   artifact_dir="${artifact_root}/${target}"
   mkdir -p "${corpus_dir}" "${artifact_dir}"
-  cp -R "${tracked_corpus}/${target}/." "${corpus_dir}/"
+  if [[ -d "${tracked_corpus}/${target}" ]]; then
+    cp -R "${tracked_corpus}/${target}/." "${corpus_dir}/"
+  fi
+  if [[ "${target}" == report ]]; then
+    printf '\377' >"${corpus_dir}/malformed-utf8.bin"
+  fi
 
   printf 'Fuzzing %s for %s seconds\n' "${target}" "${max_total_time}"
   FUZZ_TARGET="${target}" uv run --frozen --group fuzz python -m "${fuzz_entrypoint}" \

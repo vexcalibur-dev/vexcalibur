@@ -14,7 +14,7 @@ closed-world schema:
 | `review_kind` | `production` or `synthetic_fixture` |
 | `analysis_revision` | Positive integer, advanced for each review |
 | `reviewed_at` | Extended RFC 3339 UTC timestamp ending in `Z` |
-| `reviewed_by` | Nonempty public attribution; repository review history supplies provenance |
+| `reviewed_by` | Nonempty public attribution to a maintainer or named review automation; repository review history supplies provenance |
 | `inventory.path` | `uv.lock` |
 | `inventory.sha256` | Exact lock SHA-256 as four colon-delimited groups of 16 lowercase hexadecimal characters |
 | `inventory.coverage` | `cross-platform-reference-runtime` |
@@ -181,13 +181,15 @@ Every publication bundle contains:
 | `runtime-constraints.txt` | Strict runtime installation contract |
 | `review.json` and `findings.json` | Exact reviewed inputs |
 | `vex.cdx.json` | Byte-identical output from the installed wheel and pinned Action |
+| `vex.cdx.execution.json` | Schema-1 report bound to the CycloneDX document bytes |
 | `vexcalibur-VERSION-py3-none-any.whl` | Exact checked wheel later eligible for PyPI |
 | `vexcalibur-VERSION.tar.gz` | Exact checked source distribution later eligible for PyPI |
 | `manifest.json` | Closed-world schema-2 publication record |
 | `SHA256SUMS` | Sorted digest inventory for every other release asset |
 
 `vex.openvex.json` and `vexcalibur-vex.json` are additionally present when the
-review contains at least one assertion.
+review contains at least one assertion. Their reports are
+`vex.openvex.execution.json` and `vexcalibur-vex.execution.json`.
 
 The schema-2 verifier rejects unknown fields. The top-level fields are exactly:
 
@@ -216,8 +218,8 @@ The generator contains exactly `distribution`, `sdist_filename`,
 commit; and `wheel_source_dirty` is `false`.
 
 The schema-2 validation record contains the six schema-1 fields plus
-`action_local_wheel_equivalence: passed`. All other values and the
-zero-assertion cross-format exception are unchanged.
+`action_local_wheel_equivalence: passed` and `execution_reports: passed`. All
+other values and the zero-assertion cross-format exception are unchanged.
 
 `publication` has exactly these fields:
 
@@ -242,7 +244,7 @@ The `action` record contains exactly:
 | `job` | `action-vex` |
 | `output_equivalence` | `byte_for_byte` |
 | `package_spec` | `file_uri_with_sha256_fragment` |
-| `payload_sha256` | Canonical payload digest of the generated VEX files |
+| `payload_sha256` | Canonical payload digest of the generated VEX files and execution reports |
 | `repository` | `vexcalibur-dev/vexcalibur-action` |
 
 Schema-2 creation currently requires Action commit
@@ -256,7 +258,8 @@ For each producer, the finalizer sorts the relevant
 canonical JSON serializer, and records the SHA-256 as `payload_sha256`. The
 inventory payload covers the five reviewed inventory files, the build payload
 covers the wheel and source distribution, and the direct and Action payloads
-cover the generated VEX files. The latter two digests must be equal.
+cover the generated VEX files and execution reports. The latter two digests
+must be equal.
 
 GitHub Actions archive digests are checked while artifacts cross jobs. They are
 deliberately absent from the published manifest because the archive envelope is
@@ -312,13 +315,31 @@ uv run --frozen python scripts/release_evidence.py verify-bundle \
   --bundle-dir build/release-evidence
 ```
 
-Verify a schema-2 publication bundle against an exact tag and commit. Replace
-`vX.Y.Z` with the release tag under review:
+Verify a schema-2 publication bundle against an exact tag and commit:
 
 ```bash
-RELEASE_TAG=vX.Y.Z
-git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-RELEASE_SHA="$(git rev-parse --verify "$RELEASE_TAG^{commit}")"
+set -euo pipefail
+
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  echo "Set RELEASE_TAG to the exact publication bundle tag." >&2
+  exit 2
+fi
+
+PUBLICATION_REF="refs/vexcalibur-publication/${RELEASE_TAG}-$$"
+cleanup_publication_ref() {
+  git update-ref -d "$PUBLICATION_REF" 2>/dev/null || true
+}
+trap cleanup_publication_ref EXIT
+
+git fetch --force --no-tags origin \
+  "refs/tags/${RELEASE_TAG}:${PUBLICATION_REF}"
+if [[ "$(git cat-file -t "$PUBLICATION_REF")" != "tag" ]] ||
+  [[ "$(git cat-file -p "$PUBLICATION_REF" | sed -n '2s/^type //p')" != "commit" ]]; then
+  printf 'Publication verification requires an annotated tag that directly names a commit.\n' >&2
+  exit 1
+fi
+RELEASE_SHA="$(git rev-parse --verify "${PUBLICATION_REF}^{commit}")"
 
 uv run --frozen python scripts/release_evidence.py verify-publication \
   --bundle-dir build/publication-assets \

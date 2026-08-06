@@ -660,6 +660,16 @@ class OsvSource:
         if self.headers is not None:
             object.__setattr__(self, "headers", _validated_osv_headers(self.headers))
 
+    @property
+    def effective_base_url(self) -> str:
+        """Return the endpoint that this source's configured client will use."""
+        return self._effective_base_url(self.client)
+
+    def validate_before_inventory_load(self) -> None:
+        """Validate built-in OSV policy before a remote inventory request."""
+        if type(self) is OsvSource:
+            self.validate_configuration()
+
     def findings_for_components(
         self,
         components: tuple[ComponentIdentity, ...],
@@ -684,6 +694,15 @@ class OsvSource:
             ),
         )
 
+    def validate_configuration(self) -> None:
+        """Validate endpoint consent and provenance without making a request."""
+        effective_base_url = self.effective_base_url
+        ensure_osv_url_allowed(
+            osv_base_url=effective_base_url,
+            allow_public_osv=self.allow_public_osv,
+        )
+        self._provenance_for_url(effective_base_url)
+
     def _client(self) -> OsvClient:
         if self.client is None:
             return osv_client_for_url(
@@ -699,7 +718,10 @@ class OsvSource:
         return self.client
 
     def _provenance(self, client: OsvClient) -> tuple[str, str, str]:
-        effective_base_url = normalize_osv_base_url(_client_base_url(client) or self.osv_base_url)
+        effective_base_url = self._effective_base_url(client)
+        return self._provenance_for_url(effective_base_url)
+
+    def _provenance_for_url(self, effective_base_url: str) -> tuple[str, str, str]:
         validate_osv_base_url(effective_base_url)
         is_official = _is_canonical_public_osv_endpoint(effective_base_url)
         analysis_detail = OSV_ANALYSIS_DETAIL if is_official else OSV_MIRROR_ANALYSIS_DETAIL
@@ -715,6 +737,9 @@ class OsvSource:
             _canonical_httpx_url(effective_base_url),
             analysis_detail,
         )
+
+    def _effective_base_url(self, client: object | None) -> str:
+        return normalize_osv_base_url(_client_base_url(client) or self.osv_base_url)
 
 
 def osv_client_for_url(
@@ -803,6 +828,11 @@ def is_public_osv_url(osv_base_url: str) -> bool:
     if hostname is None:
         return False
     return _normalized_hostname(hostname) == PUBLIC_OSV_API_HOST
+
+
+def is_canonical_public_osv_endpoint(osv_base_url: str) -> bool:
+    """Return whether a URL is the exact supported public OSV API root."""
+    return _is_canonical_public_osv_endpoint(osv_base_url)
 
 
 def normalize_osv_base_url(osv_base_url: str) -> str:

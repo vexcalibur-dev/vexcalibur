@@ -132,9 +132,11 @@ def test_resolve_github_token_uses_hostname_without_port_for_default_github() ->
 
 def test_resolve_github_token_falls_back_to_gh_auth_token(monkeypatch: pytest.MonkeyPatch) -> None:
     captured_args: list[list[str]] = []
+    captured_environment: dict[str, str] = {}
 
     def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
         captured_args.append(args)
+        captured_environment.update(kwargs["env"])
         return subprocess.CompletedProcess(args=args, returncode=0, stdout=" gh-token\n")
 
     monkeypatch.setattr("vexcalibur.github_sbom.subprocess.run", fake_run)
@@ -143,6 +145,38 @@ def test_resolve_github_token_falls_back_to_gh_auth_token(monkeypatch: pytest.Mo
 
     assert token == "gh-token"  # noqa: S105
     assert captured_args == [["gh", "auth", "token", "--hostname", "github.com"]]
+    assert captured_environment == {}
+
+
+def test_gh_fallback_removes_ambient_token_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_environment: dict[str, str] = {}
+
+    def fake_run(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        captured_environment.update(kwargs["env"])
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="host-token\n")
+
+    monkeypatch.setattr("vexcalibur.github_sbom.subprocess.run", fake_run)
+
+    token = resolve_github_token(
+        api_url="https://attacker.example/api/v3",
+        allow_gh_cli=True,
+        environ={
+            "PATH": "/usr/bin",
+            "GH_CONFIG_DIR": "/home/example/.config/gh",
+            "GH_TOKEN": "public-token",
+            "GITHUB_TOKEN": "workflow-token",
+            "GH_ENTERPRISE_TOKEN": "enterprise-token",
+            "GITHUB_ENTERPRISE_TOKEN": "enterprise-workflow-token",
+        },
+    )
+
+    assert token == "host-token"  # noqa: S105
+    assert captured_environment == {
+        "PATH": "/usr/bin",
+        "GH_CONFIG_DIR": "/home/example/.config/gh",
+    }
 
 
 def test_resolve_github_token_returns_none_without_credentials(

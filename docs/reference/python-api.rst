@@ -36,9 +36,9 @@ and verifies the result.
 Generation
 ----------
 
-All generation functions return serialized JSON as ``str``. CycloneDX 1.6 is
-the default output. Pass ``OpenVexJsonRenderer`` or ``Csaf20VexJsonRenderer``
-to select another format.
+Generation functions without a ``_result`` suffix return serialized JSON as
+``str``. CycloneDX 1.6 is the default output. Pass ``OpenVexJsonRenderer`` or
+``Csaf20VexJsonRenderer`` to select another format.
 
 ``generate_vex_from_source`` and ``generate_vex_from_components`` accept a
 custom ``VulnerabilitySource``. A source receives immutable component values
@@ -56,6 +56,132 @@ output extension contract.
 .. autofunction:: generate_vex_from_github_sbom
 
 .. autofunction:: generate_vex_from_local_findings
+
+Report-aware generation
+-----------------------
+
+Each supported generation path has a ``*_result`` variant. These functions
+return ``GenerationResult`` instead of ``str``. The result retains the exact
+rendered bytes and the normalized values needed to build a versioned execution
+report, so callers do not need to parse VEX output to calculate counts or a
+digest.
+
+Built-in sources and renderers supply their execution-report categories. When
+a result uses a custom source or renderer, pass ``GenerationExecutionContext``
+with the corresponding ``custom`` category before calling
+``GenerationResult.execution_report()``. Generation can succeed without that
+context, but the result cannot produce an execution report and the method
+raises ``ValueError``.
+
+``EXECUTION_REPORT_SCHEMA_VERSION`` is the feature-detection constant for this
+contract. Require the exact integer value your application supports. A missing,
+mistyped, or different value means the installed package does not provide that
+report contract.
+
+.. autofunction:: generate_vex_from_components_result
+
+.. autofunction:: generate_vex_from_source_result
+
+.. autofunction:: generate_vex_from_sbom_result
+
+.. autofunction:: generate_vex_from_github_sbom_result
+
+.. autofunction:: generate_vex_from_github_source_result
+
+.. autofunction:: generate_vex_from_local_findings_result
+
+.. autodata:: EXECUTION_REPORT_SCHEMA_VERSION
+
+.. autoclass:: GenerationResult
+   :members:
+
+.. autoclass:: GenerationExecutionContext
+
+.. autoclass:: GenerationSourcePreflight
+   :members:
+
+.. autoclass:: GenerationExecutionReport
+   :members:
+
+.. autoclass:: GeneratedDocumentMetadata
+
+.. autoclass:: GeneratedDocumentMetadataDict
+
+.. autoclass:: GenerationExecutionReportDict
+
+The typed dictionaries expose these required fields:
+
+.. list-table:: Execution-report dictionary fields
+   :header-rows: 1
+
+   * - Type
+     - Field
+     - Value
+   * - ``GeneratedDocumentMetadataDict``
+     - ``sha256``
+     - Lowercase SHA-256 digest text for the exact UTF-8 document bytes
+   * - ``GeneratedDocumentMetadataDict``
+     - ``bytes``
+     - UTF-8 document byte count as an integer
+   * - ``GenerationExecutionReportDict``
+     - ``schema_version``
+     - Report schema integer
+   * - ``GenerationExecutionReportDict``
+     - ``command``
+     - Literal ``generate``
+   * - ``GenerationExecutionReportDict``
+     - ``vexcalibur_version``
+     - Installed package version text
+   * - ``GenerationExecutionReportDict``
+     - ``inventory_source``
+     - Serialized ``InventorySourceCategory`` value
+   * - ``GenerationExecutionReportDict``
+     - ``finding_source``
+     - Serialized ``FindingSourceCategory`` value
+   * - ``GenerationExecutionReportDict``
+     - ``output_format``
+     - Serialized ``ExecutionReportOutputFormat`` value
+   * - ``GenerationExecutionReportDict``
+     - ``component_count``
+     - Normalized component count as an integer
+   * - ``GenerationExecutionReportDict``
+     - ``finding_count``
+     - Normalized finding count as an integer
+   * - ``GenerationExecutionReportDict``
+     - ``analysis_state_counts``
+     - Mapping from serialized analysis-state values to positive integer counts
+   * - ``GenerationExecutionReportDict``
+     - ``document``
+     - ``GeneratedDocumentMetadataDict`` value
+
+.. autoclass:: InventorySourceCategory
+   :members:
+
+.. autoclass:: FindingSourceCategory
+   :members:
+
+.. autoclass:: ExecutionReportOutputFormat
+   :members:
+
+.. autofunction:: parse_generation_execution_report
+
+The :doc:`execution-report reference <execution-report>` defines the serialized
+fields, category values, size limit, and security boundary. This checked-in
+example writes matching VEX and report bytes without replacing existing files:
+
+.. literalinclude:: ../examples/generate_execution_report.py
+   :language: python
+   :linenos:
+
+Run it from Bash or PowerShell at the repository root with a new output
+directory::
+
+   uv run --frozen python docs/examples/generate_execution_report.py vexcalibur-python-api
+
+Success prints both output paths. The two writes are independent and can leave
+partial files. On Windows, their privacy depends on the ACL of the existing
+parent directory. Python embeddings do not receive the CLI's coordinated
+publication transaction.
 
 SBOM ingest and GitHub
 ----------------------
@@ -161,6 +287,39 @@ Enumeration values
    * - Enum
      - Member
      - Serialized value
+   * - ``InventorySourceCategory``
+     - ``SBOM_FILE``
+     - ``sbom_file``
+   * - ``InventorySourceCategory``
+     - ``GITHUB_DEPENDENCY_GRAPH``
+     - ``github_dependency_graph``
+   * - ``InventorySourceCategory``
+     - ``CUSTOM``
+     - ``custom``
+   * - ``FindingSourceCategory``
+     - ``LOCAL_FILE``
+     - ``local_file``
+   * - ``FindingSourceCategory``
+     - ``PUBLIC_OSV``
+     - ``public_osv``
+   * - ``FindingSourceCategory``
+     - ``CUSTOM_OSV``
+     - ``custom_osv``
+   * - ``FindingSourceCategory``
+     - ``CUSTOM``
+     - ``custom``
+   * - ``ExecutionReportOutputFormat``
+     - ``CYCLONEDX``
+     - ``cyclonedx``
+   * - ``ExecutionReportOutputFormat``
+     - ``OPENVEX``
+     - ``openvex``
+   * - ``ExecutionReportOutputFormat``
+     - ``CSAF``
+     - ``csaf``
+   * - ``ExecutionReportOutputFormat``
+     - ``CUSTOM``
+     - ``custom``
    * - ``VexAnalysisState``
      - ``RESOLVED``
      - ``resolved``
@@ -229,11 +388,19 @@ classes support broader boundaries:
   renderers raise its ``OpenVexRenderError`` or ``CsafRenderError`` subclasses.
 * ``ComponentVersionError`` reports contradictory explicit and package URL
   versions when an application constructs ``ComponentIdentity`` directly.
+* ``GenerationReportMetadataError`` means package metadata cannot prove which
+  Vexcalibur code produced a report.
+* ``GenerationExecutionReportParseError`` rejects oversized, malformed,
+  noncanonical, or schema-incompatible report bytes.
 
 The API does not wrap unexpected exceptions raised by custom providers or
 renderers. Their implementations own those failures.
 
 .. autoexception:: ComponentVersionError
+
+.. autoexception:: GenerationReportMetadataError
+
+.. autoexception:: GenerationExecutionReportParseError
 
 .. autoexception:: SbomError
 

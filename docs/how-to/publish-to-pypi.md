@@ -62,12 +62,20 @@ The `pypi` environment's tag policy is a deployment restriction, but it has no
 required reviewer. Anyone allowed to dispatch the release workflows should be
 treated as a release operator.
 
-The immutable-policy status endpoint requires Administration-read permission,
-which the ordinary workflow token may not have. A 401 or 403 produces a
-prominent deferred-preflight warning. Any readable false policy, 404, malformed
-response, or other failure stops publication. Regardless of preflight access,
-the publisher requires GitHub to report `immutable: true` and verify the
-release plus every asset after publication.
+After it verifies the downloaded assets and scanned release notes, the
+publisher creates a repository-scoped GitHub App token with Administration-read
+and Contents-write permission. It uses that token to check the immutable-release
+policy before creating a tag or release. A false policy, unreadable endpoint,
+malformed response, or other request failure stops publication. The publisher
+checks the policy again immediately before it publishes the draft. It also
+requires GitHub to report `immutable: true` and verify the release plus every
+asset after publication.
+
+The installed App must grant both requested permissions; GitHub adds
+Metadata-read automatically. If you add Administration-read to an existing App,
+an organization owner may need to approve the new permission before the
+installation can issue the publisher token. Run `make governance-check` after
+that approval.
 
 ## Prepare the release commit
 
@@ -86,8 +94,8 @@ Run the repository gates:
 ```bash
 uv lock --check
 uv sync --frozen --extra docs
-uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py
-uv run --frozen ruff check src tests scripts/*.py docs/conf.py
+uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py
+uv run --frozen ruff check src tests scripts/*.py docs/conf.py docs/examples/*.py
 uv run --frozen mypy src
 make workflow-lint
 uv run --frozen pytest -m "not live" --cov-fail-under=75
@@ -118,6 +126,10 @@ highest applicable change:
 
 An explicit version must be `MAJOR.MINOR.PATCH`, with no leading zeros and no
 component above `999999`. It must be higher than the latest release.
+If `HEAD` already has a release tag, don't provide a new version. An automatic
+rerun can recreate a missing release from that tag, while recovery handles an
+interrupted release. The resolver rejects a second release tag on the same
+commit.
 
 ## Start a normal release
 
@@ -136,9 +148,9 @@ is left intact for explicit recovery.
 
 The workflow builds the wheel and source distribution once, creates the
 candidate-free inventory, generates VEX independently with the installed wheel
-and full-commit-pinned companion Action, and finalizes a flat schema-2 asset
-set on a fresh runner. Release notes cross a separate digest and secret-scan
-boundary.
+and full-commit-pinned companion Action, validates an execution report for each
+document, and finalizes a flat schema-2 asset set on a fresh runner. Release
+notes cross a separate digest and secret-scan boundary.
 
 Only after all proposed bytes are verified does the final job mint a short-lived
 App token. It creates an annotated bot-authored tag whose canonical JSON message
@@ -155,44 +167,94 @@ Do not create or edit the tag or release manually while this workflow runs.
 
 Use recovery only for an existing annotated release tag created by the
 automation contract. The dispatch itself must run from `main`; the workflow's
-resolver rejects every other Git ref. With a recent authenticated GitHub CLI:
+resolver rejects every other Git ref.
 
-Replace `vX.Y.Z` below with the exact existing release tag you are recovering:
+Run this Bash procedure from the repository root with a recent authenticated
+GitHub CLI. It updates your local `main` branch, so move unfinished work to
+another worktree before you begin.
 
 ```bash
 set -euo pipefail
 
-RELEASE_TAG=vX.Y.Z
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
 
-gh auth status --active --hostname github.com
-RUN_URL="$(
-  gh workflow run release.yml \
-    --repo vexcalibur-dev/vexcalibur \
-    --ref main \
-    -f recovery-tag="$RELEASE_TAG"
-)"
-if [[ "$RUN_URL" =~ /actions/runs/([0-9]+)$ ]]; then
-  RUN_ID="${BASH_REMATCH[1]}"
-else
-  printf 'could not read workflow run ID from %s\n' "$RUN_URL" >&2
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  printf 'Release tag must look like v1.2.3 without leading zeros.\n' >&2
   exit 1
 fi
-gh run watch "$RUN_ID" \
+
+gh auth status --active --hostname github.com
+
+if ! WORKTREE_STATUS="$(git status --porcelain)"; then
+  printf 'Could not inspect the worktree before recovery.\n' >&2
+  exit 1
+fi
+if [[ -n "$WORKTREE_STATUS" ]]; then
+  printf 'Recovery requires a clean worktree.\n' >&2
+  exit 1
+fi
+git switch main
+git pull --ff-only origin main
+if ! WORKTREE_STATUS="$(git status --porcelain)"; then
+  printf 'Could not inspect the worktree after updating main.\n' >&2
+  exit 1
+fi
+if [[ -n "$WORKTREE_STATUS" ]]; then
+  printf 'Recovery requires a clean worktree after updating main.\n' >&2
+  exit 1
+fi
+
+RECOVERY_REF="refs/vexcalibur-recovery/${RELEASE_TAG}"
+cleanup_recovery_ref() {
+  git update-ref -d "$RECOVERY_REF" 2>/dev/null || true
+}
+trap cleanup_recovery_ref EXIT
+
+git fetch --force --no-tags origin \
+  "refs/tags/${RELEASE_TAG}:${RECOVERY_REF}"
+if [[ "$(git cat-file -t "$RECOVERY_REF")" != "tag" ]] ||
+  [[ "$(git cat-file -p "$RECOVERY_REF" | sed -n '2s/^type //p')" != "commit" ]]; then
+  printf 'Recovery requires an annotated tag that directly names a commit.\n' >&2
+  exit 1
+fi
+
+RELEASE_SHA="$(git rev-parse --verify "${RECOVERY_REF}^{commit}")"
+MAIN_SHA="$(git rev-parse --verify origin/main)"
+if ! git merge-base --is-ancestor "$RELEASE_SHA" "$MAIN_SHA"; then
+  printf '%s is not contained in current main.\n' "$RELEASE_TAG" >&2
+  exit 1
+fi
+
+python3 -I scripts/check-recovery-contract.py --ref "$RELEASE_SHA"
+
+read -r -p "Type ${RELEASE_TAG} to dispatch immutable release recovery: " CONFIRM_TAG
+if [[ "$CONFIRM_TAG" != "$RELEASE_TAG" ]]; then
+  printf 'Confirmation did not match; recovery was not dispatched.\n' >&2
+  exit 1
+fi
+
+gh workflow run release.yml \
   --repo vexcalibur-dev/vexcalibur \
-  --exit-status
+  --ref main \
+  -f recovery-tag="$RELEASE_TAG"
 ```
 
-Leave `version` empty and inspect every reconciliation message. The watch must
-end with a successful conclusion. Success means the release is immutable and
-the workflow has verified every expected asset and attestation. GitHub Release
-recovery deliberately uses `--ref main`; the later PyPI recovery dispatch uses
-the exact release tag as both `--ref` and `release-tag`.
+The final command exits after GitHub accepts the dispatch; it does not wait for
+recovery to finish. Leave `version` empty, open the queued run, and inspect every
+reconciliation message. GitHub Release recovery deliberately uses `--ref main`;
+the later PyPI recovery dispatch uses the exact release tag as both `--ref` and
+`release-tag`.
 
 The tag must directly annotate a commit that is still an ancestor of current
-`main`; it need not remain the tip. Validation regenerates the complete asset
-set deterministically. Existing draft assets must have the same names and
-bytes. The workflow may delete and retry only a zero-byte GitHub
-`state=starter` upload marker. It never replaces a completed asset.
+`main`; it need not remain the tip. Its commit must also contain
+`release-evidence/recovery-contract.json` with the schema supported by the
+current workflow. Tags from before that marker cannot use automated recovery
+because their build and asset contracts differ. They remain immutable.
+
+Validation regenerates the complete asset set deterministically. Existing draft
+assets must have the same names and bytes. The workflow may delete and retry
+only a zero-byte GitHub `state=starter` upload marker. It never replaces a
+completed asset.
 
 Recovery does not trust the mutable draft body. It validates the protected tag
 ref, annotated object, target commit, automation-bot tagger, closed-world
@@ -230,6 +292,7 @@ It downloads all schema-2 assets and verifies:
 - wheel and source-distribution names, metadata, version, source identity, and
   archive safety;
 - installed-wheel behavior;
+- execution-report provenance, counts, size, and document digests;
 - CycloneDX, official OpenVEX, and strict CSAF validation; and
 - exact hashes already present on PyPI.
 
@@ -250,49 +313,46 @@ subset, checks the compact JSON filename contract and every digest again,
 re-resolves the immutable release, then invokes the pinned PyPI publisher.
 
 If the GitHub release event was missed or a PyPI upload stopped after one file,
-dispatch `PyPI` from the exact release tag and supply the same tag as input.
-Replace `vX.Y.Z` with that tag:
+dispatch `PyPI` from the exact release tag and supply the same tag as input:
 
 ```bash
-set -euo pipefail
-
-RELEASE_TAG=vX.Y.Z
-RUN_URL="$(
-  gh workflow run pypi.yml \
-    --repo vexcalibur-dev/vexcalibur \
-    --ref "$RELEASE_TAG" \
-    -f release-tag="$RELEASE_TAG"
-)"
-if [[ "$RUN_URL" =~ /actions/runs/([0-9]+)$ ]]; then
-  RUN_ID="${BASH_REMATCH[1]}"
-else
-  printf 'could not read workflow run ID from %s\n' "$RUN_URL" >&2
-  exit 1
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  echo "Set RELEASE_TAG to the exact interrupted release tag." >&2
+  exit 2
 fi
-gh run watch "$RUN_ID" \
+read -r -p "Type $RELEASE_TAG to confirm the recovery target: " CONFIRMED_TAG
+[[ "$CONFIRMED_TAG" == "$RELEASE_TAG" ]] || exit 2
+
+gh workflow run pypi.yml \
   --repo vexcalibur-dev/vexcalibur \
-  --exit-status
+  --ref "$RELEASE_TAG" \
+  -f release-tag="$RELEASE_TAG"
 ```
 
 The workflow rejects a dispatch whose Git ref and `release-tag` differ. This
 binding is also what satisfies the `pypi` environment's `v*` tag deployment
 policy. Publishing both files already present at the expected hashes is a
-successful no-op. The watch must end successfully before verification. On an
-already complete release, the selector reports that no distribution files need
-publication; after an interrupted upload, the PyPI release contains both files
-at their expected hashes.
+successful no-op.
 
 ## Verify the release
 
 Run this from a Vexcalibur checkout after both workflows succeed. It requires a
 recent authenticated GitHub CLI, Git with the release tag available, GNU
 `sha256sum`, `jq`, uv, and Python 3. The temporary directories must be new so
-stale files cannot satisfy a check. Replace `vX.Y.Z` with the published tag:
+stale files cannot satisfy a check:
 
 ```bash
 set -euo pipefail
 
-RELEASE_TAG=vX.Y.Z
+RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+  echo "Set RELEASE_TAG to the exact release produced by the workflow." >&2
+  exit 2
+fi
+read -r -p "Type $RELEASE_TAG to confirm the verification target: " CONFIRMED_TAG
+[[ "$CONFIRMED_TAG" == "$RELEASE_TAG" ]] || exit 2
+
 RELEASE_VERSION=${RELEASE_TAG#v}
 REPOSITORY=vexcalibur-dev/vexcalibur
 RELEASE_ASSETS="$(mktemp -d)"
@@ -334,6 +394,24 @@ TAG_OBJECT_SHA="$(
     "$TAG_REF"
 )"
 gh api "repos/$REPOSITORY/git/tags/$TAG_OBJECT_SHA" > "$TAG_OBJECT"
+has_exact_tag_schema_version() {
+  local tag_path="$1"
+  python3 -I - "$tag_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    tag = json.load(stream)
+message = json.loads(tag["message"])
+raise SystemExit(
+    not (
+        type(message.get("schema_version")) is int
+        and message["schema_version"] == 1
+    )
+)
+PY
+}
+has_exact_tag_schema_version "$TAG_OBJECT"
 jq --exit-status \
   --arg tag "$RELEASE_TAG" \
   --arg sha "$RELEASE_SHA" \
@@ -473,12 +551,19 @@ replaced.
    useful reason. Open the public [Vexcalibur project page on
    PyPI](https://pypi.org/project/vexcalibur/), select the affected version from
    its release history, and confirm that the version is visibly marked as yanked
-   and displays that reason. Replace `X.Y.Z` below with the affected release
-   number. Also require every file in the version-specific JSON response to
-   report `yanked: true`:
+   and displays that reason. Also require every file in the version-specific
+   JSON response to report `yanked: true`:
 
    ```bash
-   RELEASE_VERSION=X.Y.Z
+   RELEASE_TAG=REPLACE_WITH_RELEASE_TAG
+   if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+     echo "Set RELEASE_TAG to the exact release being investigated." >&2
+     exit 2
+   fi
+   read -r -p "Type $RELEASE_TAG to confirm the incident target: " CONFIRMED_TAG
+   [[ "$CONFIRMED_TAG" == "$RELEASE_TAG" ]] || exit 2
+   RELEASE_VERSION=${RELEASE_TAG#v}
+
    python - "$RELEASE_VERSION" <<'PY'
    import json
    import sys

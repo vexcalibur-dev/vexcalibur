@@ -1,8 +1,8 @@
 # Vexcalibur
 
 Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
-documents. It reads CycloneDX files or a GitHub Dependency Graph SBOM, then
-collects findings from OSV-compatible services or local JSON. It writes
+documents. It reads CycloneDX files or a GitHub Dependency Graph SBOM,
+collects findings from OSV-compatible services or local JSON, and writes
 CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
 
 Public OSV access fails closed. Vexcalibur sends package URLs and versions to `https://api.osv.dev` only when a command includes `--allow-public-osv`.
@@ -32,16 +32,19 @@ the App-backed production automation plan.
 ## How-to guides
 
 - [Generate VEX from Python](how-to/use-python-api.md)
+- [Generate an execution report from Python](how-to/generate-execution-report-from-python.md)
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
 - [Generate OpenVEX](how-to/generate-openvex.md)
 - [Generate CSAF VEX](how-to/generate-csaf.md)
 - [Use a private OSV mirror](how-to/use-private-osv-mirror.md)
+- [Consume a generation execution report](how-to/consume-execution-report.md)
 - [Build and review local release evidence](how-to/build-release-evidence.md)
 - [Publish Vexcalibur to PyPI](how-to/publish-to-pypi.md)
 
 ## Reference
 
 - [Command-line interface](reference/cli.md)
+- [Generation execution report](reference/execution-report.md)
 - [CycloneDX VEX output](reference/cyclonedx-vex-output.md)
 - [OpenVEX output](reference/openvex-output.md)
 - [CSAF output](reference/csaf-output.md)
@@ -71,14 +74,17 @@ the App-backed production automation plan.
 
 tutorials/quickstart
 tutorials/offline-local-findings
+how-to/use-python-api
+how-to/generate-execution-report-from-python
 how-to/generate-cyclonedx-vex
 how-to/generate-openvex
 how-to/generate-csaf
-how-to/use-python-api
 how-to/use-private-osv-mirror
+how-to/consume-execution-report
 how-to/build-release-evidence
 how-to/publish-to-pypi
 reference/cli
+reference/execution-report
 reference/cyclonedx-vex-output
 reference/openvex-output
 reference/csaf-output

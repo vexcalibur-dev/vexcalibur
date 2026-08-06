@@ -51,3 +51,6 @@ PY
 Use application paths in place of the two fixture paths. Keep imports under `vexcalibur.api`; implementation modules can change outside the 1.x compatibility contract.
 
 To query an OSV-compatible service instead of reviewed local findings, use `generate_vex_from_sbom`. Public OSV remains blocked until the call includes `allow_public_osv=True`. See [Use a private OSV mirror](use-private-osv-mirror.md) before sending a private inventory to any service.
+
+When the embedding also needs counts and a digest for the exact rendered bytes,
+follow [Generate an execution report from Python](generate-execution-report-from-python.md).

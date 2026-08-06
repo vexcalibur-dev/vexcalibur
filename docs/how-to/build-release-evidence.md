@@ -40,7 +40,7 @@ Everything under `release-evidence/` is intended to become public. Do not place
 embargoed advisories, private SBOM data, tokens, customer identifiers, or
 internal URLs there.
 
-## Check the human-reviewed snapshot
+## Check the reviewed snapshot
 
 Display the two digests that the review binds:
 
@@ -52,7 +52,7 @@ uv run --frozen python scripts/release_evidence.py validate-review \
   --lock uv.lock
 ```
 
-The initial zero-finding review prints:
+The current zero-finding review prints:
 
 ```text
 production	0
@@ -78,7 +78,8 @@ The gate generates the production and synthetic bundles twice in distinct
 temporary directories and compares every byte. It also:
 
 - verifies clean, full-commit wheel SCM metadata;
-- installs with exact hash-locked dependencies and a SHA-256-bound wheel URI;
+- installs the SHA-256-bound wheel from its own dependency metadata while the
+  lock export constrains every resolved dependency by version and hash;
 - validates CycloneDX output;
 - runs the pinned official OpenVEX parser;
 - runs the pinned CSAF schema and mandatory-test suite; and

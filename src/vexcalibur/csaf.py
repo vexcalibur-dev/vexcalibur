@@ -30,6 +30,7 @@ from vexcalibur.domain import (
     VulnerabilityFinding,
 )
 from vexcalibur.errors import VexRenderError
+from vexcalibur.render_budget import enforce_builtin_render_input_budget
 from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
 CSAF_VERSION = "2.0"
@@ -177,6 +178,19 @@ class Csaf20VexJsonRenderer:
         Raises:
             CsafRenderError: The values cannot form a valid document.
         """
+        if type(self)._render_document is Csaf20VexJsonRenderer._render_document:
+            enforce_builtin_render_input_budget(
+                components=components,
+                findings=findings,
+                component_purl_copies=2,
+                additional_text=(
+                    self.metadata.document_id,
+                    self.metadata.title,
+                    self.metadata.publisher_name,
+                    self.metadata.publisher_namespace,
+                    self.tool_version,
+                ),
+            )
         try:
             document = vex_document_from_findings(components=components, findings=findings)
         except VexRenderError as exc:
