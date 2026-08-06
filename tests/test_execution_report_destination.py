@@ -285,6 +285,18 @@ def test_temporary_setup_preserves_primary_and_cleanup_failures(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
+def test_staged_filename_uses_bytes_for_directory_relative_operations(
+    tmp_path: Path,
+) -> None:
+    destination = BoundFileDestination.prepare(tmp_path / "execution-report.json")
+
+    with destination.stage_bytes(b"private report") as staged:
+        assert isinstance(staged.temporary_name, bytes)
+
+    destination.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
 def test_cancellation_during_temporary_file_handoff_closes_the_descriptor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -293,7 +305,7 @@ def test_cancellation_during_temporary_file_handoff_closes_the_descriptor(
     destination = BoundFileDestination.prepare(path)
     observed_descriptors: list[int] = []
 
-    def cancel_handoff(descriptor: int, name: str) -> tuple[int, str]:
+    def cancel_handoff(descriptor: int, name: bytes) -> tuple[int, bytes]:
         del name
         observed_descriptors.append(descriptor)
         raise KeyboardInterrupt("temporary file handoff interrupted")
@@ -331,7 +343,7 @@ def test_cancellation_during_staging_cleanup_closes_all_descriptors(
     def observe_temporary_file(
         self: BoundFileDestination,
         parent_descriptor: int,
-    ) -> tuple[int, str]:
+    ) -> tuple[int, bytes]:
         result = real_create(self, parent_descriptor)
         staging_descriptors.extend((parent_descriptor, result[0]))
         return result

@@ -424,7 +424,7 @@ class BoundFileDestination:
             raise BoundFileDestinationError("bound parent directory is already closed")
         return self._parent_descriptor
 
-    def _create_temporary_file(self, parent_fd: int) -> tuple[int, str]:
+    def _create_temporary_file(self, parent_fd: int) -> tuple[int, bytes]:
         return staging_module._create_temporary_file(parent_fd)
 
     def close(self) -> None:

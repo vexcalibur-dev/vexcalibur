@@ -318,6 +318,9 @@ jobs:
           enable-cache: true
           python-version: ${{ env.MAX_PYTHON }}
 
+      - name: Install Python
+        run: uv python install "${MAX_PYTHON}"
+
       - name: Download distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -426,6 +429,9 @@ jobs:
           version-file: .tool-versions
           enable-cache: true
           python-version: ${{ matrix.python-version }}
+
+      - name: Install Python
+        run: uv python install "${{ matrix.python-version }}"
 
       - name: Install pinned CSAF validator
         run: make csaf-validator-install

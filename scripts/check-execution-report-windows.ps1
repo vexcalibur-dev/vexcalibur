@@ -33,6 +33,7 @@ function Assert-DistributionDigest {
     [Parameter(Mandatory = $true)]
     [System.IO.FileInfo]$File,
     [Parameter(Mandatory = $true)]
+    [AllowEmptyString()]
     [string]$Expected,
     [Parameter(Mandatory = $true)]
     [string]$Role

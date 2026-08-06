@@ -41,7 +41,7 @@ class _StagingDestination(Protocol):
 
     def _open_parent(self) -> int: ...
 
-    def _create_temporary_file(self, parent_fd: int) -> tuple[int, str]: ...
+    def _create_temporary_file(self, parent_fd: int) -> tuple[int, bytes]: ...
 
     def _require_parent_descriptor(self) -> int: ...
 
@@ -132,7 +132,7 @@ class StagedFileWrite:
         *,
         destination: _StagingDestination,
         parent_fd: int,
-        temporary_name: str,
+        temporary_name: bytes,
         temporary_fd: int,
         temporary_stat: os.stat_result,
     ) -> None:
@@ -151,7 +151,7 @@ class StagedFileWrite:
         *,
         destination: _StagingDestination,
         parent_fd: int,
-        temporary_name: str,
+        temporary_name: bytes,
         temporary_fd: int,
         temporary_stat: os.stat_result,
     ) -> StagedFileWrite:
@@ -701,7 +701,7 @@ def stage_destination_bytes(
 ) -> Iterator[StagedFileWrite]:
     """Yield flushed private temporary bytes and reclaim their handles."""
     parent_fd = -1
-    temporary_name = ""
+    temporary_name = b""
     file_descriptor = -1
     try:
         try:
@@ -759,12 +759,12 @@ def stage_destination_bytes(
         staged.close()
 
 
-def _create_temporary_file(parent_fd: int) -> tuple[int, str]:
+def _create_temporary_file(parent_fd: int) -> tuple[int, bytes]:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     for _ in range(128):
-        name = f".vexcalibur-{secrets.token_hex(16)}.tmp"
+        name = f".vexcalibur-{secrets.token_hex(16)}.tmp".encode("ascii")
         try:
             with _defer_keyboard_interrupt():
                 descriptor = os.open(name, flags, 0o600, dir_fd=parent_fd)
@@ -797,13 +797,13 @@ def _create_temporary_file(parent_fd: int) -> tuple[int, str]:
     raise BoundFileDestinationError("could not allocate a unique temporary file")
 
 
-def _temporary_file_result(descriptor: int, name: str) -> tuple[int, str]:
+def _temporary_file_result(descriptor: int, name: bytes) -> tuple[int, bytes]:
     return descriptor, name
 
 
 def _cleanup_staged_file(
     parent_fd: int,
-    temporary_name: str,
+    temporary_name: bytes,
     temporary_fd: int,
 ) -> None:
     try:
@@ -821,7 +821,7 @@ def _cleanup_staged_file(
 
 def _remove_temporary_file(
     parent_fd: int,
-    temporary_name: str,
+    temporary_name: bytes,
     temporary_fd: int,
 ) -> None:
     try:

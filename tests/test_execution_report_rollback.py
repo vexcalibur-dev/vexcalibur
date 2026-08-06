@@ -4,6 +4,7 @@ import errno
 import os
 import socket
 import stat
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -391,16 +392,17 @@ def test_fifo_created_after_staging_is_not_replaced(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")
-def test_unix_socket_destination_is_rejected_without_removal(tmp_path: Path) -> None:
-    path = tmp_path / "execution-report.sock"
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
-        listener.bind(str(path))
+def test_unix_socket_destination_is_rejected_without_removal() -> None:
+    with tempfile.TemporaryDirectory(prefix="vxc-", dir="/tmp") as socket_root:
+        path = Path(socket_root) / "report.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(path))
 
-        with pytest.raises(BoundFileDestinationError, match="regular file"):
-            BoundFileDestination.prepare(path, remove_existing=True)
+            with pytest.raises(BoundFileDestinationError, match="regular file"):
+                BoundFileDestination.prepare(path, remove_existing=True)
 
-        assert path.exists()
-        assert stat.S_ISSOCK(path.lstat().st_mode)
+            assert path.exists()
+            assert stat.S_ISSOCK(path.lstat().st_mode)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX destination contract")

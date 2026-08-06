@@ -245,6 +245,10 @@ def test_installed_cli_checks_wheel_and_sdist_on_every_supported_python() -> Non
     assert "steps.dist.outputs[matrix.distribution]" in installed
     assert "VEXCALIBUR_WHEEL:" not in installed
     assert "make installed-cli-check" in installed
+    assert 'uv python install "${{ matrix.python-version }}"' in _step(
+        installed,
+        "Install Python",
+    )
 
 
 def test_sdist_validation_hash_locks_build_tools_and_builds_offline() -> None:
@@ -429,6 +433,7 @@ def test_windows_installs_wheel_and_sdist_with_locked_offline_builds() -> None:
     assert '-ExpectedPython "${{ matrix.python-version }}"' in invocation
     assert '$ErrorActionPreference = "Stop"' in contract
     assert "$PSNativeCommandUseErrorActionPreference = $true" in contract
+    assert "[AllowEmptyString()]" in contract
     assert 'if ($PSVersionTable.PSVersion -lt [Version]"7.3")' in contract
     assert "test_consumer_example_opens_inputs_in_binary_mode" in contract
     assert "Get-ChildItem -LiteralPath $resolvedDistributionDirectory -Filter *.whl" in contract
@@ -568,6 +573,10 @@ def test_csaf_conformance_covers_wheel_and_sdist_on_boundary_pythons() -> None:
         assert 'python-version: ["3.10", "3.14"]' in csaf
         assert 'distribution: ["wheel", "sdist"]' in csaf
         assert "python-version: ${{ matrix.python-version }}" in csaf
+        assert 'uv python install "${{ matrix.python-version }}"' in _step(
+            csaf,
+            "Install Python",
+        )
         assert "VEXCALIBUR_DISTRIBUTION:" in csaf
         assert "VEXCALIBUR_EXPECTED_PYTHON: ${{ matrix.python-version }}" in csaf
         assert "make installed-csaf-check" in csaf

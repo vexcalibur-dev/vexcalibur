@@ -255,7 +255,7 @@ def test_interrupted_staging_owner_close_never_closes_reused_descriptor(
     real_release = staging_module._close_descriptor_retryable
     real_close = os.close
     if attribute in {"temporary_fd", "published_fd"}:
-        replacement_path = tmp_path / staged.temporary_name
+        replacement_path = tmp_path / os.fsdecode(staged.temporary_name)
     elif attribute == "lock_fd":
         replacement_path = tmp_path / lock_module.LOCK_DIRECTORY_NAME / lock_module.LOCK_FILE_NAME
     else:

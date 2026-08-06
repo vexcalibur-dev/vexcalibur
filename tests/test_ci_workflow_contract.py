@@ -118,6 +118,12 @@ def test_ci_passes_a_resolved_tag_snapshot_to_publication_validation() -> None:
     assert "needs.publication-contract.result" in result
 
 
+def test_installed_cli_job_installs_its_selected_python() -> None:
+    installed = _job(CI_WORKFLOW.read_text(encoding="utf-8"), "installed-cli")
+
+    assert 'uv python install "${MAX_PYTHON}"' in installed
+
+
 def test_synthetic_publication_contract_isolated_from_later_remote_tag(
     tmp_path: Path,
 ) -> None:
