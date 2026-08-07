@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.archive_fixtures import (
+    pax_record,
+    write_extension_chain_tar_gzip,
+    write_extension_tar_gzip,
+)
+
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts" / "normalize-sdist.py"
 EPOCH = 1_784_135_156
@@ -151,6 +157,42 @@ def test_normalization_rejects_pax_metadata_before_materialization(
 
     assert completed.returncode == 1
     assert "unsupported PAX metadata key" in completed.stderr
+    assert not output.exists()
+
+
+def test_normalization_rejects_oversized_pax_before_tarfile_parses_it(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "oversized-pax.tar.gz"
+    write_extension_tar_gzip(
+        source,
+        extension_type=b"x",
+        extension_payload=pax_record("mtime", "1" * (2 * 1024 * 1024)),
+    )
+    output = tmp_path / "normalized.tar.gz"
+
+    assert source.stat().st_size < 32 * 1024 * 1024
+    completed = _normalize(source, output)
+
+    assert completed.returncode == 1
+    assert "PAX metadata exceeds the byte limit" in completed.stderr
+    assert not output.exists()
+
+
+def test_normalization_rejects_deep_pax_chain_without_a_traceback(tmp_path: Path) -> None:
+    source = tmp_path / "deep-pax-chain.tar.gz"
+    record = pax_record("mtime", "1")
+    write_extension_chain_tar_gzip(
+        source,
+        extensions=tuple((b"x", record) for _ in range(9)),
+    )
+    output = tmp_path / "normalized.tar.gz"
+
+    completed = _normalize(source, output)
+
+    assert completed.returncode == 1
+    assert "too many consecutive PAX metadata headers" in completed.stderr
+    assert "Traceback" not in completed.stderr
     assert not output.exists()
 
 

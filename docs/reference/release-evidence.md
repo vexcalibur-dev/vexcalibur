@@ -288,9 +288,21 @@ Candidate archives are bounded before metadata is trusted:
 | --- | --- |
 | Maximum evidence file | 32 MiB |
 | Maximum archive members | 10,000 |
-| Maximum total expanded archive size | 128 MiB |
+| Maximum cumulative non-PAX member payload | 128 MiB |
+| Maximum cumulative PAX metadata payload | 1 MiB |
+| Maximum PAX headers | 10,001 across the archive, derived from the member limit |
+| Maximum consecutive PAX headers | 8 |
+| Maximum PAX records | 10,000 |
 | Maximum metadata member | 1 MiB |
 | Maximum wheel SCM metadata | 64 KiB |
+
+The TAR preflight accepts only bounded `mtime` PAX records. It rejects PAX
+fields that can replace member paths, sizes, or link targets, along with GNU
+long-name, long-link, and sparse extension headers. The scanner enforces these
+limits before Python's `tarfile` parser receives the captured archive bytes.
+The consecutive-header limit prevents recursive parsing from approaching
+Python's recursion limit. Member counts also bound the 512-byte TAR headers and
+payload padding.
 
 Absolute paths, parent traversal, duplicate members, links, devices, special
 files, encrypted wheel entries, ambiguous metadata, and version/source
