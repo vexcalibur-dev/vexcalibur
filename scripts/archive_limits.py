@@ -7,6 +7,7 @@ import math
 import os
 import stat
 import struct
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
@@ -16,6 +17,17 @@ _ZIP_EOCD_SIZE = 22
 _ZIP_MAX_COMMENT_BYTES = 65_535
 _ZIP_CENTRAL_DIRECTORY_SIGNATURE = b"PK\x01\x02"
 _ZIP_CENTRAL_DIRECTORY_HEADER_SIZE = 46
+_ZIP64_EOCD_SIGNATURE = b"PK\x06\x06"
+_ZIP64_EOCD_MINIMUM_SIZE = 56
+_ZIP64_EOCD_MINIMUM_BODY_SIZE = 44
+_ZIP64_LOCATOR_SIGNATURE = b"PK\x06\x07"
+_ZIP64_LOCATOR_SIZE = 20
+_ZIP64_MINIMUM_VERSION = 45
+_ZIP64_EXTENSIBLE_DATA_HEADER_SIZE = 6
+_ZIP64_MAX_EXTENSIBLE_DATA_BLOCKS = 10_000
+_ZIP_MAX_EXTRA_FIELDS_PER_MEMBER = 10
+_ZIP_UINT16_MAX = (1 << 16) - 1
+_ZIP_UINT32_MAX = (1 << 32) - 1
 _TAR_BLOCK_BYTES = 512
 _TAR_PAX_TYPES = frozenset({b"X", b"g", b"x"})
 _TAR_REJECTED_EXTENSION_TYPES = frozenset({b"K", b"L", b"S"})
@@ -47,7 +59,25 @@ class ArchiveSnapshot:
         return BytesIO(self._contents)
 
 
-def preflight_zip_member_count(
+@dataclass(frozen=True)
+class _ZipDirectoryRecord:
+    disk_number: int
+    directory_disk: int
+    disk_members: int
+    total_members: int
+    directory_size: int
+    directory_offset: int
+    directory_end_offset: int
+    relative_directory_end_offset: int | None
+
+
+@dataclass(frozen=True)
+class _Zip64ExtensibleData:
+    offset: int
+    size: int
+
+
+def preflight_zip_archive(
     path: Path,
     *,
     artifact: str,
@@ -67,51 +97,247 @@ def preflight_zip_member_count(
         stream.seek(size - tail_size)
         tail = stream.read(tail_size)
 
-        search_end = len(tail)
-        while True:
-            offset = tail.rfind(_ZIP_EOCD_SIGNATURE, 0, search_end)
-            if offset < 0:
-                raise ArchivePreflightError(f"{artifact} has no bounded ZIP directory record")
-            if offset + _ZIP_EOCD_SIZE <= len(tail):
-                (
-                    _signature,
-                    disk_number,
-                    directory_disk,
-                    disk_members,
-                    total_members,
-                    directory_size,
-                    directory_offset,
-                    comment_size,
-                ) = struct.unpack_from("<4s4H2LH", tail, offset)
-                if offset + _ZIP_EOCD_SIZE + comment_size == len(tail):
-                    break
-            search_end = offset
+        offset = tail.rfind(_ZIP_EOCD_SIGNATURE)
+        if offset < 0 or offset + _ZIP_EOCD_SIZE > len(tail):
+            raise ArchivePreflightError(f"{artifact} has no bounded ZIP directory record")
+        (
+            _signature,
+            disk_number,
+            directory_disk,
+            disk_members,
+            total_members,
+            directory_size,
+            directory_offset,
+            comment_size,
+        ) = struct.unpack_from("<4s4H2LH", tail, offset)
+        if offset + _ZIP_EOCD_SIZE + comment_size != len(tail):
+            raise ArchivePreflightError(f"{artifact} has an invalid ZIP directory record")
 
-        if disk_number != 0 or directory_disk != 0 or disk_members != total_members:
-            raise ArchivePreflightError(f"{artifact} uses an unsupported multidisk ZIP")
-        if (
-            total_members == 0xFFFF
-            or directory_size == 0xFFFFFFFF
-            or directory_offset == 0xFFFFFFFF
-        ):
-            raise ArchivePreflightError(f"{artifact} uses unsupported ZIP64 metadata")
-        if total_members > maximum_members:
-            raise ArchivePreflightError(f"{artifact} contains too many archive members")
-        if directory_size > maximum_directory_bytes:
-            raise ArchivePreflightError(f"{artifact} ZIP central directory exceeds the byte limit")
-        directory_end = directory_offset + directory_size
         eocd_offset = size - tail_size + offset
-        if directory_end != eocd_offset:
-            raise ArchivePreflightError(f"{artifact} has an invalid ZIP directory boundary")
+        directory, extensible_data = _resolve_zip_directory_record(
+            stream,
+            artifact=artifact,
+            classic=_ZipDirectoryRecord(
+                disk_number=disk_number,
+                directory_disk=directory_disk,
+                disk_members=disk_members,
+                total_members=total_members,
+                directory_size=directory_size,
+                directory_offset=directory_offset,
+                directory_end_offset=eocd_offset,
+                relative_directory_end_offset=None,
+            ),
+        )
+        if (
+            directory.disk_number != 0
+            or directory.directory_disk != 0
+            or directory.disk_members != directory.total_members
+        ):
+            raise ArchivePreflightError(f"{artifact} uses an unsupported multidisk ZIP")
+        _enforce_zip_directory_limits(
+            directory,
+            artifact=artifact,
+            maximum_members=maximum_members,
+            maximum_directory_bytes=maximum_directory_bytes,
+        )
+        directory = _translate_zip_directory_offset(directory, artifact=artifact)
+        if extensible_data is not None:
+            stream.seek(extensible_data.offset)
+            _preflight_zip64_extensible_data(
+                stream,
+                artifact=artifact,
+                size=extensible_data.size,
+            )
         _preflight_zip_central_directory(
             stream,
             artifact=artifact,
-            directory_offset=directory_offset,
-            directory_size=directory_size,
-            expected_members=total_members,
+            directory_offset=directory.directory_offset,
+            directory_size=directory.directory_size,
+            expected_members=directory.total_members,
             maximum_members=maximum_members,
         )
     return snapshot
+
+
+def _resolve_zip_directory_record(
+    stream: BinaryIO,
+    *,
+    artifact: str,
+    classic: _ZipDirectoryRecord,
+) -> tuple[_ZipDirectoryRecord, _Zip64ExtensibleData | None]:
+    locator_offset = classic.directory_end_offset - _ZIP64_LOCATOR_SIZE
+    locator = b""
+    if locator_offset >= 0:
+        stream.seek(locator_offset)
+        locator = stream.read(_ZIP64_LOCATOR_SIZE)
+    if len(locator) != _ZIP64_LOCATOR_SIZE or not locator.startswith(_ZIP64_LOCATOR_SIGNATURE):
+        return classic, None
+
+    _signature, record_disk, record_offset, total_disks = struct.unpack("<4sLQL", locator)
+    if record_disk != 0 or total_disks != 1:
+        raise ArchivePreflightError(f"{artifact} uses an unsupported multidisk ZIP64 archive")
+    if record_offset > locator_offset or locator_offset - record_offset < _ZIP64_EOCD_MINIMUM_SIZE:
+        raise ArchivePreflightError(f"{artifact} has a truncated ZIP64 directory record")
+
+    physical_record_offset = record_offset
+    stream.seek(record_offset)
+    if (
+        stream.read(len(_ZIP64_EOCD_SIGNATURE)) != _ZIP64_EOCD_SIGNATURE
+        and record_offset != locator_offset - _ZIP64_EOCD_MINIMUM_SIZE
+    ):
+        physical_record_offset = locator_offset - _ZIP64_EOCD_MINIMUM_SIZE
+
+    return _read_zip64_directory_record(
+        stream,
+        artifact=artifact,
+        classic=classic,
+        record_offset=physical_record_offset,
+        relative_record_offset=record_offset,
+        locator_offset=locator_offset,
+    )
+
+
+def _read_zip64_directory_record(
+    stream: BinaryIO,
+    *,
+    artifact: str,
+    classic: _ZipDirectoryRecord,
+    record_offset: int,
+    relative_record_offset: int,
+    locator_offset: int,
+) -> tuple[_ZipDirectoryRecord, _Zip64ExtensibleData]:
+    stream.seek(record_offset)
+    record = stream.read(_ZIP64_EOCD_MINIMUM_SIZE)
+    if len(record) != _ZIP64_EOCD_MINIMUM_SIZE:
+        raise ArchivePreflightError(f"{artifact} has a truncated ZIP64 directory record")
+    (
+        signature,
+        record_size,
+        _version_made_by,
+        version_needed,
+        disk_number,
+        directory_disk,
+        disk_members,
+        total_members,
+        directory_size,
+        directory_offset,
+    ) = struct.unpack("<4sQ2H2L4Q", record)
+    if signature != _ZIP64_EOCD_SIGNATURE:
+        raise ArchivePreflightError(f"{artifact} has an invalid ZIP64 directory record")
+    if record_size < _ZIP64_EOCD_MINIMUM_BODY_SIZE:
+        raise ArchivePreflightError(f"{artifact} has a truncated ZIP64 directory record")
+    if record_offset + 12 + record_size != locator_offset:
+        raise ArchivePreflightError(f"{artifact} has an invalid ZIP64 directory record boundary")
+    if version_needed < _ZIP64_MINIMUM_VERSION:
+        raise ArchivePreflightError(f"{artifact} has an invalid ZIP64 version")
+
+    zip64 = _ZipDirectoryRecord(
+        disk_number=disk_number,
+        directory_disk=directory_disk,
+        disk_members=disk_members,
+        total_members=total_members,
+        directory_size=directory_size,
+        directory_offset=directory_offset,
+        directory_end_offset=record_offset,
+        relative_directory_end_offset=relative_record_offset,
+    )
+    _validate_classic_zip64_consistency(classic, zip64, artifact=artifact)
+    return (
+        zip64,
+        _Zip64ExtensibleData(
+            offset=record_offset + _ZIP64_EOCD_MINIMUM_SIZE,
+            size=record_size - _ZIP64_EOCD_MINIMUM_BODY_SIZE,
+        ),
+    )
+
+
+def _translate_zip_directory_offset(
+    directory: _ZipDirectoryRecord,
+    *,
+    artifact: str,
+) -> _ZipDirectoryRecord:
+    relative_end = directory.directory_offset + directory.directory_size
+    expected_relative_end = directory.relative_directory_end_offset
+    if expected_relative_end is not None and relative_end != expected_relative_end:
+        raise ArchivePreflightError(f"{artifact} has an invalid ZIP directory boundary")
+    prefix_size = directory.directory_end_offset - (
+        relative_end if expected_relative_end is None else expected_relative_end
+    )
+    if prefix_size < 0:
+        raise ArchivePreflightError(f"{artifact} has an invalid ZIP directory boundary")
+    return _ZipDirectoryRecord(
+        disk_number=directory.disk_number,
+        directory_disk=directory.directory_disk,
+        disk_members=directory.disk_members,
+        total_members=directory.total_members,
+        directory_size=directory.directory_size,
+        directory_offset=directory.directory_offset + prefix_size,
+        directory_end_offset=directory.directory_end_offset,
+        relative_directory_end_offset=directory.relative_directory_end_offset,
+    )
+
+
+def _enforce_zip_directory_limits(
+    directory: _ZipDirectoryRecord,
+    *,
+    artifact: str,
+    maximum_members: int,
+    maximum_directory_bytes: int,
+) -> None:
+    if directory.total_members > maximum_members:
+        raise ArchivePreflightError(f"{artifact} contains too many archive members")
+    if directory.directory_size > maximum_directory_bytes:
+        raise ArchivePreflightError(f"{artifact} ZIP central directory exceeds the byte limit")
+
+
+def _preflight_zip64_extensible_data(
+    stream: BinaryIO,
+    *,
+    artifact: str,
+    size: int,
+) -> None:
+    remaining = size
+    blocks = 0
+    while remaining:
+        blocks += 1
+        if blocks > _ZIP64_MAX_EXTENSIBLE_DATA_BLOCKS:
+            raise ArchivePreflightError(
+                f"{artifact} contains too many ZIP64 extensible data blocks"
+            )
+        if remaining < _ZIP64_EXTENSIBLE_DATA_HEADER_SIZE:
+            raise ArchivePreflightError(f"{artifact} has invalid ZIP64 extensible data")
+        header = stream.read(_ZIP64_EXTENSIBLE_DATA_HEADER_SIZE)
+        if len(header) != _ZIP64_EXTENSIBLE_DATA_HEADER_SIZE:
+            raise ArchivePreflightError(f"{artifact} has truncated ZIP64 extensible data")
+        _header_id, data_size = struct.unpack("<HL", header)
+        remaining -= _ZIP64_EXTENSIBLE_DATA_HEADER_SIZE
+        if data_size > remaining:
+            raise ArchivePreflightError(f"{artifact} has invalid ZIP64 extensible data")
+        stream.seek(data_size, os.SEEK_CUR)
+        remaining -= data_size
+
+
+def _validate_classic_zip64_consistency(
+    classic: _ZipDirectoryRecord,
+    zip64: _ZipDirectoryRecord,
+    *,
+    artifact: str,
+) -> None:
+    comparisons = (
+        (classic.disk_number, zip64.disk_number, _ZIP_UINT16_MAX),
+        (classic.directory_disk, zip64.directory_disk, _ZIP_UINT16_MAX),
+        (classic.disk_members, zip64.disk_members, _ZIP_UINT16_MAX),
+        (classic.total_members, zip64.total_members, _ZIP_UINT16_MAX),
+        (classic.directory_size, zip64.directory_size, _ZIP_UINT32_MAX),
+        (classic.directory_offset, zip64.directory_offset, _ZIP_UINT32_MAX),
+    )
+    if any(
+        classic_value != sentinel and classic_value != zip64_value
+        for classic_value, zip64_value, sentinel in comparisons
+    ):
+        raise ArchivePreflightError(
+            f"{artifact} has contradictory ZIP and ZIP64 directory metadata"
+        )
 
 
 def _preflight_zip_central_directory(
@@ -123,8 +349,11 @@ def _preflight_zip_central_directory(
     expected_members: int,
     maximum_members: int,
 ) -> None:
+    if expected_members * _ZIP_CENTRAL_DIRECTORY_HEADER_SIZE > directory_size:
+        raise ArchivePreflightError(f"{artifact} has a truncated ZIP central directory")
     consumed = 0
     members = 0
+    extra_fields = 0
     stream.seek(directory_offset)
     while consumed < directory_size:
         header = stream.read(_ZIP_CENTRAL_DIRECTORY_HEADER_SIZE)
@@ -144,9 +373,82 @@ def _preflight_zip_central_directory(
         members += 1
         if members > maximum_members:
             raise ArchivePreflightError(f"{artifact} contains too many archive members")
-        stream.seek(variable_size, 1)
+        variable_data = stream.read(variable_size)
+        if len(variable_data) != variable_size:
+            raise ArchivePreflightError(f"{artifact} has a truncated ZIP central directory")
+        extra = variable_data[filename_size : filename_size + extra_size]
+        zip64_data, member_extra_fields = _parse_zip_central_directory_extra(
+            extra,
+            artifact=artifact,
+        )
+        extra_fields += member_extra_fields
+        if extra_fields > expected_members * _ZIP_MAX_EXTRA_FIELDS_PER_MEMBER:
+            raise ArchivePreflightError(
+                f"{artifact} contains too many ZIP central directory extra fields"
+            )
+        _validate_zip_central_directory_zip64(header, zip64_data, artifact=artifact)
     if consumed != directory_size or members != expected_members:
         raise ArchivePreflightError(f"{artifact} has inconsistent ZIP central directory metadata")
+
+
+def _validate_zip_central_directory_zip64(
+    header: bytes,
+    zip64_data: bytes | None,
+    *,
+    artifact: str,
+) -> None:
+    version_needed = struct.unpack_from("<H", header, 6)[0]
+    compressed_size, uncompressed_size = struct.unpack_from("<2L", header, 20)
+    local_header_offset = struct.unpack_from("<L", header, 42)[0]
+    disk_number = struct.unpack_from("<H", header, 34)[0]
+    zip64_size = 0
+    for value in (uncompressed_size, compressed_size, local_header_offset):
+        if value == _ZIP_UINT32_MAX:
+            zip64_size += 8
+    if disk_number == _ZIP_UINT16_MAX:
+        zip64_size += 4
+
+    if zip64_size == 0:
+        if zip64_data is not None:
+            raise ArchivePreflightError(
+                f"{artifact} has unexpected ZIP64 central directory metadata"
+            )
+    elif zip64_data is None or len(zip64_data) != zip64_size:
+        raise ArchivePreflightError(f"{artifact} has invalid ZIP64 central directory metadata")
+    elif version_needed < _ZIP64_MINIMUM_VERSION:
+        raise ArchivePreflightError(f"{artifact} has an invalid ZIP64 member version")
+
+    if disk_number == _ZIP_UINT16_MAX and zip64_data is not None:
+        disk_number = struct.unpack_from("<L", zip64_data, zip64_size - 4)[0]
+    if disk_number != 0:
+        raise ArchivePreflightError(f"{artifact} uses an unsupported multidisk ZIP")
+
+
+def _parse_zip_central_directory_extra(
+    extra: bytes,
+    *,
+    artifact: str,
+) -> tuple[bytes | None, int]:
+    offset = 0
+    fields = 0
+    zip64_data: bytes | None = None
+    while offset < len(extra):
+        fields += 1
+        if len(extra) - offset < 4:
+            raise ArchivePreflightError(f"{artifact} has invalid ZIP central directory metadata")
+        header_id, data_size = struct.unpack_from("<2H", extra, offset)
+        offset += 4
+        data_end = offset + data_size
+        if data_end > len(extra):
+            raise ArchivePreflightError(f"{artifact} has invalid ZIP central directory metadata")
+        if header_id == 0x0001:
+            if zip64_data is not None:
+                raise ArchivePreflightError(
+                    f"{artifact} has duplicate ZIP64 central directory metadata"
+                )
+            zip64_data = extra[offset:data_end]
+        offset = data_end
+    return zip64_data, fields
 
 
 def preflight_tar_gzip_stream(

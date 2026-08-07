@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import runpy
+import struct
 import subprocess
 import sys
 import tarfile
@@ -11,7 +13,10 @@ from pathlib import Path
 import pytest
 
 from tests.archive_fixtures import (
+    append_ambiguous_zip_eocd,
     pax_record,
+    set_zip_central_directory_uint32_sentinels,
+    write_empty_member_zip_with_extra,
     write_extension_chain_tar_gzip,
     write_extension_tar_gzip,
 )
@@ -474,7 +479,7 @@ def test_verifier_rejects_oversized_pax_before_tarfile_parses_it(tmp_path: Path)
     result = run_verifier(tmp_path)
 
     assert result.returncode == 1
-    assert "Sdist pax metadata exceeds the byte limit" in result.stderr
+    assert "Sdist PAX metadata exceeds the byte limit" in result.stderr
 
 
 def test_verifier_rejects_deep_pax_chain_without_a_traceback(tmp_path: Path) -> None:
@@ -489,18 +494,166 @@ def test_verifier_rejects_deep_pax_chain_without_a_traceback(tmp_path: Path) -> 
     result = run_verifier(tmp_path)
 
     assert result.returncode == 1
-    assert "too many consecutive pax metadata headers" in result.stderr
+    assert "too many consecutive PAX metadata headers" in result.stderr
     assert "Traceback" not in result.stderr
 
 
-def test_verifier_rejects_wheel_member_flood(tmp_path: Path) -> None:
+def test_verifier_rejects_wheel_member_flood_before_zipfile_parses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     wheel = write_wheel(tmp_path)
     with zipfile.ZipFile(wheel, "a") as archive:
         for index in range(10_000):
             archive.writestr(f"flood/{index}", b"")
     write_sdist(tmp_path)
 
-    result = run_verifier(tmp_path)
+    def fail_zipfile_open(*args: object, **kwargs: object) -> None:
+        pytest.fail("oversized member count reached zipfile")
 
-    assert result.returncode == 1
-    assert "Wheel contains too many archive members" in result.stderr
+    monkeypatch.setattr(zipfile, "ZipFile", fail_zipfile_open)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT),
+            str(tmp_path),
+            "--expected-name",
+            "vexcalibur",
+            "--expected-version",
+            "0.1.0",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="Wheel contains too many archive members"):
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+
+
+def test_verifier_rejects_wheel_extra_field_flood_before_zipfile_parses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = tmp_path / "vexcalibur-0.1.0-py3-none-any.whl"
+    write_empty_member_zip_with_extra(
+        wheel,
+        members=10_000,
+        extra=struct.pack("<2H", 0xCAFE, 0) * 11,
+    )
+    write_sdist(tmp_path)
+
+    def fail_zipfile_open(*args: object, **kwargs: object) -> None:
+        pytest.fail("oversized ZIP extra-field count reached zipfile")
+
+    monkeypatch.setattr(zipfile, "ZipFile", fail_zipfile_open)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT),
+            str(tmp_path),
+            "--expected-name",
+            "vexcalibur",
+            "--expected-version",
+            "0.1.0",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="too many ZIP central directory extra fields"):
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+
+
+def test_verifier_rejects_oversized_directory_before_zipfile_parses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = tmp_path / "vexcalibur-0.1.0-py3-none-any.whl"
+    extra_data = b"x" * 65_531
+    extra = struct.pack("<2H", 0xCAFE, len(extra_data)) + extra_data
+    write_empty_member_zip_with_extra(wheel, members=129, extra=extra)
+    write_sdist(tmp_path)
+
+    assert wheel.stat().st_size < 32 * 1024 * 1024
+
+    def fail_zipfile_open(*args: object, **kwargs: object) -> None:
+        pytest.fail("oversized ZIP central directory reached zipfile")
+
+    monkeypatch.setattr(zipfile, "ZipFile", fail_zipfile_open)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT),
+            str(tmp_path),
+            "--expected-name",
+            "vexcalibur",
+            "--expected-version",
+            "0.1.0",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="Wheel ZIP central directory exceeds"):
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+
+
+def test_verifier_rejects_ambiguous_eocd_before_zipfile_parses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = write_wheel(tmp_path)
+    append_ambiguous_zip_eocd(wheel)
+    write_sdist(tmp_path)
+
+    def fail_zipfile_open(*args: object, **kwargs: object) -> None:
+        pytest.fail("ambiguous ZIP directory reached zipfile")
+
+    monkeypatch.setattr(zipfile, "ZipFile", fail_zipfile_open)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT),
+            str(tmp_path),
+            "--expected-name",
+            "vexcalibur",
+            "--expected-version",
+            "0.1.0",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="Wheel has an invalid ZIP directory record"):
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+
+
+def test_verifier_rejects_missing_zip64_member_data_before_zipfile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = write_wheel(tmp_path)
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr("unselected-member", b"")
+    set_zip_central_directory_uint32_sentinels(
+        wheel,
+        member_index=1,
+        fields=("local_header_offset",),
+    )
+    write_sdist(tmp_path)
+
+    def fail_zipfile_open(*args: object, **kwargs: object) -> None:
+        pytest.fail("incomplete ZIP64 member metadata reached zipfile")
+
+    monkeypatch.setattr(zipfile, "ZipFile", fail_zipfile_open)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT),
+            str(tmp_path),
+            "--expected-name",
+            "vexcalibur",
+            "--expected-version",
+            "0.1.0",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="Wheel has invalid ZIP64 central directory metadata"):
+        runpy.run_path(str(SCRIPT), run_name="__main__")

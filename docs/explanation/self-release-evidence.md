@@ -92,6 +92,14 @@ SCM prefix. Both archive readers reject unsafe paths, duplicate members,
 links, special files, oversized metadata, excessive member counts, and
 excessive member payload bytes.
 
+Python's `zipfile` reads the whole central directory when it opens a wheel. An
+archive with many empty entries can remain below the 32 MiB file limit while
+forcing `zipfile` to construct far more than the allowed 10,000 member objects.
+The wheel preflight reads the classic ZIP and ZIP64 end records first. It bounds
+the declared entry count and central-directory size, checks that the records
+agree, and rejects overlapping boundaries before `zipfile` receives the
+captured bytes.
+
 Source distributions need an earlier check because Python's `tarfile` parser
 consumes extension headers before it yields a member. The preflight permits
 bounded PAX timestamps, but rejects path-rewriting PAX fields and GNU extension
