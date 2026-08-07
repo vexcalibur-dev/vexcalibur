@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -58,6 +60,25 @@ def _write_pair(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     return report_path, document_path, report
 
 
+def _offset_stat(
+    metadata: os.stat_result,
+    *,
+    nanoseconds: int = 0,
+    size: int | None = None,
+) -> os.stat_result:
+    return cast(
+        os.stat_result,
+        SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_dev=metadata.st_dev,
+            st_ino=metadata.st_ino,
+            st_size=metadata.st_size if size is None else size,
+            st_mtime_ns=metadata.st_mtime_ns + nanoseconds,
+            st_ctime_ns=metadata.st_ctime_ns + nanoseconds,
+        ),
+    )
+
+
 def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
     report_path, document_path, expected_report = _write_pair(tmp_path)
 
@@ -80,7 +101,8 @@ def test_consumer_example_accepts_a_matching_report(tmp_path: Path) -> None:
     assert result.stdout == "execution report verified\n"
 
 
-def test_consumer_example_opens_inputs_in_binary_mode(
+@pytest.mark.skipif(os.name == "nt", reason="Windows uses a native shared handle")
+def test_posix_consumer_example_opens_inputs_in_binary_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -110,6 +132,193 @@ def test_consumer_example_opens_inputs_in_binary_mode(
 
     assert observed_flags & binary_flag
     assert result == payload
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing modes are unavailable")
+def test_windows_consumer_allows_readers_and_denies_writers_and_deleters(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "shared-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    read_script = (
+        "from pathlib import Path; import sys; "
+        "raise SystemExit(0 if Path(sys.argv[1]).read_bytes() == b'stable' else 1)"
+    )
+    write_script = (
+        "from pathlib import Path; import errno, sys; "
+        "\ntry: Path(sys.argv[1]).write_bytes(b'changed')"
+        "\nexcept OSError as error: "
+        "raise SystemExit(0 if error.errno == errno.EACCES else 2)"
+        "\nraise SystemExit(1)"
+    )
+    delete_script = (
+        "from pathlib import Path; import sys; "
+        "\ntry: Path(sys.argv[1]).unlink()"
+        "\nexcept OSError as error: "
+        "raise SystemExit(0 if getattr(error, 'winerror', None) == 32 else 2)"
+        "\nraise SystemExit(1)"
+    )
+
+    with consumer._open_regular_file(path, role="test input") as (stream, _):
+        assert not os.get_inheritable(stream.fileno())
+        assert stream.read() == payload
+        reader = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-c", read_script, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+        writer = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-c", write_script, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+        deleter = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-c", delete_script, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+
+        assert reader.returncode == 0, reader.stderr
+        assert writer.returncode == 0, writer.stderr
+        assert deleter.returncode == 0, deleter.stderr
+        assert path.read_bytes() == payload
+
+    path.write_bytes(b"changed")
+    assert path.read_bytes() == b"changed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing modes are unavailable")
+def test_windows_consumer_rejects_a_preexisting_writer(tmp_path: Path) -> None:
+    path = tmp_path / "writer-open.json"
+    path.write_bytes(b"stable")
+
+    with (
+        path.open("r+b"),
+        pytest.raises(OSError) as error,
+        consumer._open_regular_file(path, role="test input"),
+    ):
+        pytest.fail("a Windows reader opened while a writer held the file")
+
+    assert error.value.winerror == 32
+
+
+def test_consumer_example_compares_timestamps_from_the_same_stat_interface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "stable-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    real_lstat = consumer.os.lstat
+
+    def lstat_with_platform_timestamp(selected_path: Path) -> os.stat_result:
+        metadata = real_lstat(selected_path)
+        if Path(selected_path) != path:
+            return metadata
+        return _offset_stat(metadata, nanoseconds=100)
+
+    monkeypatch.setattr(consumer.os, "lstat", lstat_with_platform_timestamp)
+
+    assert (
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
+        == payload
+    )
+
+
+@pytest.mark.parametrize("changed_call", (2, 3))
+def test_consumer_example_rejects_a_path_state_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_call: int,
+) -> None:
+    path = tmp_path / "restored-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    real_lstat = consumer.os.lstat
+    calls = 0
+
+    def changed_then_restored_lstat(selected_path: Path) -> os.stat_result:
+        nonlocal calls
+        metadata = real_lstat(selected_path)
+        if Path(selected_path) != path:
+            return metadata
+        calls += 1
+        return _offset_stat(metadata, nanoseconds=100 if calls == changed_call else 0)
+
+    monkeypatch.setattr(consumer.os, "lstat", changed_then_restored_lstat)
+
+    with pytest.raises(ValueError, match="test input changed while it was read"):
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
+
+
+def test_consumer_example_rejects_a_cross_interface_size_difference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "size-mismatch.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    real_lstat = consumer.os.lstat
+
+    def lstat_with_other_size(selected_path: Path) -> os.stat_result:
+        metadata = real_lstat(selected_path)
+        if Path(selected_path) != path:
+            return metadata
+        return _offset_stat(metadata, size=len(payload) - 1)
+
+    monkeypatch.setattr(consumer.os, "lstat", lstat_with_other_size)
+
+    with pytest.raises(ValueError, match="test input changed while it was read"):
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
+
+
+def test_consumer_example_rejects_a_descriptor_state_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "changed-input.json"
+    payload = b"stable"
+    path.write_bytes(payload)
+    path_metadata = path.stat()
+    real_fstat = consumer.os.fstat
+    calls = 0
+
+    def changed_descriptor_fstat(descriptor: int) -> os.stat_result:
+        nonlocal calls
+        metadata = real_fstat(descriptor)
+        if not os.path.samestat(metadata, path_metadata):
+            return metadata
+        calls += 1
+        return _offset_stat(metadata, nanoseconds=100 if calls == 2 else 0)
+
+    monkeypatch.setattr(consumer.os, "fstat", changed_descriptor_fstat)
+
+    with pytest.raises(ValueError, match="test input changed while it was read"):
+        consumer._read_bounded_file(
+            path,
+            role="test input",
+            maximum=len(payload),
+            too_large="test input is too large",
+        )
 
 
 @pytest.mark.parametrize(

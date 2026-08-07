@@ -153,12 +153,19 @@ open or parse the report a second time.
 
 The validator is the tested example from this checkout. It first requires
 exact Python integers because JSON Schema treats values such as `1.0` as
-integers when they have no fractional part. It then opens the report, schema,
-and document in nonblocking mode, checks each opened descriptor, and rejects
-symbolic links and special files. It rejects an opened document larger than
-25 MiB before reading and hashing it. It accepts only the reviewed schema bytes
-from the same checkout; a changed or substituted schema is rejected before
-JSON Schema evaluation. Schema references cannot trigger network requests.
+integers when they have no fractional part. It rejects symbolic links and
+verifies that the report, schema, and document paths still identify the regular
+files checked before opening. Each opened descriptor must remain stable through
+the read. The validator rejects a document larger than 25 MiB before reading
+and hashing it. It accepts only the reviewed schema bytes from the same
+checkout; a changed or substituted schema is rejected before JSON Schema
+evaluation. Schema references cannot trigger network requests.
+
+On Windows, each input handle permits concurrent readers but denies write and
+delete sharing until validation finishes with that file. Validation fails if a
+writer already holds an input. All platforms retain descriptor and path-state
+checks. Unix systems rely on those checks because their ordinary read-only open
+does not provide the same sharing contract.
 
 ## Keep the trust boundary explicit
 

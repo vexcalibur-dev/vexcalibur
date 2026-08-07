@@ -25,6 +25,9 @@ MAX_SCHEMA_BYTES = 256 * 1024
 EXECUTION_REPORT_SCHEMA_SHA256 = (
     "8e49a8d5652a94bcbd46eb012e643d8300f1e7c376803def509d37e37e54ed65"  # pragma: allowlist secret
 )
+_WINDOWS_GENERIC_READ = 0x80000000
+_WINDOWS_FILE_SHARE_READ = 0x00000001
+_WINDOWS_OPEN_EXISTING = 3
 
 
 def _reject_external_schema_reference(uri: str) -> NoReturn:
@@ -32,6 +35,13 @@ def _reject_external_schema_reference(uri: str) -> NoReturn:
 
 
 SCHEMA_REGISTRY: Registry[Any] = Registry(retrieve=_reject_external_schema_reference)
+
+
+def _file_timestamps(metadata: os.stat_result) -> tuple[int, int]:
+    return (
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -43,6 +53,65 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _open_windows_read_descriptor(path: Path) -> int:
+    """Open a binary descriptor that permits readers but denies writers and deletion."""
+
+    import ctypes
+    import ctypes.wintypes
+    import msvcrt
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.LPVOID,
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.HANDLE,
+    )
+    create_file.restype = ctypes.wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (ctypes.wintypes.HANDLE,)
+    close_handle.restype = ctypes.wintypes.BOOL
+
+    handle = create_file(
+        str(path),
+        _WINDOWS_GENERIC_READ,
+        _WINDOWS_FILE_SHARE_READ,
+        None,
+        _WINDOWS_OPEN_EXISTING,
+        0,
+        None,
+    )
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    descriptor_flags = os.O_RDONLY
+    descriptor_flags |= getattr(os, "O_BINARY", 0)
+    descriptor_flags |= getattr(os, "O_NOINHERIT", 0)
+    try:
+        return msvcrt.open_osfhandle(handle, descriptor_flags)
+    except BaseException as exc:
+        if not close_handle(handle):
+            raise ctypes.WinError(ctypes.get_last_error()) from exc
+        raise
+
+
+def _open_read_descriptor(path: Path) -> int:
+    """Open a non-inheritable descriptor for the regular-file checks."""
+
+    if os.name == "nt":
+        return _open_windows_read_descriptor(path)
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return os.open(path, flags)
+
+
 @contextmanager
 def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.stat_result]]:
     before_open = os.lstat(path)
@@ -50,14 +119,9 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
         raise ValueError(f"{role} must not be a symbolic link")
     if not stat.S_ISREG(before_open.st_mode):
         raise ValueError(f"{role} must be a regular file")
-    flags = os.O_RDONLY
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_NONBLOCK", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
     descriptor = -1
     try:
-        descriptor = os.open(path, flags)
+        descriptor = _open_read_descriptor(path)
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError(f"{role} must be a regular file")
@@ -79,19 +143,14 @@ def _open_regular_file(path: Path, *, role: str) -> Iterator[tuple[BinaryIO, os.
                 raise ValueError(f"{role} changed while it was read")
             if any(not os.path.samestat(metadata, snapshot) for snapshot in snapshots):
                 raise ValueError(f"{role} changed while it was read")
-            expected_state = (
-                metadata.st_size,
-                metadata.st_mtime_ns,
-                metadata.st_ctime_ns,
-            )
-            if any(
-                (
-                    snapshot.st_size,
-                    snapshot.st_mtime_ns,
-                    snapshot.st_ctime_ns,
-                )
-                != expected_state
-                for snapshot in snapshots
+            all_snapshots = (before_open, metadata, after_open, after_read, current_path)
+            if any(snapshot.st_size != metadata.st_size for snapshot in all_snapshots):
+                raise ValueError(f"{role} changed while it was read")
+            path_timestamps = _file_timestamps(before_open)
+            if (
+                _file_timestamps(metadata) != _file_timestamps(after_read)
+                or _file_timestamps(after_open) != path_timestamps
+                or _file_timestamps(current_path) != path_timestamps
             ):
                 raise ValueError(f"{role} changed while it was read")
     finally:
