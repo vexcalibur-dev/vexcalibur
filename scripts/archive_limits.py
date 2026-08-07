@@ -19,6 +19,8 @@ _ZIP_CENTRAL_DIRECTORY_HEADER_SIZE = 46
 _TAR_BLOCK_BYTES = 512
 _TAR_PAX_TYPES = frozenset({b"X", b"g", b"x"})
 _TAR_REJECTED_EXTENSION_TYPES = frozenset({b"K", b"L", b"S"})
+_TAR_MAX_PAX_HEADERS = 10_001
+_TAR_MAX_CONSECUTIVE_PAX_HEADERS = 8
 _TAR_MAX_PAX_BYTES = 1024 * 1024
 _TAR_MAX_PAX_RECORDS = 10_000
 _TAR_ALLOWED_PAX_KEYS = frozenset({b"mtime"})
@@ -158,20 +160,26 @@ def preflight_tar_gzip_stream(
     """Return a bounded gzip-compressed tar snapshot for ``tarfile``.
 
     Setuptools emits one PAX ``mtime`` record for each sdist member. This
-    preflight accepts that bounded timestamp metadata but rejects PAX keys that
-    can replace paths, sizes, or link targets. GNU long-name, long-link, and
-    sparse extensions are rejected for the same reason.
+    preflight accepts that timestamp metadata within archive-wide header, byte,
+    record, and consecutive-chain limits, but rejects PAX keys that can replace
+    paths, sizes, or link targets. ``tarfile`` recursively resolves consecutive
+    PAX headers, so the chain limit stays well below Python's recursion limit.
+    GNU long-name, long-link, and sparse extensions are rejected before their
+    payloads are read. The caller's file-byte limit covers regular and
+    special-member payloads; this scanner separately bounds TAR framing and the
+    accepted PAX metadata before ``tarfile`` receives the snapshot.
     """
     snapshot = _read_archive_snapshot(
         path,
         artifact=artifact,
         maximum_bytes=maximum_archive_bytes,
     )
+    maximum_pax_headers = min(_TAR_MAX_PAX_HEADERS, maximum_members + 1)
     maximum_stream_bytes = (
         maximum_file_bytes
         + (maximum_members * ((_TAR_BLOCK_BYTES - 1) + _TAR_BLOCK_BYTES))
         + _TAR_MAX_PAX_BYTES
-        + ((maximum_members + 1) * ((_TAR_BLOCK_BYTES - 1) + _TAR_BLOCK_BYTES))
+        + (maximum_pax_headers * ((_TAR_BLOCK_BYTES - 1) + _TAR_BLOCK_BYTES))
         + (2 * _TAR_BLOCK_BYTES)
     )
     consumed = 0
@@ -179,6 +187,8 @@ def preflight_tar_gzip_stream(
     members = 0
     pax_bytes = 0
     pax_headers = 0
+    pax_records = 0
+    consecutive_pax_headers = 0
     try:
         with snapshot.open() as raw, gzip.GzipFile(fileobj=raw, mode="rb") as stream:
             while True:
@@ -204,9 +214,14 @@ def preflight_tar_gzip_stream(
                 member_size = _parse_tar_size(header[124:136], artifact=artifact)
                 if member_type in _TAR_PAX_TYPES:
                     pax_headers += 1
-                    if pax_headers > maximum_members + 1:
+                    if pax_headers > maximum_pax_headers:
                         raise ArchivePreflightError(
                             f"{artifact} contains too many PAX metadata headers"
+                        )
+                    consecutive_pax_headers += 1
+                    if consecutive_pax_headers > _TAR_MAX_CONSECUTIVE_PAX_HEADERS:
+                        raise ArchivePreflightError(
+                            f"{artifact} contains too many consecutive PAX metadata headers"
                         )
                     pax_bytes += member_size
                     if pax_bytes > _TAR_MAX_PAX_BYTES:
@@ -226,9 +241,14 @@ def preflight_tar_gzip_stream(
                         raise ArchivePreflightError(
                             f"{artifact} has a truncated PAX metadata record"
                         )
-                    _validate_pax_payload(payload[:member_size], artifact=artifact)
+                    pax_records = _validate_pax_payload(
+                        payload[:member_size],
+                        artifact=artifact,
+                        previous_records=pax_records,
+                    )
                     continue
 
+                consecutive_pax_headers = 0
                 members += 1
                 if members > maximum_members:
                     raise ArchivePreflightError(f"{artifact} contains too many archive members")
@@ -332,9 +352,14 @@ def _padded_tar_size(size: int) -> int:
     return ((size + _TAR_BLOCK_BYTES - 1) // _TAR_BLOCK_BYTES) * _TAR_BLOCK_BYTES
 
 
-def _validate_pax_payload(payload: bytes, *, artifact: str) -> None:
+def _validate_pax_payload(
+    payload: bytes,
+    *,
+    artifact: str,
+    previous_records: int,
+) -> int:
     offset = 0
-    records = 0
+    records = previous_records
     while offset < len(payload):
         separator = payload.find(b" ", offset, min(len(payload), offset + 32))
         if separator < 0:
@@ -366,6 +391,7 @@ def _validate_pax_payload(payload: bytes, *, artifact: str) -> None:
         if records > _TAR_MAX_PAX_RECORDS:
             raise ArchivePreflightError(f"{artifact} contains too many PAX metadata records")
         offset = record_end
+    return records
 
 
 def _read_bounded(

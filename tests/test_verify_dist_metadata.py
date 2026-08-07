@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.archive_fixtures import pax_record, write_extension_tar_gzip
+from tests.archive_fixtures import (
+    pax_record,
+    write_extension_chain_tar_gzip,
+    write_extension_tar_gzip,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "verify-dist-metadata.py"
@@ -455,6 +459,38 @@ def test_verifier_rejects_compressed_wheel_metadata_bomb(tmp_path: Path) -> None
 
     assert result.returncode == 1
     assert "Wheel metadata is not a bounded regular member" in result.stderr
+
+
+def test_verifier_rejects_oversized_pax_before_tarfile_parses_it(tmp_path: Path) -> None:
+    write_wheel(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.1.0.tar.gz"
+    write_extension_tar_gzip(
+        sdist,
+        extension_type=b"x",
+        extension_payload=pax_record("mtime", "1" * (2 * 1024 * 1024)),
+    )
+
+    assert sdist.stat().st_size < 32 * 1024 * 1024
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert "Sdist pax metadata exceeds the byte limit" in result.stderr
+
+
+def test_verifier_rejects_deep_pax_chain_without_a_traceback(tmp_path: Path) -> None:
+    write_wheel(tmp_path)
+    sdist = tmp_path / "vexcalibur-0.1.0.tar.gz"
+    record = pax_record("mtime", "1")
+    write_extension_chain_tar_gzip(
+        sdist,
+        extensions=tuple((b"x", record) for _ in range(9)),
+    )
+
+    result = run_verifier(tmp_path)
+
+    assert result.returncode == 1
+    assert "too many consecutive pax metadata headers" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_verifier_rejects_wheel_member_flood(tmp_path: Path) -> None:

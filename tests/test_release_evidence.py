@@ -13,7 +13,11 @@ from pathlib import Path
 import pytest
 import scripts.release_evidence as release_evidence
 
-from tests.archive_fixtures import pax_record, write_extension_tar_gzip
+from tests.archive_fixtures import (
+    pax_record,
+    write_extension_chain_tar_gzip,
+    write_extension_tar_gzip,
+)
 from vexcalibur.generation_result import (
     GenerationExecutionReportParseError,
     parse_generation_execution_report,
@@ -80,6 +84,47 @@ def test_release_evidence_rejects_solaris_pax_sdist_size_rewrite(
     )
 
     with pytest.raises(release_evidence.EvidenceError, match="unsupported PAX metadata key"):
+        release_evidence._read_sdist_distribution_metadata(sdist, "0.1.0")
+
+
+def test_release_evidence_rejects_oversized_pax_before_tarfile_parses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sdist = tmp_path / "vexcalibur-0.1.0.tar.gz"
+    write_extension_tar_gzip(
+        sdist,
+        extension_type=b"x",
+        extension_payload=pax_record("mtime", "1" * (2 * 1024 * 1024)),
+    )
+
+    def fail_tarfile_open(*args: object, **kwargs: object) -> None:
+        pytest.fail("oversized PAX metadata reached tarfile")
+
+    assert sdist.stat().st_size < release_evidence.MAX_EVIDENCE_FILE_BYTES
+    monkeypatch.setattr(release_evidence.tarfile, "open", fail_tarfile_open)
+
+    with pytest.raises(release_evidence.EvidenceError, match="PAX metadata exceeds"):
+        release_evidence._read_sdist_distribution_metadata(sdist, "0.1.0")
+
+
+def test_release_evidence_rejects_deep_pax_chain_before_tarfile_parses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sdist = tmp_path / "vexcalibur-0.1.0.tar.gz"
+    record = pax_record("mtime", "1")
+    write_extension_chain_tar_gzip(
+        sdist,
+        extensions=tuple((b"x", record) for _ in range(9)),
+    )
+
+    def fail_tarfile_open(*args: object, **kwargs: object) -> None:
+        pytest.fail("deep PAX chain reached tarfile")
+
+    monkeypatch.setattr(release_evidence.tarfile, "open", fail_tarfile_open)
+
+    with pytest.raises(release_evidence.EvidenceError, match="too many consecutive PAX"):
         release_evidence._read_sdist_distribution_metadata(sdist, "0.1.0")
 
 

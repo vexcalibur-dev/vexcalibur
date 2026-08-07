@@ -90,7 +90,14 @@ workflow builds once. The wheel must contain clean, full-commit SCM metadata;
 the source distribution must contain the exact version and matching generated
 SCM prefix. Both archive readers reject unsafe paths, duplicate members,
 links, special files, oversized metadata, excessive member counts, and
-excessive expanded size.
+excessive member payload bytes.
+
+Source distributions need an earlier check because Python's `tarfile` parser
+consumes extension headers before it yields a member. The preflight permits
+bounded PAX timestamps, but rejects path-rewriting PAX fields and GNU extension
+headers. Header, byte, and record limits apply across the whole archive.
+Consecutive PAX headers have a separate depth limit because `tarfile` resolves
+them recursively.
 
 The bundled runtime constraints start with `--require-hashes` and
 `--only-binary :all:`. Every requirement is an exact version with at least one
