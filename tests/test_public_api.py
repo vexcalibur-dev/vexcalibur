@@ -191,7 +191,7 @@ def test_public_api_preflights_custom_source_before_github_auth(monkeypatch) -> 
         ) -> tuple[api.VulnerabilityFinding, ...]:
             raise AssertionError(components)
 
-    monkeypatch.setattr("vexcalibur.api._resolve_github_token", fail_if_auth_attempted)
+    monkeypatch.setattr("vexcalibur.generate.resolve_github_token", fail_if_auth_attempted)
 
     with pytest.raises(api.SbomError, match="source policy"):
         api.generate_vex_from_github_source_result(

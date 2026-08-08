@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from typing import Literal, overload
 
 from vexcalibur.domain import (
     ComponentIdentity,
@@ -472,24 +473,16 @@ def generate_vex_from_github_sbom(
         source_url=osv_source_url,
         headers=osv_headers,
     )
-    _validate_source_before_inventory_load(source)
-    client: GithubSbomComponentLoader = (
-        GithubSbomClient(
-            api_url=github_api_url,
-            token=resolve_github_token(
-                api_url=github_api_url,
-                token_env=github_token_env,
-                allow_gh_cli=use_gh_auth,
-            ),
-        )
-        if github_client is None
-        else github_client
-    )
-    return _render_legacy_generation(
-        components=_github_components(repository, client),
+    return _run_github_generation(
+        repository=repository,
         source=source,
         timestamp=timestamp,
+        github_api_url=github_api_url,
+        github_token_env=github_token_env,
+        use_gh_auth=use_gh_auth,
+        github_client=github_client,
         renderer=renderer,
+        report_aware=False,
     )
 
 
@@ -498,50 +491,109 @@ def generate_vex_from_github_source_result(
     repository: str,
     source: VulnerabilitySource,
     timestamp: datetime | None = None,
+    github_api_url: str = DEFAULT_GITHUB_API_URL,
+    github_token_env: str | None = None,
+    use_gh_auth: bool = True,
     github_client: GithubSbomComponentLoader | None = None,
-    github_client_factory: Callable[[], GithubSbomComponentLoader] | None = None,
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate a report-aware result from GitHub inventory and one source."""
-    if github_client is not None and github_client_factory is not None:
-        raise ValueError("github_client and github_client_factory are mutually exclusive")
-    _validate_source_before_inventory_load(source)
-    if github_client_factory is not None:
-        github_client = github_client_factory()
-    return _generate_vex_from_github_selected_source_result(
+    """Generate a report-aware result through the GitHub orchestration boundary."""
+    return _run_github_generation(
         repository=repository,
         source=source,
         timestamp=timestamp,
+        github_api_url=github_api_url,
+        github_token_env=github_token_env,
+        use_gh_auth=use_gh_auth,
         github_client=github_client,
         renderer=renderer,
         execution_context=execution_context,
+        report_aware=True,
     )
 
 
-def _generate_vex_from_github_selected_source_result(
+@overload
+def _run_github_generation(
     *,
     repository: str,
     source: VulnerabilitySource,
-    timestamp: datetime | None = None,
-    github_client: GithubSbomComponentLoader | None = None,
-    renderer: VexRenderer | None = None,
+    timestamp: datetime | None,
+    github_api_url: str,
+    github_token_env: str | None,
+    use_gh_auth: bool,
+    github_client: GithubSbomComponentLoader | None,
+    renderer: VexRenderer | None,
     execution_context: GenerationExecutionContext | None = None,
+    report_aware: Literal[False],
+) -> str:
+    raise NotImplementedError
+
+
+@overload
+def _run_github_generation(
+    *,
+    repository: str,
+    source: VulnerabilitySource,
+    timestamp: datetime | None,
+    github_api_url: str,
+    github_token_env: str | None,
+    use_gh_auth: bool,
+    github_client: GithubSbomComponentLoader | None,
+    renderer: VexRenderer | None,
+    execution_context: GenerationExecutionContext | None,
+    report_aware: Literal[True],
 ) -> GenerationResult:
-    """Generate after the caller has completed remote-source preflight."""
+    raise NotImplementedError
+
+
+def _run_github_generation(
+    *,
+    repository: str,
+    source: VulnerabilitySource,
+    timestamp: datetime | None,
+    github_api_url: str,
+    github_token_env: str | None,
+    use_gh_auth: bool,
+    github_client: GithubSbomComponentLoader | None,
+    renderer: VexRenderer | None,
+    execution_context: GenerationExecutionContext | None = None,
+    report_aware: bool,
+) -> str | GenerationResult:
+    """Own source preflight, GitHub loading, and generation in that order."""
+    _validate_source_before_inventory_load(source)
     selected_renderer = select_renderer(renderer)
-    retained_context = _execution_context_for_generation(
-        inventory_source=_github_inventory_source(github_client),
-        finding_source=finding_source_category(source),
-        output_format=renderer_output_format(selected_renderer),
-        execution_context=execution_context,
+    inventory_source = _github_inventory_source(github_client)
+    retained_context = (
+        _execution_context_for_generation(
+            inventory_source=inventory_source,
+            finding_source=finding_source_category(source),
+            output_format=renderer_output_format(selected_renderer),
+            execution_context=execution_context,
+        )
+        if report_aware
+        else None
     )
-    return _generate_result(
-        components=_github_components(repository, github_client),
+    client = _github_client(
+        github_api_url=github_api_url,
+        github_token_env=github_token_env,
+        use_gh_auth=use_gh_auth,
+        github_client=github_client,
+    )
+    components = _github_components(repository, client)
+    if report_aware:
+        return _generate_result(
+            components=components,
+            source=source,
+            timestamp=timestamp,
+            renderer=selected_renderer,
+            execution_context=retained_context,
+        )
+    return _render_legacy_generation(
+        components=components,
         source=source,
         timestamp=timestamp,
         renderer=selected_renderer,
-        execution_context=retained_context,
     )
 
 
@@ -572,25 +624,35 @@ def generate_vex_from_github_sbom_result(
         headers=osv_headers,
     )
 
-    def create_github_client() -> GithubSbomClient:
-        return GithubSbomClient(
-            api_url=github_api_url,
-            token=resolve_github_token(
-                api_url=github_api_url,
-                token_env=github_token_env,
-                allow_gh_cli=use_gh_auth,
-            ),
-        )
-
-    github_client_factory = create_github_client if github_client is None else None
     return generate_vex_from_github_source_result(
         repository=repository,
         source=source,
         timestamp=timestamp,
+        github_api_url=github_api_url,
+        github_token_env=github_token_env,
+        use_gh_auth=use_gh_auth,
         github_client=github_client,
-        github_client_factory=github_client_factory,
         renderer=renderer,
         execution_context=execution_context,
+    )
+
+
+def _github_client(
+    *,
+    github_api_url: str,
+    github_token_env: str | None,
+    use_gh_auth: bool,
+    github_client: GithubSbomComponentLoader | None,
+) -> GithubSbomComponentLoader:
+    if github_client is not None:
+        return github_client
+    return GithubSbomClient(
+        api_url=github_api_url,
+        token=resolve_github_token(
+            api_url=github_api_url,
+            token_env=github_token_env,
+            allow_gh_cli=use_gh_auth,
+        ),
     )
 
 
@@ -606,10 +668,9 @@ def _github_inventory_source(
 
 def _github_components(
     repository: str,
-    github_client: GithubSbomComponentLoader | None,
+    github_client: GithubSbomComponentLoader,
 ) -> tuple[ComponentIdentity, ...]:
-    client = GithubSbomClient() if github_client is None else github_client
-    return client.component_identities(repository)
+    return github_client.component_identities(repository)
 
 
 def _osv_source(

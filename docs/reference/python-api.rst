@@ -208,6 +208,18 @@ fallback. GitHub Enterprise requires either ``github_token_env`` or credentials
 available to ``gh`` for the configured host. Token text must be printable ASCII
 without whitespace.
 
+``generate_vex_from_github_source_result`` is the supported owner for a custom
+finding source and GitHub inventory. It runs the source's optional
+``GenerationSourcePreflight`` once, before GitHub authentication. The
+:py:func:`vexcalibur.api.generate_vex_from_github_source_result` reference above
+defines the complete order and exception contract.
+
+The CLI uses this same function. Built-in public and private OSV sources use
+the same internal sequence. A local findings file is different: Vexcalibur
+loads the GitHub inventory first because the file can refer to component
+references from that inventory. It does not send those components to a finding
+service.
+
 .. autofunction:: load_cyclonedx_sbom
 
 Sources and renderers

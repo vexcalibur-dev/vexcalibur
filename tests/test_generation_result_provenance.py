@@ -545,54 +545,77 @@ def test_github_source_does_not_inspect_extension_metadata_before_loading_invent
     assert result.execution_context is None
 
 
-def test_github_source_does_not_inspect_extension_metadata_before_client_factory() -> None:
-    factory_calls = 0
+def test_github_source_does_not_inspect_extension_metadata_before_client_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_constructions = 0
 
     class InvalidDeclaredSource(FakeVulnerabilitySource):
         def execution_report_finding_source(self) -> FindingSourceCategory:
             return FindingSourceCategory.LOCAL_FILE
 
-    def create_client() -> FakeGithubSbomClient:
-        nonlocal factory_calls
-        factory_calls += 1
-        return FakeGithubSbomClient()
+    class RecordingGithubSbomClient(FakeGithubSbomClient):
+        def __init__(self, **kwargs: object) -> None:
+            nonlocal client_constructions
+            client_constructions += 1
+            assert kwargs == {"api_url": "https://api.github.com", "token": None}
+
+    monkeypatch.setattr(
+        "vexcalibur.generate.GithubSbomClient",
+        RecordingGithubSbomClient,
+    )
 
     result = generate_vex_from_github_source_result(
         repository="vexcalibur-dev/vexcalibur",
-        github_client_factory=create_client,
         source=InvalidDeclaredSource(()),
+        use_gh_auth=False,
     )
 
-    assert factory_calls == 1
+    assert client_constructions == 1
     assert result.execution_context is None
 
 
-def test_github_source_constructs_a_client_factory_once() -> None:
-    factory_calls = 0
-    client = FakeGithubSbomClient()
+def test_github_source_constructs_default_client_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_constructions = 0
 
-    def create_client() -> FakeGithubSbomClient:
-        nonlocal factory_calls
-        factory_calls += 1
-        return client
+    class RecordingGithubSbomClient(FakeGithubSbomClient):
+        def __init__(self, **kwargs: object) -> None:
+            nonlocal client_constructions
+            client_constructions += 1
+            assert kwargs == {"api_url": "https://api.github.com", "token": None}
+
+    monkeypatch.setattr(
+        "vexcalibur.generate.GithubSbomClient",
+        RecordingGithubSbomClient,
+    )
 
     generate_vex_from_github_source_result(
         repository="vexcalibur-dev/vexcalibur",
-        github_client_factory=create_client,
         source=FakeVulnerabilitySource(()),
+        use_gh_auth=False,
     )
 
-    assert factory_calls == 1
+    assert client_constructions == 1
 
 
-def test_github_source_rejects_a_client_and_factory_together() -> None:
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        generate_vex_from_github_source_result(
-            repository="vexcalibur-dev/vexcalibur",
-            github_client=FakeGithubSbomClient(),
-            github_client_factory=FakeGithubSbomClient,
-            source=FakeVulnerabilitySource(()),
-        )
+def test_github_source_injected_client_skips_credential_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_token_resolution(**kwargs: object) -> None:
+        raise AssertionError(kwargs)
+
+    monkeypatch.setattr(
+        "vexcalibur.generate.resolve_github_token",
+        unexpected_token_resolution,
+    )
+
+    generate_vex_from_github_source_result(
+        repository="vexcalibur-dev/vexcalibur",
+        github_client=FakeGithubSbomClient(),
+        source=FakeVulnerabilitySource(()),
+    )
 
 
 def test_github_source_validates_context_before_loading_inventory() -> None:
