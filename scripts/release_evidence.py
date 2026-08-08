@@ -26,14 +26,14 @@ try:
         ArchivePreflightError,
         ArchiveSnapshot,
         preflight_tar_gzip_stream,
-        preflight_zip_member_count,
+        preflight_zip_archive,
     )
 except ModuleNotFoundError:
     from archive_limits import (  # type: ignore[no-redef]
         ArchivePreflightError,
         ArchiveSnapshot,
         preflight_tar_gzip_stream,
-        preflight_zip_member_count,
+        preflight_zip_archive,
     )
 
 try:
@@ -61,6 +61,7 @@ MAX_GENERATED_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_ARCHIVE_METADATA_BYTES = 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+MAX_WHEEL_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 MAX_NORMALIZED_SBOM_COMPONENTS = 10_000
 MAX_NORMALIZED_SBOM_COMPONENT_DEPTH = 50
 MAX_WHEEL_SCM_METADATA_BYTES = 64 * 1024
@@ -1974,11 +1975,11 @@ def _read_sdist_distribution_metadata(path: Path, version: str) -> tuple[dict[st
 
 def _preflight_wheel(path: Path) -> ArchiveSnapshot:
     try:
-        return preflight_zip_member_count(
+        return preflight_zip_archive(
             path,
             artifact="wheel",
             maximum_members=MAX_ARCHIVE_MEMBERS,
-            maximum_directory_bytes=MAX_EVIDENCE_FILE_BYTES,
+            maximum_directory_bytes=MAX_WHEEL_CENTRAL_DIRECTORY_BYTES,
             maximum_archive_bytes=MAX_EVIDENCE_FILE_BYTES,
         )
     except (ArchivePreflightError, OSError) as exc:

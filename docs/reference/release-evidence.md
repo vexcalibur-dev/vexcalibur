@@ -288,6 +288,9 @@ Candidate archives are bounded before metadata is trusted:
 | --- | --- |
 | Maximum evidence file | 32 MiB |
 | Maximum archive members | 10,000 |
+| Maximum wheel central directory | 8 MiB |
+| Maximum wheel central-directory extra fields | 100,000 |
+| Maximum ZIP64 extensible data blocks | 10,000 |
 | Maximum cumulative non-PAX member payload | 128 MiB |
 | Maximum cumulative PAX metadata payload | 1 MiB |
 | Maximum PAX headers | 10,001 across the archive, derived from the member limit |
@@ -295,6 +298,21 @@ Candidate archives are bounded before metadata is trusted:
 | Maximum PAX records | 10,000 |
 | Maximum metadata member | 1 MiB |
 | Maximum wheel SCM metadata | 64 KiB |
+
+The wheel preflight reads the classic end-of-central-directory record and any
+ZIP64 end record and locator. It checks the entry count and central-directory
+size before Python's `zipfile` parser constructs member objects. The end
+records and every central-directory member must resolve to disk zero. This
+includes member disk numbers stored in ZIP64 extra fields. ZIP64 records must
+end at the locator and agree with every classic field that does not contain a
+ZIP64 sentinel. Every member size, compressed size, and local-header offset
+that uses a ZIP64 sentinel must have its complete value in the member's ZIP64
+extra field, with no surplus values. ZIP64 end records and ZIP64 members must
+require extraction version 4.5 or later.
+The central directory must end exactly where the end records begin. Optional
+ZIP64 extensible data must contain complete identified, length-prefixed blocks.
+The scanner permits an aggregate of ten central-directory extra fields for
+each declared member.
 
 The TAR preflight accepts only bounded `mtime` PAX records. It rejects PAX
 fields that can replace member paths, sizes, or link targets, along with GNU
