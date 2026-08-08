@@ -220,6 +220,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: ${{ !inputs.publication-only }}
     strategy:
       fail-fast: false

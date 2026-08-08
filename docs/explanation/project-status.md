@@ -56,9 +56,12 @@ only artifacts derived from this public repository, and the caller must set
 `allow-public-evidence-upload: true`.
 
 Pull requests do not create a GitHub Release or perform a PyPI OIDC exchange.
-Those publisher paths are tested statically until a real release. The current
-production review makes zero assertions; a separate synthetic `in_triage`
-fixture exercises CycloneDX, OpenVEX, and CSAF equivalence.
+Offline integration tests execute the GitHub Release recovery transition. For
+PyPI, they execute missing-file selection, publication-file verification, and
+the final pre-OIDC release re-resolution with fake service clients. A real
+release still verifies the live GitHub API, artifact actions, and PyPI OIDC
+exchange. The current production review makes zero assertions; a separate
+synthetic `in_triage` fixture exercises CycloneDX, OpenVEX, and CSAF equivalence.
 
 This is maintainer and release tooling, not part of the public package API.
 Read [Why Vexcalibur publishes evidence about itself](self-release-evidence.md)

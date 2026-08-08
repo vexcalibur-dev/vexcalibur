@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import os
 import re
-import subprocess
 import textwrap
 from pathlib import Path
+
+import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
@@ -21,22 +21,117 @@ def _workflow_text() -> str:
 
 def _job(text: str, name: str) -> str:
     pattern = rf"(?ms)^  {re.escape(name)}:\n.*?(?=^  [a-z0-9][a-z0-9-]*:\n|\Z)"
-    match = re.search(pattern, text)
-    assert match is not None, f"release workflow has no {name!r} job"
-    return match.group(0)
+    matches = list(re.finditer(pattern, text))
+    assert len(matches) == 1, f"release workflow must have exactly one {name!r} job"
+    return matches[0].group(0)
 
 
 def _step(job: str, name: str) -> str:
-    pattern = rf"(?ms)^      - name: {re.escape(name)}\n.*?(?=^      - name: |\Z)"
-    match = re.search(pattern, job)
-    assert match is not None, f"workflow job has no {name!r} step"
-    return match.group(0)
+    pattern = rf"(?ms)^      - name: {re.escape(name)}\n.*?(?=^      - |\Z)"
+    matches = list(re.finditer(pattern, job))
+    assert len(matches) == 1, f"workflow job must have exactly one {name!r} step"
+    return matches[0].group(0)
+
+
+def _job_step_names(job: str) -> list[str]:
+    root = yaml.compose(textwrap.dedent(job), Loader=yaml.BaseLoader)
+    assert isinstance(root, MappingNode) and len(root.value) == 1, (
+        "workflow job scope must contain exactly one job"
+    )
+    job_node = root.value[0][1]
+    assert isinstance(job_node, MappingNode), "workflow job must be a mapping"
+    step_nodes = [
+        value
+        for key, value in job_node.value
+        if isinstance(key, ScalarNode) and key.value == "steps"
+    ]
+    assert len(step_nodes) == 1 and isinstance(step_nodes[0], SequenceNode), (
+        "workflow job must contain exactly one steps sequence"
+    )
+
+    names: list[str] = []
+    for step_node in step_nodes[0].value:
+        assert isinstance(step_node, MappingNode), "workflow step must be a mapping"
+        name_nodes = [
+            value
+            for key, value in step_node.value
+            if isinstance(key, ScalarNode) and key.value == "name"
+        ]
+        if not name_nodes:
+            continue
+        assert len(name_nodes) == 1 and isinstance(name_nodes[0], ScalarNode), (
+            "workflow step must have one scalar name"
+        )
+        name = name_nodes[0].value
+        assert name not in names, f"workflow job contains duplicate step name {name!r}"
+        names.append(name)
+    return names
 
 
 def _step_script(step: str) -> str:
     marker = "        run: |\n"
     assert marker in step
     return textwrap.dedent(step.partition(marker)[2])
+
+
+def _environment_entries(text: str, *, indentation: int) -> dict[str, str]:
+    root = yaml.compose(text, Loader=yaml.BaseLoader)
+    assert root is not None, "workflow scope is empty"
+    scope = _scope_mapping(root, indentation=indentation)
+    environment_nodes = [
+        value for key, value in scope.value if isinstance(key, ScalarNode) and key.value == "env"
+    ]
+    if not environment_nodes:
+        return {}
+    assert len(environment_nodes) == 1, "workflow scope contains duplicate environment mappings"
+    environment = environment_nodes[0]
+    assert isinstance(environment, MappingNode), (
+        "workflow environment must be a block or flow mapping"
+    )
+
+    entries: dict[str, str] = {}
+    for key, value in environment.value:
+        assert isinstance(key, ScalarNode) and re.fullmatch(r"[A-Z][A-Z0-9_]*", key.value), (
+            "workflow environment key is unsupported"
+        )
+        assert key.value not in entries, "workflow environment contains a duplicate key"
+        assert isinstance(value, ScalarNode), "nested workflow environment values are unsupported"
+        assert value.style not in {"|", ">"}, "workflow environment block scalars are unsupported"
+        assert value.value, "empty workflow environment values are unsupported"
+        entries[key.value] = value.value
+    return entries
+
+
+def _scope_mapping(root: Node, *, indentation: int) -> MappingNode:
+    if indentation == 0:
+        assert isinstance(root, MappingNode), "workflow root must be a mapping"
+        return root
+    if indentation == 4:
+        assert isinstance(root, MappingNode) and len(root.value) == 1, (
+            "workflow job scope must contain exactly one job"
+        )
+        job = root.value[0][1]
+        assert isinstance(job, MappingNode), "workflow job must be a mapping"
+        return job
+    assert indentation == 8, "unsupported workflow scope indentation"
+    assert isinstance(root, SequenceNode) and len(root.value) == 1, (
+        "workflow step scope must contain exactly one step"
+    )
+    step = root.value[0]
+    assert isinstance(step, MappingNode), "workflow step must be a mapping"
+    return step
+
+
+def _step_environment(step: str) -> dict[str, str]:
+    return _environment_entries(step, indentation=8)
+
+
+def _job_environment(job: str) -> dict[str, str]:
+    return _environment_entries(job, indentation=4)
+
+
+def _workflow_environment(workflow: str) -> dict[str, str]:
+    return _environment_entries(workflow, indentation=0)
 
 
 def _workflow_job_dependencies(text: str) -> dict[str, set[str]]:
@@ -81,102 +176,6 @@ def _has_job_ancestor(
         visited.add(dependency)
         pending.extend(dependencies.get(dependency, ()))
     return False
-
-
-def _run_create_release_step(
-    tmp_path: Path,
-    *,
-    graphql_responses: list[object],
-    create_exit: int = 0,
-    rest_release_id: int = 123,
-) -> tuple[subprocess.CompletedProcess[str], str]:
-    runner_temp = tmp_path / "runner"
-    notes_path = runner_temp / "release-notes" / "vexcalibur-release-notes.md"
-    notes_path.parent.mkdir(parents=True)
-    notes_path.write_text("reviewed release notes\n", encoding="utf-8")
-    github_output = tmp_path / "github-output"
-    github_output.touch()
-    gh_test_dir = tmp_path / "gh-test"
-    gh_test_dir.mkdir()
-    for index, response in enumerate(graphql_responses, start=1):
-        (gh_test_dir / f"graphql-{index}.json").write_text(
-            json.dumps(response),
-            encoding="utf-8",
-        )
-    (gh_test_dir / "release.json").write_text(
-        json.dumps(
-            {
-                "id": rest_release_id,
-                "tag_name": "v1.2.3",
-                "target_commitish": "a" * 40,
-                "name": "v1.2.3",
-                "body": "reviewed release notes\n",
-                "draft": True,
-                "prerelease": False,
-                "immutable": False,
-                "author": {"login": "automation[bot]"},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    fake_gh = fake_bin / "gh"
-    fake_gh.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >> "${GH_TEST_DIR}/calls"
-if [[ "$1" == "api" && "${2:-}" == "graphql" ]]; then
-  count=0
-  if [[ -f "${GH_TEST_DIR}/query-count" ]]; then
-    count="$(cat "${GH_TEST_DIR}/query-count")"
-  fi
-  count=$((count + 1))
-  printf '%s\n' "${count}" > "${GH_TEST_DIR}/query-count"
-  response="${GH_TEST_DIR}/graphql-${count}.json"
-  [[ -f "${response}" ]] || exit 98
-  cat "${response}"
-  exit 0
-fi
-if [[ "$1" == "api" && "${2:-}" == repos/*/releases/123 ]]; then
-  cat "${GH_TEST_DIR}/release.json"
-  exit 0
-fi
-if [[ "$1" == "release" && "${2:-}" == "create" ]]; then
-  [[ " $* " == *" --verify-tag "* ]] || exit 97
-  exit "${GH_CREATE_EXIT}"
-fi
-exit 96
-""",
-        encoding="utf-8",
-    )
-    fake_gh.chmod(0o755)
-
-    step = _step(_job(_workflow_text(), "publish-release"), "Create GitHub Release")
-    completed = subprocess.run(  # noqa: S603 - reviewed workflow with a test-owned gh stub
-        ["/bin/bash", "-c", _step_script(step)],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        env={
-            **os.environ,
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-            "RUNNER_TEMP": str(runner_temp),
-            "GITHUB_REPOSITORY": "vexcalibur-dev/vexcalibur",
-            "GITHUB_OUTPUT": str(github_output),
-            "RELEASE_TAG": "v1.2.3",
-            "RELEASE_SHA": "a" * 40,
-            "APP_SLUG": "automation",
-            "GH_TOKEN": "test-token",  # pragma: allowlist secret
-            "GH_TEST_DIR": str(gh_test_dir),
-            "GH_CREATE_EXIT": str(create_exit),
-        },
-    )
-    calls_path = gh_test_dir / "calls"
-    calls = calls_path.read_text(encoding="utf-8") if calls_path.exists() else ""
-    return completed, calls
 
 
 def _validation_text() -> str:

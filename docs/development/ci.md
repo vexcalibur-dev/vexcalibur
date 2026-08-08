@@ -43,7 +43,24 @@ selected by the protected `main` ruleset. `Analyze Python`, `dependency-review`,
 up-to-date enforcement. See [Verify GitHub governance](github-governance.md)
 for the organization-wide policy and drift checks.
 
+(reproduce-important-gates)=
 ## Reproduce important gates
+
+Release-recovery tests execute the checked-in workflow shell bodies in a
+controlled child process. The harness supplies an explicit environment, puts
+fail-closed fake clients first in `PATH`, closes standard input, and stops the
+entire process group after 30 seconds. A fake client records rejected commands
+in shared state, so masking its exit code with `|| true` still fails the test.
+
+This harness tests trusted repository code. It is not a security sandbox for
+arbitrary shell input, and it doesn't require Linux namespace tools. The same
+behavioral tests therefore run on older Linux distributions without changing
+Vexcalibur's runtime requirements.
+
+The complete offline suite needs Linux, Bash, Git, `jq`, `uv`, and the standard
+GNU commands `awk`, `chmod`, `cmp`, `comm`, `find`, `grep`, `mkdir`, `mktemp`,
+`sed`, `sha256sum`, `sort`, `stat`, `tail`, and `wc`. These are developer and CI
+prerequisites. Installing and running Vexcalibur does not require them.
 
 Run the complete offline test suite:
 

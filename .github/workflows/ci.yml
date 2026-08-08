@@ -141,6 +141,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.run_scheduled_profile)
     strategy:
       fail-fast: false
