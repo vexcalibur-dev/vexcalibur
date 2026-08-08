@@ -6,18 +6,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import vexcalibur.api as api
 from vexcalibur.domain import VulnerabilitySource
 from vexcalibur.generate import (
-    generate_vex_from_github_source_result,
     generate_vex_from_local_findings_result,
     generate_vex_from_sbom_result,
 )
 from vexcalibur.generation_result import GenerationResult
 from vexcalibur.github_sbom import (
-    GithubSbomClient,
     normalize_github_api_url,
     parse_github_repository,
-    resolve_github_token,
 )
 from vexcalibur.render import VexRenderer
 from vexcalibur.source_options import (
@@ -106,18 +104,13 @@ class GenerateCommandRequest:
         if repository is None:
             raise AssertionError("generate request repository validation failed")
         source = self._source
-        return generate_vex_from_github_source_result(
+        return api.generate_vex_from_github_source_result(
             repository=repository,
             source=source,
             timestamp=self.timestamp,
-            github_client_factory=lambda: GithubSbomClient(
-                api_url=self.github_api_url,
-                token=resolve_github_token(
-                    api_url=self.github_api_url,
-                    token_env=self.github_token_env,
-                    allow_gh_cli=self.use_gh_auth,
-                ),
-            ),
+            github_api_url=self.github_api_url,
+            github_token_env=self.github_token_env,
+            use_gh_auth=self.use_gh_auth,
             renderer=self.renderer,
         )
 

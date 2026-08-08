@@ -77,14 +77,10 @@ from vexcalibur.github_sbom import (
     DEFAULT_GITHUB_API_URL as _DEFAULT_GITHUB_API_URL,
 )
 from vexcalibur.github_sbom import (
-    GithubSbomClient as _GithubSbomClient,
-)
-from vexcalibur.github_sbom import (
     GithubSbomClientError,
     GithubSbomConfigurationError,
     GithubSbomError,
 )
-from vexcalibur.github_sbom import resolve_github_token as _resolve_github_token
 from vexcalibur.openvex import OpenVexJsonRenderer, OpenVexRenderError
 from vexcalibur.render import VexRenderer, VexRenderError
 from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
@@ -317,14 +313,37 @@ def generate_vex_from_github_source_result(
 ) -> GenerationResult:
     """Generate report-aware VEX from GitHub inventory and a custom source.
 
-    A ``GenerationSourcePreflight`` runs before Vexcalibur resolves GitHub
-    credentials or creates a client. The custom source owns its network and
-    disclosure policy. Its documented exceptions propagate unchanged unless it
-    raises ``VulnerabilitySourceInputError``, which becomes ``SbomError``.
+    This function owns the remote-inventory sequence. It runs a
+    ``GenerationSourcePreflight`` once, selects the renderer, validates the
+    execution context, resolves GitHub credentials, loads the repository
+    inventory, and then queries the source and renders the result. A failed
+    preflight or context check prevents GitHub authentication and inventory
+    loading.
+
+    The custom source owns its network and disclosure policy.
+    ``VulnerabilitySourceInputError`` becomes ``SbomError``. Other exceptions
+    from the custom source or renderer propagate unchanged.
     Pass an ``execution_context`` that classifies custom source or renderer
     boundaries before calling ``execution_report()`` on the result. Without
     that context, generation succeeds but ``execution_report()`` raises
     ``ValueError``.
+
+    Args:
+        repository: GitHub repository in ``OWNER/REPO`` form.
+        source: Finding source queried with the repository's component
+            inventory. The source may implement ``GenerationSourcePreflight``.
+        timestamp: Document timestamp. The renderer uses the current UTC time
+            when this is ``None``.
+        github_api_url: GitHub REST API base URL.
+        github_token_env: Environment variable containing a printable ASCII
+            GitHub token without whitespace. When omitted, standard GitHub
+            token variables are checked.
+        use_gh_auth: Fall back to ``gh auth token`` when environment variables
+            do not provide a token.
+        renderer: Output renderer. The default emits CycloneDX 1.6 JSON.
+        execution_context: Report classification for custom source or renderer
+            boundaries. Vexcalibur infers omitted built-in values and rejects
+            contradictory values before GitHub authentication.
 
     Returns:
         The rendered document and immutable inputs needed to derive its report.
@@ -332,6 +351,7 @@ def generate_vex_from_github_source_result(
     Raises:
         GithubSbomError: GitHub authentication, transport, or SBOM parsing fails.
         SbomError: Inventory or source preflight validation fails.
+        VulnerabilitySourceError: The custom source cannot produce findings.
         VexRenderError: The findings cannot be rendered within output limits.
         GenerationReportMetadataError: The loaded package version cannot be
             identified safely for a report.
@@ -339,21 +359,13 @@ def generate_vex_from_github_source_result(
         ValueError: The execution context contradicts inferred generation facts.
     """
 
-    def create_github_client() -> _GithubSbomClient:
-        return _GithubSbomClient(
-            api_url=github_api_url,
-            token=_resolve_github_token(
-                api_url=github_api_url,
-                token_env=github_token_env,
-                allow_gh_cli=use_gh_auth,
-            ),
-        )
-
     return _generate_vex_from_github_source_result(
         repository=repository,
         source=source,
         timestamp=timestamp,
-        github_client_factory=create_github_client,
+        github_api_url=github_api_url,
+        github_token_env=github_token_env,
+        use_gh_auth=use_gh_auth,
         renderer=renderer,
         execution_context=execution_context,
     )

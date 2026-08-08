@@ -77,16 +77,24 @@ class ExampleSource(GenerationSourcePreflight):
         return ()
 ```
 
-`generate_vex_from_github_source_result`, `generate_vex_from_github_sbom`, and
-`generate_vex_from_github_sbom_result` call this hook before they construct a
-GitHub client or request the repository inventory. The hook must only inspect
-local configuration. It must not open a file, create a network client, or make
-a request.
+`vexcalibur.api.generate_vex_from_github_source_result` owns remote-inventory
+generation for the supported Python API and the CLI. It calls the hook once,
+before GitHub authentication. See the [Python API
+reference](python-api.rst) for the complete ordered contract.
 
-Raise `VulnerabilitySourceInputError` when the selected inventory makes the
-source configuration invalid. Vexcalibur reports that exception as an
+The built-in GitHub helpers use the same internal sequence. The hook must only
+inspect local configuration. It must not open a file, create a network client,
+or make a request.
+
+Raise `VulnerabilitySourceInputError` when the source configuration is invalid
+for remote-inventory generation. Vexcalibur reports that exception as an
 `SbomError` and retains the original exception as its cause. Other exceptions
 propagate unchanged. A source with no preflight work can omit the method.
+
+`LocalFindingsSource` omits the hook. Its document can refer to component
+references from the GitHub SBOM, so Vexcalibur reads and validates the file
+after it loads that inventory. This path does not send the inventory to a
+finding service.
 
 ## Component identity
 
@@ -165,7 +173,9 @@ A network source must make public data sharing explicit. At minimum, it should:
 - bound encoded and decoded response bytes, pagination, overall time, parsed
   records, and the provider-to-component expansion.
 
-The OSV source implements this policy with `--allow-public-osv` and `--osv-url`. A custom source passed to `generate_vex_from_source` owns its own network policy.
+The OSV source implements this policy with `--allow-public-osv` and `--osv-url`.
+A custom source owns its network policy whether it is passed to
+`generate_vex_from_source` or `generate_vex_from_github_source_result`.
 
 An offline source should not create a network client. It should define limits for local data and reject ambiguous component matches.
 
@@ -192,8 +202,10 @@ error-body limits, repeated and oversized tokens, pagination floods, record
 deduplication, total deadlines, and expansion-limit tests.
 
 When a provider implements `GenerationSourcePreflight`, add an ordering test
-that makes the hook fail. Assert that Vexcalibur did not call the selected
-GitHub client factory or inventory loader.
+that makes the hook fail. Assert that Vexcalibur did not resolve GitHub
+credentials, construct a GitHub client, or call the inventory loader. Add a
+successful ordering test that proves the hook runs exactly once before those
+operations.
 
 First-party providers put these tests in the Vexcalibur suite. External
 providers run the equivalent contract and integration tests in their owning
