@@ -63,8 +63,19 @@ prerequisites. Git must support
 `git init --initial-branch=main --object-format=sha1`. Installing and running
 Vexcalibur does not require these tools.
 
-On macOS or Windows, run the checks supported by that platform and use the
-required pull-request CI for the complete Linux suite.
+On macOS or Windows, run the portable repository checks:
+
+```console
+uv sync --frozen
+uv run --frozen pre-commit run --all-files
+uv run --frozen mypy src
+```
+
+Required pull-request CI is the sole test and coverage authority for
+contributors on these platforms. It also verifies release recovery, POSIX
+packaging tools, workflow and shell lint, and the deterministic fuzz smoke
+profile. Those gates depend on Linux or GNU shell tools and are not covered by
+the portable commands.
 
 Run the complete offline test suite:
 
