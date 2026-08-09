@@ -92,7 +92,7 @@ class ReleaseRecoveryHarness:
         self.read_token = "read-only-token"  # noqa: S105  # pragma: allowlist secret
         self.write_token = "write-token"  # noqa: S105  # pragma: allowlist secret
         self.notes = "reviewed release notes\n"
-        git = shutil.which("git")
+        git = self._resolve_command("git")
         if git is None:
             raise RuntimeError("required test command is unavailable: git")
         self.git = git
@@ -207,7 +207,7 @@ class ReleaseRecoveryHarness:
     @staticmethod
     def _resolve_command(command: str) -> str | None:
         target = shutil.which(command)
-        if command != "uv" or target is None or "/shims/" not in target:
+        if target is None or "/shims/" not in target:
             return None if target is None else str(Path(target).resolve())
         for manager in ("asdf", "mise", "pyenv"):
             manager_path = shutil.which(manager)

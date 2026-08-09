@@ -6,6 +6,7 @@ import pytest
 
 from tests.release_workflow_helpers import (
     _job,
+    _job_condition,
     _job_environment,
     _job_step_names,
     _pypi_text,
@@ -123,7 +124,7 @@ def test_recovery_transitions_are_unique_and_ordered_in_the_workflows() -> None:
             "Verify release and every asset attestation",
         ),
     )
-    assert "if: needs.resolve.outputs.skip != 'true'" in release_job
+    assert _job_condition(release_job) == "needs.resolve.outputs.skip != 'true'"
 
     pypi_job = _job(_pypi_text(), "publish")
     _assert_ordered_subsequence(
@@ -134,7 +135,7 @@ def test_recovery_transitions_are_unique_and_ordered_in_the_workflows() -> None:
             "Publish distributions",
         ),
     )
-    assert "if: needs.validation.outputs.publish_needed == 'true'" in pypi_job
+    assert _job_condition(pypi_job) == "needs.validation.outputs.publish_needed == 'true'"
 
 
 def test_workflow_wires_recovery_outputs_into_each_transition() -> None:

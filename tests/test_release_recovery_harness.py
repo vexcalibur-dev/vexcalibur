@@ -135,7 +135,19 @@ def test_fake_github_rejects_mutating_an_immutable_release(tmp_path: Path) -> No
     harness.update_state(release=harness.contract_release(published=True))
     harness.add_remote_asset(asset)
     transition = harness.runner_temp / "immutable-publication-transition.json"
-    transition.write_text("{}\n", encoding="utf-8")
+    transition.write_text(
+        json.dumps(
+            {
+                "tag_name": harness.release_tag,
+                "target_commitish": harness.release_sha,
+                "name": harness.release_tag,
+                "body": harness.notes,
+                "draft": False,
+                "prerelease": False,
+            }
+        ),
+        encoding="utf-8",
+    )
     repository = harness.state["repository"]
     release_id = harness.state["release"]["id"]
     commands = (
@@ -264,6 +276,36 @@ def test_harness_resolves_uv_from_a_pyenv_shim(
     monkeypatch.setattr(shutil, "which", find_command)
 
     assert ReleaseRecoveryHarness._resolve_command("uv") == str(target.resolve())
+
+
+def test_harness_uses_git_resolved_past_a_version_manager_shim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shim = tmp_path / ".mise" / "shims" / "git"
+    target = tmp_path / ".mise" / "installs" / "git" / "bin" / "git"
+    manager = tmp_path / "manager-bin" / "mise"
+    for path in (shim, target, manager):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        path.chmod(0o755)
+    manager.write_text(f"#!/bin/sh\nprintf '%s\\n' {shlex.quote(str(target))}\n", encoding="utf-8")
+    find_system_command = shutil.which
+
+    def find_command(command: str) -> str | None:
+        return {
+            "git": str(shim),
+            "asdf": None,
+            "mise": str(manager),
+            "pyenv": None,
+        }.get(command, find_system_command(command))
+
+    monkeypatch.setattr(shutil, "which", find_command)
+
+    harness = ReleaseRecoveryHarness(tmp_path)
+
+    assert harness.git == str(target.resolve())
+    assert (harness.fake_bin / "git").resolve() == target.resolve()
 
 
 def test_harness_resolves_the_python_interpreter_symlink(tmp_path: Path) -> None:

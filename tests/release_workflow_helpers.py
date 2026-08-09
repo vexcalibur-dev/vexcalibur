@@ -33,16 +33,34 @@ def _step(job: str, name: str) -> str:
     return matches[0].group(0)
 
 
-def _job_step_names(job: str) -> list[str]:
+def _job_mapping(job: str) -> MappingNode:
     root = yaml.compose(textwrap.dedent(job), Loader=yaml.BaseLoader)
     assert isinstance(root, MappingNode) and len(root.value) == 1, (
         "workflow job scope must contain exactly one job"
     )
     job_node = root.value[0][1]
     assert isinstance(job_node, MappingNode), "workflow job must be a mapping"
+    return job_node
+
+
+def _job_condition(job: str) -> str:
+    condition_nodes = [
+        value
+        for key, value in _job_mapping(job).value
+        if isinstance(key, ScalarNode) and key.value == "if"
+    ]
+    assert len(condition_nodes) == 1 and isinstance(condition_nodes[0], ScalarNode), (
+        "workflow job must contain exactly one scalar condition"
+    )
+    condition = condition_nodes[0].value
+    assert isinstance(condition, str), "workflow job condition must be text"
+    return condition
+
+
+def _job_step_names(job: str) -> list[str]:
     step_nodes = [
         value
-        for key, value in job_node.value
+        for key, value in _job_mapping(job).value
         if isinstance(key, ScalarNode) and key.value == "steps"
     ]
     assert len(step_nodes) == 1 and isinstance(step_nodes[0], SequenceNode), (

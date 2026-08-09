@@ -53,14 +53,18 @@ entire process group after 30 seconds. A fake client records rejected commands
 in shared state, so masking its exit code with `|| true` still fails the test.
 
 This harness tests trusted repository code. It is not a security sandbox for
-arbitrary shell input, and it doesn't require Linux namespace tools. The same
-behavioral tests therefore run on older Linux distributions without changing
-Vexcalibur's runtime requirements.
+arbitrary shell input, and it doesn't require Linux namespace tools. These
+test-only constraints don't change Vexcalibur's runtime requirements.
 
 The complete offline suite needs Linux, Bash, Git, `jq`, `uv`, and the standard
 GNU commands `awk`, `chmod`, `cmp`, `comm`, `find`, `grep`, `mkdir`, `mktemp`,
 `sed`, `sha256sum`, `sort`, `stat`, `tail`, and `wc`. These are developer and CI
-prerequisites. Installing and running Vexcalibur does not require them.
+prerequisites. Git must support
+`git init --initial-branch=main --object-format=sha1`. Installing and running
+Vexcalibur does not require these tools.
+
+On macOS or Windows, run the checks supported by that platform and use the
+required pull-request CI for the complete Linux suite.
 
 Run the complete offline test suite:
 

@@ -11,6 +11,11 @@ Install these prerequisites:
 - Python 3.10 or newer.
 - The `uv`, `actionlint`, and `shellcheck` versions in `.tool-versions`.
 
+The complete `make check` gate also needs the Linux host tools listed in
+[Reproduce important gates](docs/development/ci.md#reproduce-important-gates).
+On macOS or Windows, run the checks supported by your platform and use the
+required pull-request CI for the complete Linux gate.
+
 OpenVEX renderer changes also need Go 1.25.8. The version and the `go-vex` 0.2.8 dependency are recorded in `tests/integration/openvex-go/go.mod`. Other Python and documentation work does not require Go locally.
 
 CSAF renderer, golden, or conformance changes also need Node 24 and npm. The

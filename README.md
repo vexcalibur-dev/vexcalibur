@@ -156,7 +156,12 @@ The complete manual is at [vexcalibur-dev.github.io/vexcalibur][vexcalibur-docs]
 
 ## Contributing
 
-Run the local quality gate:
+The complete local gate runs on Linux and needs the host tools listed in
+[Reproduce important gates](https://vexcalibur-dev.github.io/vexcalibur/development/ci.html#reproduce-important-gates).
+On macOS or Windows, run the checks supported by your platform; required
+pull-request CI runs the complete Linux gate.
+
+Run the quality gate:
 
 ```bash
 make check
