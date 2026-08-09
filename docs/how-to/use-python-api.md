@@ -1,6 +1,6 @@
 # Generate VEX from Python
 
-Use `vexcalibur.api` when an application needs VEX generation without invoking the command-line interface. This example stays offline: it reads a CycloneDX SBOM and reviewed findings from the Vexcalibur test fixtures.
+Use `vexcalibur.api` when an application needs to generate VEX without invoking the command-line interface. This example stays offline: it reads a CycloneDX SBOM and reviewed findings from the Vexcalibur test fixtures.
 
 ## Prepare the checkout
 

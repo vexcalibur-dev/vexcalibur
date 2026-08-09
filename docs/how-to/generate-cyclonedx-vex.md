@@ -91,7 +91,7 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- github-repo-public-example:end -->
 
-Vexcalibur requests GitHub's asynchronous SPDX 2.3 JSON report. It waits until the report is ready. It downloads the report and extracts package URL references. The resulting components use the same finding and rendering path as a local SBOM.
+Vexcalibur requests GitHub's asynchronous SPDX 2.3 JSON report. It waits until the report is ready, then downloads it and extracts package URL references. The resulting components use the same finding and rendering path as a local SBOM.
 
 Fetching the SBOM and querying a vulnerability service are separate network decisions. `--github-repo` does not grant permission to send the inventory to public OSV.
 

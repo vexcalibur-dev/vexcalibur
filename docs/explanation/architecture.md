@@ -63,7 +63,7 @@ The two inventory paths meet at `ComponentIdentity`. The two finding paths meet 
 
 Generation returns an immutable `GenerationResult` before either output is
 written. It contains the rendered document plus the normalized components and
-findings used by the renderer. Its UTF-8 bytes are calculated once, when a
+findings used by the renderer. It computes its UTF-8 bytes once, when a
 caller first needs them. Built-in workflows also retain source categories and
 the selected format, so an execution report cannot relabel a completed
 operation. Custom sources and renderers can provide the same context explicitly

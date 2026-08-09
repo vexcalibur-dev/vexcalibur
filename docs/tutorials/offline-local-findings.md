@@ -27,7 +27,7 @@ Install the locked dependencies:
 uv sync
 ```
 
-Dependency installation may contact your configured package index. The later generation step uses only the local SBOM and findings file.
+Installing the dependencies may contact your configured package index. The later generation step uses only the local SBOM and findings file.
 
 We'll reuse `tests/fixtures/sbom/cyclonedx-json-simple.json`. Its Django component has the reference `component:django`.
 
