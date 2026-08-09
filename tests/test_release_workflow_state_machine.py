@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.release_recovery_harness import ReleaseRecoveryHarness
 from tests.release_workflow_helpers import (
     _job,
     _pypi_text,
-    _run_create_release_step,
     _step,
     _validation_text,
     _workflow_text,
@@ -25,6 +25,49 @@ RELEASE_EVIDENCE = ROOT / "scripts" / "release_evidence.py"
 PYPI_SELECTOR = ROOT / "scripts" / "select-pypi-release-files.py"
 PYPI_RELEASE_STATE_QUERY = ".draft == false and .prerelease == false and .immutable == true"
 ARTIFACT_EXPIRATION_QUERY = 'if .expired == false then "current" else "invalid" end'
+
+
+def _run_create_release_step(
+    tmp_path: Path,
+    *,
+    graphql_responses: list[object],
+    concurrent_create: bool = False,
+    rest_release_id: int = 123,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    first_release: object = None
+    if graphql_responses and isinstance(graphql_responses[0], dict):
+        data = graphql_responses[0].get("data")
+        if isinstance(data, dict):
+            repository = data.get("repository")
+            if isinstance(repository, dict):
+                first_release = repository.get("release")
+    existing = None
+    if isinstance(first_release, dict) and isinstance(first_release.get("databaseId"), int):
+        existing = harness.contract_release()
+        existing["id"] = rest_release_id
+        rest_lookup_id = first_release["databaseId"]
+    else:
+        rest_lookup_id = None
+    harness.update_state(
+        release=existing,
+        graphql_responses=graphql_responses,
+        graphql_scripted=True,
+        concurrent_create=concurrent_create,
+        rest_lookup_id=rest_lookup_id,
+    )
+    completed = harness.run_release_step(
+        "publish-release",
+        "Create GitHub Release",
+        expression_values={
+            "needs.validation.outputs.tag": harness.release_tag,
+            "needs.validation.outputs.sha": harness.release_sha,
+            "steps.app-token.outputs.app-slug": harness.app_slug,
+            "steps.app-token.outputs.token": harness.write_token,
+        },
+    )
+    calls = "\n".join(" ".join(call) for call in harness.state["calls"])
+    return completed, calls
 
 
 def test_release_publisher_rest_binds_the_downloaded_validation_artifact() -> None:
@@ -169,11 +212,22 @@ def test_release_resolver_accepts_a_concurrent_create_only_after_exact_resolutio
             {"data": {"repository": {"release": None}}},
             {"data": {"repository": {"release": {"databaseId": 123}}}},
         ],
-        create_exit=1,
+        concurrent_create=True,
     )
 
     assert completed.returncode == 0, completed.stderr
     assert "release create v1.2.3" in calls
+    assert calls.count("api graphql") == 2
+
+
+def test_release_resolver_rejects_an_exhausted_scripted_query(tmp_path: Path) -> None:
+    completed, calls = _run_create_release_step(
+        tmp_path,
+        graphql_responses=[{"data": {"repository": {"release": None}}}],
+    )
+
+    assert completed.returncode != 0
+    assert "Could not create or reconcile" in completed.stderr
     assert calls.count("api graphql") == 2
 
 

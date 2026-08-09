@@ -11,6 +11,12 @@ Install these prerequisites:
 - Python 3.10 or newer.
 - The `uv`, `actionlint`, and `shellcheck` versions in `.tool-versions`.
 
+The complete `make check` gate also needs the Linux host tools listed in
+[Reproduce important gates](docs/development/ci.md#reproduce-important-gates).
+On macOS or Windows, follow the portable procedure in that section. Required
+pull-request CI is the authoritative result for the Linux-only recovery,
+workflow-shell, and fuzz gates.
+
 OpenVEX renderer changes also need Go 1.25.8. The version and the `go-vex` 0.2.8 dependency are recorded in `tests/integration/openvex-go/go.mod`. Other Python and documentation work does not require Go locally.
 
 CSAF renderer, golden, or conformance changes also need Node 24 and npm. The
@@ -25,7 +31,7 @@ Activate the pinned tools with `mise`, `asdf`, or an equivalent version manager.
 uv sync
 ```
 
-Run the local quality gate before opening a pull request:
+On Linux, run the local quality gate before opening a pull request:
 
 ```bash
 make check
@@ -39,7 +45,8 @@ governance](docs/development/github-governance.md):
 make governance-check
 ```
 
-CI also checks formatting and enforces 75 percent branch coverage. Run those two policies explicitly:
+CI also checks formatting and enforces 75 percent branch coverage. On Linux,
+run those two policies explicitly:
 
 ```bash
 uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py

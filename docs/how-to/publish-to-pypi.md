@@ -89,7 +89,10 @@ git status --short
 test -z "$(git status --porcelain)"
 ```
 
-Run the repository gates:
+Run the repository gates on Linux with the host tools listed in {ref}`Reproduce
+important gates <reproduce-important-gates>`. If you prepare the release from
+macOS or Windows, confirm that required CI passed for the exact release commit;
+don't treat skipped Linux checks as completed.
 
 ```bash
 uv lock --check
