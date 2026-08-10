@@ -57,13 +57,13 @@ The command should exit without output and create `/tmp/vexcalibur-vex.json`.
 Print the first part of the document:
 
 ```bash
-python3 -m json.tool /tmp/vexcalibur-vex.json | sed -n '1,80p'
+uv run --frozen python -m json.tool /tmp/vexcalibur-vex.json | sed -n '1,80p'
 ```
 
 Now check the fields this tutorial expects:
 
 ```bash
-python3 - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 

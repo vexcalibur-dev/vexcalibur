@@ -75,7 +75,7 @@ The command should exit without output and create `/tmp/vexcalibur-local-vex.jso
 Read the generated vulnerability entry:
 
 ```bash
-python3 - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 

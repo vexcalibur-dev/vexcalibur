@@ -104,7 +104,7 @@ uv run --frozen vexcalibur generate \
 Check the result:
 
 ```bash
-python3 - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 
