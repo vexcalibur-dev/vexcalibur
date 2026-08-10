@@ -215,7 +215,7 @@ uv run --frozen vexcalibur generate \
 Parse the file and check its format discriminators:
 
 ```bash
-python - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 

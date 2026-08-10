@@ -131,7 +131,7 @@ uv run --frozen python scripts/release_evidence.py verify-bundle \
 Inspect `manifest.json`. For the empty production snapshot, require:
 
 ```bash
-python - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 
