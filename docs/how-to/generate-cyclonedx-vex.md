@@ -2,7 +2,7 @@
 
 Use `vexcalibur generate` to write CycloneDX 1.6 VEX JSON from a local CycloneDX SBOM or a GitHub Dependency Graph SBOM.
 
-The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync`. When using an installed release, run `vexcalibur` directly and substitute your own file paths.
+The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync --frozen`. When using an installed release, run `vexcalibur` directly and substitute your own file paths.
 
 Choose one inventory input and one finding source:
 

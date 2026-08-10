@@ -5,8 +5,8 @@ Vexcalibur has published releases and supports the workflows in this manual. It 
 Pin exact package and action versions in automation. Do not use a mutable branch for a production workflow.
 
 This manual follows the default branch, so it can describe a capability before
-that capability reaches a package release. Execution reports are one such
-capability: no release through v0.4.4 includes them. Check the documentation for
+that capability reaches a package release. Execution reports were one such
+capability: they reached release in v0.6.0. Check the documentation for
 your release and its `vexcalibur generate --help` output before you update
 automation.
 

@@ -304,7 +304,7 @@ The option is additive on supported systems. Calls that omit
 `--execution-report` retain the existing text-mode output and Python API
 behavior.
 
-No Vexcalibur release through v0.4.4 includes `--execution-report`. Before you
+`--execution-report` is available in Vexcalibur v0.6.0 and later. Before you
 depend on the option, verify the installed command:
 
 ```bash

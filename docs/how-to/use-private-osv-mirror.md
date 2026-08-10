@@ -2,7 +2,7 @@
 
 Use an internal OSV-compatible endpoint when package names, versions, or dependency inventory must not go to public OSV.
 
-The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync`. When using an installed release, run `vexcalibur` directly.
+The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync --frozen`. When using an installed release, run `vexcalibur` directly.
 
 You need an endpoint that implements OSV `/v1/querybatch` and a runner that can reach it.
 

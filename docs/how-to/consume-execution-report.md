@@ -9,10 +9,10 @@ This guide requires Linux or macOS, Bash, Git, and `uv`. It uses the
 repository's locked development environment because that environment includes
 a JSON Schema Draft 2020-12 validator.
 
-No Vexcalibur release through v0.4.4 includes execution reports. Use an
-immutable release or a reviewed pull-request commit, then confirm that
-`vexcalibur generate --help` lists `--execution-report` before you update
-automation.
+Execution reports are available in Vexcalibur v0.6.0 and later. Use an
+immutable release (`v0.6.0` or newer) or a reviewed pull-request commit, then
+confirm that `vexcalibur generate --help` lists `--execution-report` before you
+update automation.
 
 For a release, set `RELEASE_TAG` to the exact version you reviewed. This
 sequence fetches only that tag from the official repository, requires an

@@ -7,7 +7,7 @@
 [![OpenSSF Scorecard](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
 [![Dependency Review](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
 
-Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
+Vexcalibur turns software bills of materials and vulnerability findings into VEX documents, for the security and release engineers who publish VEX statements alongside an SBOM. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
 Current releases write CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
 output uses the `csaf_vex` profile. This branch also writes SPDX 3.0.1
@@ -104,7 +104,7 @@ uv run --frozen vexcalibur generate \
 Check the result:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import json
 from pathlib import Path
 

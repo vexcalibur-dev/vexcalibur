@@ -7,7 +7,7 @@ The quickstart used a ready-made findings file. In this tutorial, we'll write on
 You need:
 
 - Git.
-- Python 3.10 or newer.
+- Python 3.10 or newer. `uv sync` provisions the interpreter pinned in `.python-version` (currently 3.14) and downloads it if your system lacks it.
 - `uv`.
 - A POSIX-style shell.
 
@@ -75,7 +75,7 @@ The command should exit without output and create `/tmp/vexcalibur-local-vex.jso
 Read the generated vulnerability entry:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import json
 from pathlib import Path
 
