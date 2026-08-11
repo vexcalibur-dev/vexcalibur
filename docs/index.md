@@ -3,7 +3,7 @@
 Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
 documents. It reads CycloneDX files or a GitHub Dependency Graph SBOM,
 collects findings from OSV-compatible services or local JSON, and writes
-CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
+CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX 3.0.1 JSON.
 
 Public OSV access fails closed. Vexcalibur sends package URLs and versions to `https://api.osv.dev` only when a command includes `--allow-public-osv`.
 

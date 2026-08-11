@@ -100,12 +100,16 @@ automation against one:
 vexcalibur generate --help
 ```
 
-The `--format` choices list what this release can write. Two gaps are worth
-knowing about before you plan around them:
+The `--format` choices list what this release can write. Formats and options
+arrived in these releases:
 
-- SPDX 3 output isn't in any release through `v0.6.3`. To use it now, install
-  from source instead.
-- `--execution-report` needs `v0.6.0` or later.
+| Feature | First release |
+| --- | --- |
+| CycloneDX 1.6 output | `v0.1.0` |
+| OpenVEX 0.2.0 output | `v0.2.0` |
+| CSAF 2.0 output | `v0.3.0` |
+| `--execution-report` | `v0.6.0` |
+| SPDX 3.0.1 output | `v0.7.0` |
 
 If the format you need is missing, install a newer release rather than working
 around it.
