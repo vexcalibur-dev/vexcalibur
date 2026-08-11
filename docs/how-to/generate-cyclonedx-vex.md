@@ -2,7 +2,7 @@
 
 Use `vexcalibur generate` to write CycloneDX 1.6 VEX JSON from a local CycloneDX SBOM or a GitHub Dependency Graph SBOM.
 
-The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync --frozen`. When using an installed release, run `vexcalibur` directly and substitute your own file paths.
+These examples call an installed `vexcalibur`. If you don't have one yet, follow [Install Vexcalibur](install.md) first. Substitute your own SBOM and findings paths throughout.
 
 Choose one inventory input and one finding source:
 
@@ -22,10 +22,10 @@ Choose one inventory input and one finding source:
 Pass a findings file when vulnerability or exploitability analysis already exists locally:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  path/to/sbom.json \
+vexcalibur generate \
+  sbom.json \
   --offline \
-  --findings-file path/to/findings.json \
+  --findings-file findings.json \
   --output /tmp/vexcalibur-vex.json
 ```
 
@@ -38,8 +38,8 @@ When the inventory comes from `--github-repo`, omit `--offline` because fetching
 Point `--osv-url` at the mirror's base URL:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  path/to/private-sbom.json \
+vexcalibur generate \
+  private-sbom.json \
   --osv-url https://osv.internal.example \
   --output /tmp/vexcalibur-vex.json
 ```
@@ -60,8 +60,8 @@ The next command sends SBOM package URLs and versions to `https://api.osv.dev`. 
 Pass the explicit consent flag:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
+vexcalibur generate \
+  sbom.json \
   --allow-public-osv \
   --output /tmp/vexcalibur-vex.json
 ```
@@ -69,8 +69,8 @@ uv run --frozen vexcalibur generate \
 Live OSV results change. Add a timestamp when the document metadata must stay stable:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
+vexcalibur generate \
+  sbom.json \
   --allow-public-osv \
   --timestamp 2026-06-23T00:00:00Z \
   --output /tmp/vexcalibur-vex.json
@@ -84,7 +84,7 @@ Pass `--github-repo` instead of a local input path:
 
 <!-- github-repo-public-example:start -->
 ```bash
-uv run --frozen vexcalibur generate \
+vexcalibur generate \
   --github-repo vexcalibur-dev/vexcalibur \
   --allow-public-osv \
   --output /tmp/vexcalibur-vex.json
@@ -107,7 +107,7 @@ For GitHub Enterprise, pass both the API base URL and an explicit token variable
 
 <!-- github-repo-enterprise-example:start -->
 ```bash
-uv run --frozen vexcalibur generate \
+vexcalibur generate \
   --github-repo internal/example \
   --github-api-url https://github.example.test/api/v3 \
   --github-token-env GH_ENTERPRISE_TOKEN \
@@ -192,10 +192,10 @@ version and Action commit tested together:
 Pass a CycloneDX XML file in the same position as JSON:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml \
+vexcalibur generate \
+  sbom.xml \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
+  --findings-file findings.json \
   --output /tmp/vexcalibur-vex.json
 ```
 
@@ -204,10 +204,10 @@ uv run --frozen vexcalibur generate \
 Omit `--output`:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
+vexcalibur generate \
+  sbom.json \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json
+  --findings-file findings.json
 ```
 
 ## Check basic output fields
@@ -215,7 +215,7 @@ uv run --frozen vexcalibur generate \
 Parse the file and check its format discriminators:
 
 ```bash
-uv run --frozen python - <<'PY'
+python - <<'PY'
 import json
 from pathlib import Path
 

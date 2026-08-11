@@ -31,6 +31,7 @@ the plan for App-backed production automation.
 
 ## How-to guides
 
+- [Install Vexcalibur](how-to/install.md)
 - [Generate VEX from Python](how-to/use-python-api.md)
 - [Generate an execution report from Python](how-to/generate-execution-report-from-python.md)
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
@@ -76,6 +77,7 @@ the plan for App-backed production automation.
 
 tutorials/quickstart
 tutorials/offline-local-findings
+how-to/install
 how-to/use-python-api
 how-to/generate-execution-report-from-python
 how-to/generate-cyclonedx-vex

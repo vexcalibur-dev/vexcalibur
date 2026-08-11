@@ -12,12 +12,17 @@ pass that name with `--creator`.
 
 Before you begin:
 
+- Install from source. No release through `v0.6.3` includes SPDX 3 output, so
+  an installed release can't run this guide yet. See the "Install from source
+  instead" section of [Install Vexcalibur](install.md).
 - Install Git, Python 3.10 or newer, and the `uv` version in `.tool-versions`.
-- Clone this repository and check out the exact release you intend to use.
-  No release through `v0.6.3` includes SPDX 3 output, so choose a newer
-  release and use the guide from that checkout.
+- Check out the exact commit you intend to use, and use the guide from that
+  checkout because the hosted documentation tracks current development.
 - Open a Bash-compatible shell in the repository root.
 - Confirm that `/tmp` is writable, or replace the example output path.
+
+Once a release ships SPDX 3, install it as usual and drop the
+`uv run --frozen` prefix from every command below.
 
 The offline example needs no service credentials. Dependency installation may
 contact your configured Python package index.

@@ -15,19 +15,19 @@ Request the report with `--execution-report PATH`:
 work_dir="$(mktemp -d)"
 trap 'rm -rf -- "$work_dir"' EXIT
 
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
+vexcalibur generate \
+  sbom.json \
+  --findings-file findings.json \
   --offline \
   --output "$work_dir/vex.json" \
   --execution-report "$work_dir/execution-report.json"
 ```
 
-Run this source-checkout example from the repository root after
-`uv sync --frozen`. It creates a private temporary directory and removes that
-directory when the shell exits. The
-[consumption guide](../how-to/consume-execution-report.md) includes the complete
-setup and validation sequence.
+This example creates a private temporary directory and removes it when the
+shell exits. `--execution-report` needs `v0.6.0` or later. For the complete
+setup and validation sequence, including the schema validator that ships in a
+source checkout, see the
+[consumption guide](../how-to/consume-execution-report.md).
 
 Success writes both files and exits with status `0`. The report describes the
 exact UTF-8 bytes in `vex.json`.

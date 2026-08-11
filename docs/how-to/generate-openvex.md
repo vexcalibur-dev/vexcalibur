@@ -8,40 +8,33 @@ OpenVEX requires a document author and at least one statement. Some statuses als
 
 Before you begin:
 
-- Install Git, Python 3.10 or newer, and the `uv` version in `.tool-versions`.
-- Clone this repository at release `v0.2.0` or newer and check out the exact
-  release you intend to use. Use the guide from that checkout because the
-  hosted documentation tracks current development.
-- Open a Bash-compatible shell in the repository root.
+- Install Vexcalibur `v0.2.0` or newer. See [Install Vexcalibur](install.md).
+- Have a CycloneDX SBOM and a reviewed findings file ready. The example calls
+  them `sbom.json` and `findings.json`.
+- Open a Bash-compatible shell.
 - Confirm that `/tmp` is writable, or replace the example output path.
 
-The offline example needs no service credentials. Dependency installation may contact your configured Python package index.
+This example needs no service credentials and contacts no network service.
 
 ## Generate from local inputs
 
-Install the locked dependencies from the repository root:
+Confirm that your release supports OpenVEX:
 
 ```bash
-uv sync --frozen
+vexcalibur generate --help
 ```
 
-Confirm that the checked-out release supports OpenVEX:
+The `--format` choices must include `openvex`. If they don't, install a newer
+release.
 
-```bash
-uv run --frozen vexcalibur generate --help
-```
-
-The `--format` choices must include `openvex`. If they don't, use a newer
-release and its matching documentation.
-
-The example below reads committed fixtures. It does not contact GitHub or an OSV service.
+The command below reads only local files. It does not contact GitHub or an OSV service.
 
 <!-- openvex-local-example:start -->
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
+vexcalibur generate \
+  sbom.json \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
+  --findings-file findings.json \
   --format openvex \
   --author "Example Security Team" \
   --author-role "VEX document producer" \
@@ -50,33 +43,37 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- openvex-local-example:end -->
 
-The command should exit with status `0` and print nothing. It writes five statements to `/tmp/vexcalibur-openvex.json`.
+The command should exit with status `0` and print nothing. It writes one
+statement per matched finding to `/tmp/vexcalibur-openvex.json`.
 
-## Validate the result
+## Check the result
 
-Validate the output against the pinned official schema used by the test suite:
+Confirm the context, the author claim, and that the document carries
+statements:
 
 ```bash
-uv run --frozen python - <<'PY'
+python - <<'PY'
 import json
 from pathlib import Path
 
-from jsonschema import Draft202012Validator, FormatChecker
-
 document = json.loads(Path("/tmp/vexcalibur-openvex.json").read_text())
-schema = json.loads(
-    Path("tests/fixtures/schemas/openvex-0.2.0.schema.json").read_text()
-)
-Draft202012Validator(schema, format_checker=FormatChecker()).validate(document)
 
 assert document["@context"] == "https://openvex.dev/ns/v0.2.0"
 assert document["author"] == "Example Security Team"
-assert len(document["statements"]) == 5
-print("validated OpenVEX 0.2.0")
+statements = document["statements"]
+assert statements
+print(f"OpenVEX 0.2.0 document with {len(statements)} statements")
 PY
 ```
 
-You should see `validated OpenVEX 0.2.0`.
+This is a field check, not validation against the full OpenVEX schema. The
+repository test suite validates generated documents against the pinned
+official 0.2.0 schema on every change; see the [OpenVEX output
+reference](../reference/openvex-output.md) for the exact pin.
+
+To run that schema validation yourself, install from source and use the
+committed schema at `tests/fixtures/schemas/openvex-0.2.0.schema.json` with the
+checkout's `jsonschema` dependency.
 
 ## Supply affected actions
 

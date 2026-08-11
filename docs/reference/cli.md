@@ -329,7 +329,7 @@ The current Vexcalibur source options are also accepted: `--findings-file`,
 
 <!-- vexy-compat-offline-example:start -->
 ```bash
-uv run --frozen vexy \
+vexy \
   -c tests/fixtures/vexy/legacy-config.yml \
   -i tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml \
   --format json \

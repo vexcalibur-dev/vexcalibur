@@ -80,9 +80,14 @@ if ($INSTALLED_VERSION -ne $VEXCALIBUR_VERSION) {
 & $VEXCALIBUR --help
 ```
 
-## Try local generation
+Once it's installed, [generate your first document](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html)
+against your own SBOM. The [install guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/install.html)
+covers PATH setup and how to check which formats your release supports.
 
-Clone the repository, then install its locked dependencies:
+## Try local generation from a checkout
+
+Use this path to work on Vexcalibur itself, or to run unreleased output
+formats. Clone the repository, then install its locked dependencies:
 
 ```bash
 uv sync --frozen
