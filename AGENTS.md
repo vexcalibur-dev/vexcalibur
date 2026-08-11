@@ -40,7 +40,7 @@ lockfile live in `tests/integration/csaf-validator/`.
 Install dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 Run the local gate:
@@ -66,7 +66,7 @@ make test-live
 If the home cache is read-only, use one cache path for setup and later commands:
 
 ```bash
-UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv sync
+UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv sync --frozen
 UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv run --frozen pytest -m "not live"
 ```
 
@@ -135,7 +135,7 @@ Keep the README a concise front door. Put guided learning in tutorials, task rec
 Do not promise planned behavior. Verify commands against the current CLI and build Sphinx with warnings treated as errors:
 
 ```bash
-uv sync --extra docs
+uv sync --frozen --extra docs
 make docs
 ```
 

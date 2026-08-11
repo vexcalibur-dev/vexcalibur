@@ -85,7 +85,7 @@ if ($INSTALLED_VERSION -ne $VEXCALIBUR_VERSION) {
 Clone the repository, then install its locked dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 Installing the dependencies may reach the configured package index. The generate command below uses only local inputs, so it never reaches a vulnerability service.
@@ -172,7 +172,7 @@ make check
 Documentation changes must also build without warnings:
 
 ```bash
-uv sync --extra docs
+uv sync --frozen --extra docs
 make docs
 ```
 

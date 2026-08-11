@@ -7,7 +7,7 @@ The quickstart used a ready-made findings file. In this tutorial, we'll write on
 You need:
 
 - Git.
-- Python 3.10 or newer. `uv sync` provisions the interpreter pinned in `.python-version` (currently 3.14) and downloads it if your system lacks it.
+- Python 3.10 or newer. `uv sync --frozen` provisions the interpreter pinned in `.python-version` (currently 3.14) and downloads it if your system lacks it.
 - `uv`.
 - A POSIX-style shell.
 
@@ -24,7 +24,7 @@ version with your version manager before you continue.
 Install the locked dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 Installing the dependencies may contact your configured package index. The later generation step uses only the local SBOM and findings file.

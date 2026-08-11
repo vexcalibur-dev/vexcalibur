@@ -7,7 +7,7 @@ In this tutorial, we'll turn two committed example files into CycloneDX 1.6 VEX 
 You need:
 
 - Git.
-- Python 3.10 or newer. `uv sync` provisions the interpreter pinned in `.python-version` (currently 3.14) and downloads it if your system lacks it.
+- Python 3.10 or newer. `uv sync --frozen` provisions the interpreter pinned in `.python-version` (currently 3.14) and downloads it if your system lacks it.
 - `uv`.
 - A POSIX-style shell.
 
@@ -24,7 +24,7 @@ version with your version manager before you continue.
 Install the locked dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 This setup step may contact your configured package index. Once the dependencies are installed, the rest of the tutorial does not need a network finding source.
