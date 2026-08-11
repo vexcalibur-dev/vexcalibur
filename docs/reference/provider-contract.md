@@ -213,10 +213,7 @@ First-party providers put these tests in the Vexcalibur suite. External
 providers run the equivalent contract and integration tests in their owning
 package.
 
-Run offline tests before opening a pull request:
-
-```bash
-uv run --frozen python -m pytest -m "not live"
-```
+Contributors changing a first-party provider should also run the repository
+gates in [Reproduce important gates](../contributing/ci.md).
 
 Run live tests only with data approved for the provider's public endpoint.

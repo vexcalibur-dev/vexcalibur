@@ -13,7 +13,7 @@ When they differ, follow the local policy. Vexcalibur does not adopt the upstrea
 | Pytest | Test runner; external-service tests use the `live` marker |
 | `pyproject.toml` | Machine-readable source of truth |
 
-Run the local gate:
+Run the quick local quality gate while you work:
 
 ```bash
 make check
@@ -22,11 +22,12 @@ make check
 Before a pull request that changes packaging or documentation, also check the lock file, build the manual, and build the distributions:
 
 ```bash
+git fetch origin main
 uv lock --check
 uv sync --frozen --extra docs
 uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py
 make check
-uv run --frozen pytest -m "not live" --cov-fail-under=75
+make coverage COVERAGE_COMPARE_REF=origin/main
 make docs
 uv build --clear --no-create-gitignore --no-sources
 make secrets-pr

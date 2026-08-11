@@ -72,11 +72,6 @@ A custom renderer is trusted application code. Vexcalibur does not restrict its 
 
 Test a renderer with empty findings, every supported analysis state, invalid component references, required evidence fields, Unicode text, and output at the size boundary. Parse the result with an independent implementation or the format's official schema when one exists.
 
-Run the Vexcalibur offline suite and documentation build after changing a first-party renderer:
-
-```bash
-uv run --frozen pytest -m "not live and not fuzz"
-uv run --frozen --extra docs sphinx-build -W --keep-going -b html docs docs/_build/html
-```
-
-Both commands exit with status `0` when the implementation and reference build pass.
+Contributors changing a first-party renderer should also run the repository
+gates in [Reproduce important gates](../contributing/ci.md) and build the
+documentation with `make docs`.

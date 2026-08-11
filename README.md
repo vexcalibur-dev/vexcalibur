@@ -182,10 +182,13 @@ The complete local gate runs on Linux and needs the host tools listed in
 That guide includes exact portable commands for macOS and Windows. Required
 pull-request CI runs the Linux-only checks.
 
-On Linux, run the quality gate:
+On Linux, refresh the base branch and run the quality and coverage gates from
+the repository root:
 
 ```bash
+git fetch origin main
 make check
+make coverage COVERAGE_COMPARE_REF=origin/main
 ```
 
 Documentation changes must also build without warnings:

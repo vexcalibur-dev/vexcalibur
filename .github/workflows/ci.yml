@@ -167,6 +167,15 @@ jobs:
       - name: Run offline tests
         run: uv run --frozen pytest -m "not live and not fuzz" --cov-fail-under=75
 
+      - name: Enforce coverage policy
+        if: matrix.python-version == env.MAX_PYTHON
+        env:
+          COVERAGE_COMPARE_REF: >-
+            ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          COVERAGE_TARGET_REF: >-
+            ${{ github.event_name == 'pull_request' && github.sha || '' }}
+        run: make coverage-policy
+
       - name: Upload coverage XML
         if: matrix.python-version == env.MAX_PYTHON
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

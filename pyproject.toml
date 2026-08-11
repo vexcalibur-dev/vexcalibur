@@ -175,7 +175,17 @@ packages = ["vexcalibur"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=vexcalibur --cov-branch --cov-report=term-missing --cov-report=xml"
+addopts = """
+--cov=vexcalibur
+--cov=scripts.archive_limits
+--cov=scripts.check_coverage_policy
+--cov=scripts.execution_report_oracle
+--cov=scripts.release_evidence
+--cov-branch
+--cov-report=term-missing
+--cov-report=xml
+--cov-report=json:coverage.json
+"""
 markers = [
   "fuzz: deterministic property tests for untrusted input boundaries",
   "live: tests that call live external services",
@@ -190,7 +200,7 @@ omit = ["src/vexcalibur/_version.py"]
 show_missing = true
 precision = 2
 exclude_lines = [
-  "pragma: no cover",
+  "# coverage: platform-only",
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]

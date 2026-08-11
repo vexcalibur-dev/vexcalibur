@@ -50,10 +50,10 @@ make check
 ```
 
 Useful focused targets are `make lint`, `make workflow-lint`, `make typecheck`,
-`make test`, `make docs`, `make audit`, `make secrets`, `make secrets-pr`,
-`make build`, `make openvex-interop`, `make csaf-validator-install`,
-`make csaf-interop`, `make installed-cli-check`, `make installed-csaf-check`,
-`make governance-check`, and `make pre-commit`.
+`make test`, `make coverage`, `make docs`, `make audit`, `make secrets`,
+`make secrets-pr`, `make build`, `make openvex-interop`,
+`make csaf-validator-install`, `make csaf-interop`, `make installed-cli-check`,
+`make installed-csaf-check`, `make governance-check`, and `make pre-commit`.
 
 `make workflow-lint` needs `actionlint` and `shellcheck` on `PATH`.
 
@@ -201,7 +201,8 @@ make openvex-interop
 make csaf-validator-install
 make csaf-interop
 make installed-csaf-check
-uv run --frozen pytest -m "not live" --cov-fail-under=75
+make coverage COVERAGE_COMPARE_REF=origin/main
+make fuzz-smoke
 make docs
 uv build --clear --no-create-gitignore --no-sources
 uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache

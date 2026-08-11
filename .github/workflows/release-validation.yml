@@ -247,6 +247,12 @@ jobs:
       - name: Run offline tests
         run: uv run --frozen pytest -m "not live" --cov-fail-under=75
 
+      - name: Enforce critical-file coverage
+        if: matrix.python-version == '3.14'
+        env:
+          COVERAGE_COMPARE_REF: ""
+        run: make coverage-policy
+
   execution-report-windows:
     name: Release execution report Windows contract (Python ${{ matrix.python-version }})
     runs-on: windows-latest

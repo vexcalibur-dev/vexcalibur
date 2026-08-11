@@ -12,5 +12,6 @@ dist/
 build/
 .coverage
 coverage.xml
+coverage.json
 docs/_build/
 node_modules/
