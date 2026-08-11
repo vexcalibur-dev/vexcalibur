@@ -43,8 +43,13 @@ vexcalibur generate \
 ```
 <!-- openvex-local-example:end -->
 
-The command should exit with status `0` and print nothing. It writes one
-statement per matched finding to `/tmp/vexcalibur-openvex.json`.
+The command should exit with status `0` and print nothing. It writes grouped
+statements to `/tmp/vexcalibur-openvex.json`.
+
+Findings that agree on the vulnerability, source, state, and evidence become a
+single statement listing every affected product, so the statement count can be
+lower than the finding count. The [OpenVEX output
+reference](../reference/openvex-output.md) lists the exact grouping values.
 
 ## Check the result
 

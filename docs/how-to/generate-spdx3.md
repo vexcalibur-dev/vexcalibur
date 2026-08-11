@@ -48,8 +48,13 @@ vexcalibur generate \
 ```
 <!-- spdx3-local-example:end -->
 
-The command should exit with status `0` and print nothing. It writes one
-assessment relationship per matched finding to `/tmp/vex.spdx3.json`.
+The command should exit with status `0` and print nothing. It writes grouped
+assessment relationships to `/tmp/vex.spdx3.json`.
+
+Findings that agree on the vulnerability, source, state, and evidence become a
+single relationship whose `to` lists every affected product, so the
+relationship count can be lower than the finding count. The [SPDX 3 output
+reference](../reference/spdx3-output.md) lists the exact grouping values.
 
 ## Check the result
 

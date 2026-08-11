@@ -66,8 +66,14 @@ if ($INSTALLED_VERSION -ne $VEXCALIBUR_VERSION) {
 The final command prints the `query-osv` and `generate` help. That's the
 success signal.
 
-The install needs Python 3.10 or newer and reaches your configured package
-index. Nothing else in the how-to guides contacts a package index.
+The install needs Python 3.10 through 3.14, the range the project tests, and
+it reaches your configured package index. Package metadata alone permits any
+3.x, so `pip` won't stop you on a newer interpreter; nothing verifies that
+combination.
+
+Once installed, the generation examples in the how-to guides read and write
+local files only. The source path below and the guides built on it are
+different — they run `uv sync --frozen`, which does reach your index.
 
 ## Put the command on your PATH
 
@@ -75,18 +81,24 @@ The guides write `vexcalibur` with no path prefix. Either activate the
 environment for your shell session:
 
 ```bash
-source .venv-vexcalibur-0.6.3/bin/activate
+source .venv-vexcalibur-0.7.0/bin/activate
 ```
 
 Or call the binary by its full path, which keeps the pinned version explicit:
 
 ```bash
-.venv-vexcalibur-0.6.3/bin/vexcalibur --help
+.venv-vexcalibur-0.7.0/bin/vexcalibur --help
 ```
 
-Substitute the version you installed for `0.6.3` in both commands. The install
-script above prompts for that version rather than exporting it, so it won't be
-set in your shell.
+In PowerShell, the virtual environment puts both under `Scripts` instead:
+
+```powershell
+.venv-vexcalibur-0.7.0\Scripts\Activate.ps1
+.venv-vexcalibur-0.7.0\Scripts\vexcalibur.exe --help
+```
+
+Substitute the version you installed for `0.7.0`. The install script prompts
+for that version rather than exporting it, so it won't be set in your shell.
 
 Activating changes only the current shell. A CI job that starts a fresh shell
 per step should use the full path.

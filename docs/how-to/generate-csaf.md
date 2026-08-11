@@ -53,8 +53,8 @@ vexcalibur generate \
 <!-- csaf-local-example:end -->
 
 The command should exit with status `0` and print nothing. It writes one
-vulnerability entry per matched finding, covering the versioned products those
-findings touch.
+vulnerability entry per vulnerability ID, each covering the versioned products
+that ID affects. Several findings for the same ID group into that one entry.
 
 The output basename is not arbitrary. Vexcalibur derives it from the tracking
 ID according to the CSAF filename rule. `ACME-VEX-2026-001` therefore requires
