@@ -330,13 +330,13 @@ The current Vexcalibur source options are also accepted: `--findings-file`,
 <!-- vexy-compat-offline-example:start -->
 ```bash
 vexy \
-  -c tests/fixtures/vexy/legacy-config.yml \
-  -i tests/fixtures/sbom/cyclonedx-xml-1.5-simple.xml \
+  -c legacy-config.yml \
+  -i sbom.xml \
   --format json \
   --schema-version 1.6 \
   --output - \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
+  --findings-file findings.json \
   --timestamp 2026-06-23T00:00:00Z
 ```
 <!-- vexy-compat-offline-example:end -->

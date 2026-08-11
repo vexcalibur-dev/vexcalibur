@@ -30,6 +30,15 @@ FINDINGS_ROOT = Path(__file__).parent / "fixtures" / "findings"
 GOLDEN_ROOT = Path(__file__).parent / "golden"
 DOCS_ROOT = Path(__file__).parent.parent / "docs"
 
+# The how-to guides address readers who installed a release, so their examples
+# name input files the reader supplies. Map those names onto the fixtures that
+# make the documented assertions hold.
+DOCUMENTED_INPUT_PATHS = {
+    "sbom.json": str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+    "sbom.xml": str(FIXTURE_ROOT / "cyclonedx-xml-1.5-simple.xml"),
+    "findings.json": str(FINDINGS_ROOT / "all-analysis-states.json"),
+}
+
 
 def test_generate_source_options_preserves_four_argument_construction() -> None:
     options = GenerateSourceOptions(None, False, None, False)
@@ -2137,9 +2146,8 @@ def _csaf_metadata_args(
 def _documented_generate_args(path: Path, marker: str) -> list[str]:
     command = _extract_marked_bash_command(path, marker)
     args = shlex.split(command)
-    assert args[:4] == ["uv", "run", "--frozen", "vexcalibur"]
-    assert args[4] == "generate"
-    return args[4:]
+    assert args[:2] == ["vexcalibur", "generate"]
+    return [DOCUMENTED_INPUT_PATHS.get(arg, arg) for arg in args[1:]]
 
 
 def _extract_marked_bash_command(path: Path, marker: str) -> str:
