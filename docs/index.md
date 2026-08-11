@@ -36,6 +36,7 @@ the App-backed production automation plan.
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
 - [Generate OpenVEX](how-to/generate-openvex.md)
 - [Generate CSAF VEX](how-to/generate-csaf.md)
+- [Generate SPDX 3 VEX](how-to/generate-spdx3.md)
 - [Use a private OSV mirror](how-to/use-private-osv-mirror.md)
 - [Consume a generation execution report](how-to/consume-execution-report.md)
 - [Build and review local release evidence](how-to/build-release-evidence.md)
@@ -48,6 +49,7 @@ the App-backed production automation plan.
 - [CycloneDX VEX output](reference/cyclonedx-vex-output.md)
 - [OpenVEX output](reference/openvex-output.md)
 - [CSAF output](reference/csaf-output.md)
+- [SPDX 3 output](reference/spdx3-output.md)
 - [Local findings format](reference/local-findings.md)
 - [Release-evidence contracts](reference/release-evidence.md)
 - [Vulnerability-source provider contract](reference/provider-contract.md)
@@ -79,6 +81,7 @@ how-to/generate-execution-report-from-python
 how-to/generate-cyclonedx-vex
 how-to/generate-openvex
 how-to/generate-csaf
+how-to/generate-spdx3
 how-to/use-private-osv-mirror
 how-to/consume-execution-report
 how-to/build-release-evidence
@@ -88,6 +91,7 @@ reference/execution-report
 reference/cyclonedx-vex-output
 reference/openvex-output
 reference/csaf-output
+reference/spdx3-output
 reference/provider-contract
 reference/renderer-contract
 reference/python-api

@@ -43,6 +43,8 @@ EXPECTED_PUBLIC_EXPORTS = (
     "OsvConfigurationError",
     "OsvResponseError",
     "SbomError",
+    "Spdx3JsonRenderer",
+    "Spdx3RenderError",
     "VexAnalysisState",
     "VexRemediationCategory",
     "VexRenderError",
@@ -116,6 +118,7 @@ def test_public_api_pins_enum_names_and_values() -> None:
         "CYCLONEDX": "cyclonedx",
         "OPENVEX": "openvex",
         "CSAF": "csaf",
+        "SPDX3": "spdx3",
         "CUSTOM": "custom",
     }
 

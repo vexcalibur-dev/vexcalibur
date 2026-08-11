@@ -39,6 +39,7 @@ from vexcalibur.sources.osv import (
     OsvQueryResult,
     OsvSource,
 )
+from vexcalibur.spdx3 import Spdx3JsonRenderer
 from vexcalibur.vex import CycloneDxJsonRenderer, parse_timestamp
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sbom"
@@ -297,6 +298,10 @@ def test_execution_report_annotation_resolves_at_runtime() -> None:
             ExecutionReportOutputFormat.OPENVEX,
         ),
         (_csaf_renderer(), ExecutionReportOutputFormat.CSAF),
+        (
+            Spdx3JsonRenderer(creator="Vexcalibur Test Maintainers"),
+            ExecutionReportOutputFormat.SPDX3,
+        ),
     ),
 )
 def test_local_generation_result_retains_actual_execution_context(

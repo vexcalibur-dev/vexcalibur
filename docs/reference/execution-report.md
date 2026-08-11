@@ -81,7 +81,7 @@ exact-type checks before schema validation.
 | `vexcalibur_version` | string | Installed Vexcalibur distribution version loaded by the process. It must match package metadata; an editable Git checkout must also identify its current `HEAD`. The value has 1–128 characters from `[0-9A-Za-z.!+_-]`, with an alphanumeric first character. |
 | `inventory_source` | string | One inventory category from the table below. |
 | `finding_source` | string | One finding category from the table below. |
-| `output_format` | string | `cyclonedx`, `openvex`, `csaf`, or `custom`. |
+| `output_format` | string | `cyclonedx`, `openvex`, `csaf`, `spdx3`, or `custom`. |
 | `component_count` | exact integer token from 0 through 10,000,000 | Normalized components sent to the finding source. |
 | `finding_count` | exact integer token from 0 through 10,000,000 | Normalized findings sent to the renderer. |
 | `analysis_state_counts` | object | Exact positive integer tokens through 10,000,000, keyed by `resolved`, `exploitable`, `in_triage`, `false_positive`, or `not_affected`. States with zero findings are omitted. |
@@ -315,6 +315,14 @@ An exit status of `0` means the installed command exposes the option.
 
 Consumers should reject an unknown `schema_version`. They should not infer a
 schema from `vexcalibur_version`.
+
+Schema version 1 added `spdx3` to the `output_format` values when SPDX 3
+output shipped. A report can only carry that value when the operator selects
+`--format spdx3`, so reports for the other formats validate unchanged against
+earlier copies of the schema. A consumer that pins a reviewed schema copy, as
+the consumption guide recommends, must adopt the updated copy before its
+pipeline adopts `--format spdx3`; until then it rejects those reports and
+fails closed.
 
 Validate the closed-world JSON Schema, check that state counts sum to
 `finding_count`, and verify the digest and byte count before trusting a report.

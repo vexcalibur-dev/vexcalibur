@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 import vexcalibur.csaf as csaf_module
 import vexcalibur.generate as generate_module
 import vexcalibur.generate_command as generate_command
+import vexcalibur.spdx3 as spdx3_module
 from vexcalibur import cli
 from vexcalibur.compat import vexy
 from vexcalibur.domain import ComponentIdentity, VulnerabilitySourceInputError
@@ -1918,6 +1919,157 @@ def test_generate_csaf_accepts_the_derived_output_filename(tmp_path: Path) -> No
     assert result.exit_code == 0
     assert result.output == ""
     assert json.loads(output_path.read_text(encoding="utf-8"))["document"]["category"] == "csaf_vex"
+
+
+def test_generate_spdx3_matches_golden(monkeypatch) -> None:
+    monkeypatch.setattr(spdx3_module, "__version__", "0.3.0")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--offline",
+            "--format",
+            "spdx3",
+            "--creator",
+            "Vexcalibur Test Maintainers",
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == (GOLDEN_ROOT / "spdx3-vex-all-analysis-states.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_documented_spdx3_local_example_executes(tmp_path: Path) -> None:
+    output_path = tmp_path / "vex.spdx3.json"
+    args = _documented_generate_args(
+        DOCS_ROOT / "how-to" / "generate-spdx3.md",
+        "spdx3-local-example",
+    )
+    args = [str(output_path) if arg.endswith("/vex.spdx3.json") else arg for arg in args]
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+    document = json.loads(output_path.read_text(encoding="utf-8"))
+    assert document["@context"] == "https://spdx.org/rdf/3.0.1/spdx-context.jsonld"
+    relationship_types = [
+        element["type"]
+        for element in document["@graph"]
+        if str(element.get("type", "")).endswith("VulnAssessmentRelationship")
+    ]
+    assert len(relationship_types) == 5
+
+
+def test_generate_spdx3_requires_creator_before_network(monkeypatch) -> None:
+    class FakeGithubSbomClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("GitHub must not be contacted before SPDX option validation")
+
+    monkeypatch.setattr(generate_module, "GithubSbomClient", FakeGithubSbomClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            "--github-repo",
+            "vexcalibur-dev/vexcalibur",
+            "--format",
+            "spdx3",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--creator is required with --format spdx3" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("output_format", ("cyclonedx", "openvex", "csaf"))
+def test_generate_rejects_creator_with_other_formats_before_network(
+    monkeypatch,
+    output_format: str,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV must not be contacted before format option validation")
+
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
+
+    args = [
+        "generate",
+        str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+        "--format",
+        output_format,
+        "--creator",
+        "Example Security Team",
+        "--allow-public-osv",
+    ]
+    if output_format == "openvex":
+        args.extend(("--author", "Example Security Team"))
+    if output_format == "csaf":
+        args.extend(_csaf_metadata_args())
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 1
+    assert "--creator requires --format spdx3" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_spdx3_rejects_openvex_metadata_before_network(monkeypatch) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("OSV must not be contacted before format option validation")
+
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--format",
+            "spdx3",
+            "--creator",
+            "Example Security Team",
+            "--author",
+            "Example Security Team",
+            "--allow-public-osv",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--author and --author-role require --format openvex" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_spdx3_rejects_empty_creator_without_traceback() -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+            "--format",
+            "spdx3",
+            "--creator",
+            " ",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "VEX generation failed: SPDX output requires a nonempty creator" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_vexy_compat_root_shows_help_without_args() -> None:

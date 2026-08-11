@@ -37,8 +37,8 @@ Generation
 ----------
 
 Generation functions without a ``_result`` suffix return serialized JSON as
-``str``. CycloneDX 1.6 is the default output. Pass ``OpenVexJsonRenderer`` or
-``Csaf20VexJsonRenderer`` to select another format.
+``str``. CycloneDX 1.6 is the default output. Pass ``OpenVexJsonRenderer``,
+``Csaf20VexJsonRenderer``, or ``Spdx3JsonRenderer`` to select another format.
 
 ``generate_vex_from_source`` and ``generate_vex_from_components`` accept a
 custom ``VulnerabilitySource``. A source receives immutable component values
@@ -290,6 +290,9 @@ with the third-party ``packageurl`` package::
 .. autoclass:: CsafPublisherCategory
    :members:
 
+.. autoclass:: Spdx3JsonRenderer
+   :members:
+
 Enumeration values
 ------------------
 
@@ -329,6 +332,9 @@ Enumeration values
    * - ``ExecutionReportOutputFormat``
      - ``CSAF``
      - ``csaf``
+   * - ``ExecutionReportOutputFormat``
+     - ``SPDX3``
+     - ``spdx3``
    * - ``ExecutionReportOutputFormat``
      - ``CUSTOM``
      - ``custom``
@@ -397,7 +403,8 @@ classes support broader boundaries:
 * ``VulnerabilitySourceError`` covers provider failures. ``OsvClientError``
   and ``LocalFindingsError`` add provider-specific detail.
 * ``VexRenderError`` covers invalid or oversized output. Format-specific
-  renderers raise its ``OpenVexRenderError`` or ``CsafRenderError`` subclasses.
+  renderers raise its ``OpenVexRenderError``, ``CsafRenderError``, or
+  ``Spdx3RenderError`` subclasses.
 * ``ComponentVersionError`` reports contradictory explicit and package URL
   versions when an application constructs ``ComponentIdentity`` directly.
 * ``GenerationReportMetadataError`` means package metadata cannot prove which
@@ -439,6 +446,8 @@ renderers. Their implementations own those failures.
 .. autoexception:: OpenVexRenderError
 
 .. autoexception:: CsafRenderError
+
+.. autoexception:: Spdx3RenderError
 
 Supported names
 ---------------

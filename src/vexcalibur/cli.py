@@ -50,6 +50,7 @@ from vexcalibur.sources.osv import (
     OsvConfigurationError,
     osv_client_for_url,
 )
+from vexcalibur.spdx3 import Spdx3JsonRenderer
 from vexcalibur.vex import VexRenderError, parse_timestamp
 
 _generate_command_started: ContextVar[bool] = ContextVar(
@@ -342,6 +343,13 @@ def generate(
             help="CSAF document status. Defaults to draft with --format csaf.",
         ),
     ] = None,
+    creator: Annotated[
+        str | None,
+        typer.Option(
+            "--creator",
+            help="SPDX document creator name. Required with --format spdx3.",
+        ),
+    ] = None,
     findings_file: Annotated[
         Path | None,
         typer.Option(
@@ -457,6 +465,7 @@ def generate(
                 output_format=output_format,
                 author=author,
                 author_role=author_role,
+                creator=creator,
                 csaf_version=csaf_version,
                 csaf_document_id=csaf_document_id,
                 csaf_document_title=csaf_document_title,
@@ -565,6 +574,7 @@ def _renderer_from_generate_options(
     output_format: VexOutputFormat,
     author: str | None,
     author_role: str | None,
+    creator: str | None,
     csaf_version: str | None,
     csaf_document_id: str | None,
     csaf_document_title: str | None,
@@ -590,6 +600,9 @@ def _renderer_from_generate_options(
     if output_format is VexOutputFormat.CSAF:
         if author is not None or author_role is not None:
             msg = "--author and --author-role require --format openvex"
+            raise GenerateSourceOptionError(msg)
+        if creator is not None:
+            msg = "--creator requires --format spdx3"
             raise GenerateSourceOptionError(msg)
         if csaf_version is not None and csaf_version != CSAF_VERSION:
             msg = f"--csaf-version must be {CSAF_VERSION}"
@@ -636,6 +649,17 @@ def _renderer_from_generate_options(
 
     if supplied_csaf_options:
         msg = f"{', '.join(supplied_csaf_options)} require --format csaf"
+        raise GenerateSourceOptionError(msg)
+    if output_format is VexOutputFormat.SPDX3:
+        if author is not None or author_role is not None:
+            msg = "--author and --author-role require --format openvex"
+            raise GenerateSourceOptionError(msg)
+        if creator is None:
+            msg = "--creator is required with --format spdx3"
+            raise GenerateSourceOptionError(msg)
+        return Spdx3JsonRenderer(creator=creator)
+    if creator is not None:
+        msg = "--creator requires --format spdx3"
         raise GenerateSourceOptionError(msg)
     if output_format is VexOutputFormat.OPENVEX:
         if author is None:

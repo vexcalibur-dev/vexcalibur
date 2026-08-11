@@ -64,7 +64,7 @@ CI log, or VEX document.
 
 ## `vexcalibur generate`
 
-Generates CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 VEX JSON.
+Generates CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX 3.0.1 VEX JSON.
 
 ```text
 vexcalibur generate [OPTIONS] [INPUT_FILE]
@@ -114,9 +114,9 @@ OSV provenance.
 
 OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, or GitHub SPDX `versionInfo`. When an inventory supplies both an explicit version and a PURL version, their decoded values must match. The command rejects a contradiction and fails instead of treating an empty query set as authoritative.
 
-An explicit empty local findings array is valid for CycloneDX output. OpenVEX
-and CSAF reject it because their standalone VEX documents need at least one
-statement or vulnerability assertion.
+An explicit empty local findings array is valid for CycloneDX output. OpenVEX,
+CSAF, and SPDX 3 reject it because their standalone VEX documents need at
+least one statement or vulnerability assertion.
 
 ### Options
 
@@ -125,9 +125,10 @@ statement or vulnerability assertion.
 | `--output PATH`, `-o PATH` | Standard output | Write VEX JSON to a file. |
 | `--execution-report PATH` | — | On Linux and macOS, atomically write a bounded, versioned generation summary. |
 | `--timestamp TEXT` | Current UTC time | ISO-8601 document timestamp. |
-| `--format cyclonedx\|openvex\|csaf` | `cyclonedx` | Select the output format. |
+| `--format cyclonedx\|openvex\|csaf\|spdx3` | `cyclonedx` | Select the output format. |
 | `--author TEXT` | — | OpenVEX document author; required for OpenVEX. |
 | `--author-role TEXT` | — | Optional OpenVEX document author role. |
+| `--creator TEXT` | — | SPDX document creator name; required for SPDX 3. |
 | `--csaf-version TEXT` | `2.0` | CSAF version; only `2.0` is accepted. |
 | `--csaf-document-id TEXT` | — | CSAF tracking ID; required for CSAF. |
 | `--csaf-document-title TEXT` | — | CSAF document title; required for CSAF. |
@@ -156,6 +157,7 @@ Public repositories may work anonymously. Token-backed requests need repository 
 `--github-repo` cannot be combined with `--offline` because fetching the SBOM uses the network. Public OSV consent remains separate.
 
 `--author` and `--author-role` are valid only with `--format openvex`.
+`--creator` is valid only with `--format spdx3`, which requires it.
 
 The `--csaf-*` options are valid only with `--format csaf`. CSAF requires the
 document ID, title, publisher name, publisher namespace, and publisher
@@ -222,12 +224,14 @@ behavior.
 CycloneDX output preserves those state names. OpenVEX maps them to its
 four-status model and requires state-specific evidence. CSAF maps them to
 product-status lists and requires product-scoped remediation or impact
-evidence where the VEX profile calls for it. OpenVEX rejects nonidentical
-assertions for one vulnerability and product. CSAF can group same-status
-provenance and evidence, but rejects contradictory effective statuses for that
-pair. Read the
-[CycloneDX](cyclonedx-vex-output.md), [OpenVEX](openvex-output.md), or
-[CSAF](csaf-output.md) output reference for the exact contract.
+evidence where the VEX profile calls for it. SPDX 3 maps them to the security
+profile's four VEX relationship classes with the same evidence rules as
+OpenVEX. OpenVEX and SPDX 3 reject nonidentical assertions for one
+vulnerability and product. CSAF can group same-status provenance and
+evidence, but rejects contradictory effective statuses for that pair. Read the
+[CycloneDX](cyclonedx-vex-output.md), [OpenVEX](openvex-output.md),
+[CSAF](csaf-output.md), or [SPDX 3](spdx3-output.md) output reference for the
+exact contract.
 
 ### Exit behavior
 

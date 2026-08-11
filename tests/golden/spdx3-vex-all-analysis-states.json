@@ -1,0 +1,222 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "@id": "_:creationinfo",
+      "created": "2026-06-23T00:00:00Z",
+      "createdBy": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#agent"
+      ],
+      "createdUsing": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#tool"
+      ],
+      "specVersion": "3.0.1",
+      "type": "CreationInfo"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "element": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#agent",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-0",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-1",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-2",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-3",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-4",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-0",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-1",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#tool",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-0",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-1",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-2",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-3",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-4"
+      ],
+      "profileConformance": [
+        "core",
+        "security",
+        "software"
+      ],
+      "rootElement": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-0",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-1",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-2",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-3",
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-4"
+      ],
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#document",
+      "type": "SpdxDocument"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "name": "Vexcalibur Test Maintainers",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#agent",
+      "type": "Agent"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "description": "Vexcalibur 0.3.0",
+      "name": "Vexcalibur",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#tool",
+      "type": "Tool"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "name": "minimist",
+      "software_packageUrl": "pkg:npm/minimist@0.0.8",
+      "software_packageVersion": "0.0.8",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-0",
+      "type": "software_Package"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "name": "django",
+      "software_packageUrl": "pkg:pypi/django@1.2",
+      "software_packageVersion": "1.2",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-1",
+      "type": "software_Package"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "externalIdentifier": [
+        {
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2026-0001",
+          "identifierLocator": [
+            "https://security.example.test/vulns/CVE-2026-0001"
+          ],
+          "type": "ExternalIdentifier"
+        }
+      ],
+      "name": "CVE-2026-0001",
+      "security_modifiedTime": "2026-01-01T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-0",
+      "type": "security_Vulnerability"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "externalIdentifier": [
+        {
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2026-0002",
+          "identifierLocator": [
+            "https://security.example.test/vulns/CVE-2026-0002"
+          ],
+          "type": "ExternalIdentifier"
+        }
+      ],
+      "name": "CVE-2026-0002",
+      "security_modifiedTime": "2026-01-02T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-1",
+      "type": "security_Vulnerability"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "externalIdentifier": [
+        {
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2026-0003",
+          "identifierLocator": [
+            "https://security.example.test/vulns/CVE-2026-0003"
+          ],
+          "type": "ExternalIdentifier"
+        }
+      ],
+      "name": "CVE-2026-0003",
+      "security_modifiedTime": "2026-01-03T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-2",
+      "type": "security_Vulnerability"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "externalIdentifier": [
+        {
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2026-0004",
+          "identifierLocator": [
+            "https://security.example.test/vulns/CVE-2026-0004"
+          ],
+          "type": "ExternalIdentifier"
+        }
+      ],
+      "name": "CVE-2026-0004",
+      "security_modifiedTime": "2026-01-04T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-3",
+      "type": "security_Vulnerability"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "externalIdentifier": [
+        {
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2026-0005",
+          "identifierLocator": [
+            "https://security.example.test/vulns/CVE-2026-0005"
+          ],
+          "type": "ExternalIdentifier"
+        }
+      ],
+      "name": "CVE-2026-0005",
+      "security_modifiedTime": "2026-01-05T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-4",
+      "type": "security_Vulnerability"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "from": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-0",
+      "relationshipType": "fixedIn",
+      "security_statusNotes": "Analysis detail: The vulnerable code path was removed.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0001)\nOriginal Vexcalibur analysis state: resolved\nConfirmed fixed product version: 1.2\nSource record modified: 2026-01-01T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-0",
+      "to": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-1"
+      ],
+      "type": "security_VexFixedVulnAssessmentRelationship"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "from": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-1",
+      "relationshipType": "affects",
+      "security_actionStatement": "Upgrade minimist to version 1.2.8 or later.",
+      "security_statusNotes": "Analysis detail: The affected feature is reachable.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0002)\nOriginal Vexcalibur analysis state: exploitable\nRemediation category: vendor_fix\nSource record modified: 2026-01-02T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-1",
+      "to": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-0"
+      ],
+      "type": "security_VexAffectedVulnAssessmentRelationship"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "from": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-2",
+      "relationshipType": "underInvestigationFor",
+      "security_statusNotes": "Analysis detail: Impact analysis is still underway.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0003)\nOriginal Vexcalibur analysis state: in_triage\nSource record modified: 2026-01-03T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-2",
+      "to": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-1"
+      ],
+      "type": "security_VexUnderInvestigationVulnAssessmentRelationship"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "from": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-3",
+      "relationshipType": "doesNotAffect",
+      "security_impactStatement": "The source matched a package that is not present at runtime.",
+      "security_statusNotes": "Analysis detail: The source matched a package that is not present at runtime.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0004)\nOriginal Vexcalibur analysis state: false_positive\nSource record modified: 2026-01-04T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-3",
+      "to": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-0"
+      ],
+      "type": "security_VexNotAffectedVulnAssessmentRelationship"
+    },
+    {
+      "creationInfo": "_:creationinfo",
+      "from": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#vulnerability-4",
+      "relationshipType": "doesNotAffect",
+      "security_impactStatement": "The deployment does not enable the affected configuration.",
+      "security_statusNotes": "Analysis detail: The deployment does not enable the affected configuration.\nSource: Contract Test (https://security.example.test/vulns/CVE-2026-0005)\nOriginal Vexcalibur analysis state: not_affected\nSource record modified: 2026-01-05T00:00:00Z",
+      "spdxId": "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#assessment-4",
+      "to": [
+        "https://vexcalibur.dev/spdx3/6792c350-ac05-500d-b708-905edf8fac4c#package-1"
+      ],
+      "type": "security_VexNotAffectedVulnAssessmentRelationship"
+    }
+  ]
+}

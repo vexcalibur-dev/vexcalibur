@@ -73,6 +73,7 @@ _V1_OUTPUT_FORMATS = (
     ExecutionReportOutputFormat.CYCLONEDX,
     ExecutionReportOutputFormat.OPENVEX,
     ExecutionReportOutputFormat.CSAF,
+    ExecutionReportOutputFormat.SPDX3,
     ExecutionReportOutputFormat.CUSTOM,
 )
 _V1_ANALYSIS_STATES = (
