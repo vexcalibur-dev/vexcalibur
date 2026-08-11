@@ -52,6 +52,7 @@
         "cyclonedx",
         "openvex",
         "csaf",
+        "spdx3",
         "custom"
       ]
     },

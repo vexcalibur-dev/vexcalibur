@@ -19,6 +19,7 @@ from vexcalibur.generate import (
 )
 from vexcalibur.openvex import OpenVexJsonRenderer
 from vexcalibur.render import VexRenderer, VexRenderError
+from vexcalibur.spdx3 import Spdx3JsonRenderer
 from vexcalibur.vex import CycloneDxJsonRenderer
 
 
@@ -50,6 +51,7 @@ def _renderers() -> tuple[VexRenderer | None, ...]:
                 publisher_category=CsafPublisherCategory.VENDOR,
             )
         ),
+        Spdx3JsonRenderer(creator="Example Security"),
     )
 
 
@@ -78,7 +80,7 @@ def _oversized_render_input() -> tuple[
     return component, findings
 
 
-@pytest.mark.parametrize("renderer", _renderers(), ids=("cyclonedx", "openvex", "csaf"))
+@pytest.mark.parametrize("renderer", _renderers(), ids=("cyclonedx", "openvex", "csaf", "spdx3"))
 def test_builtin_renderers_reject_oversized_fields_before_rendering(
     monkeypatch: pytest.MonkeyPatch,
     renderer: VexRenderer | None,
@@ -279,6 +281,9 @@ def _empty_render_subclasses() -> tuple[VexRenderer, ...]:
     class EmptyCsafRenderer(Csaf20VexJsonRenderer):
         pass
 
+    class EmptySpdx3Renderer(Spdx3JsonRenderer):
+        pass
+
     return (
         EmptyCycloneDxRenderer(),
         EmptyOpenVexRenderer(author="https://security.example.test"),
@@ -291,13 +296,14 @@ def _empty_render_subclasses() -> tuple[VexRenderer, ...]:
                 publisher_category=CsafPublisherCategory.VENDOR,
             )
         ),
+        EmptySpdx3Renderer(creator="Example Security"),
     )
 
 
 @pytest.mark.parametrize(
     "renderer",
     _empty_render_subclasses(),
-    ids=("cyclonedx", "openvex", "csaf"),
+    ids=("cyclonedx", "openvex", "csaf", "spdx3"),
 )
 def test_empty_builtin_renderer_subclass_keeps_preflight_budget(
     renderer: VexRenderer,
@@ -349,6 +355,16 @@ def _inherited_render_subclasses() -> tuple[VexRenderer, ...]:
             del document, timestamp
             return "{}\n"
 
+    class CustomSpdx3Renderer(Spdx3JsonRenderer):
+        def _render_document(
+            self,
+            *,
+            document: VexDocument,
+            timestamp: datetime | None = None,
+        ) -> str:
+            del document, timestamp
+            return "{}\n"
+
     return (
         CustomCycloneDxRenderer(),
         CustomOpenVexRenderer(author="https://security.example.test"),
@@ -361,13 +377,14 @@ def _inherited_render_subclasses() -> tuple[VexRenderer, ...]:
                 publisher_category=CsafPublisherCategory.VENDOR,
             )
         ),
+        CustomSpdx3Renderer(creator="Example Security"),
     )
 
 
 @pytest.mark.parametrize(
     "renderer",
     _inherited_render_subclasses(),
-    ids=("cyclonedx", "openvex", "csaf"),
+    ids=("cyclonedx", "openvex", "csaf", "spdx3"),
 )
 def test_inherited_builtin_render_skips_builtin_preflight_budget(
     renderer: VexRenderer,

@@ -316,6 +316,7 @@ def test_schema_v1_categories_are_frozen_independently_of_domain_enums() -> None
         ExecutionReportOutputFormat.CYCLONEDX,
         ExecutionReportOutputFormat.OPENVEX,
         ExecutionReportOutputFormat.CSAF,
+        ExecutionReportOutputFormat.SPDX3,
         ExecutionReportOutputFormat.CUSTOM,
     )
     assert _V1_ANALYSIS_STATES == (

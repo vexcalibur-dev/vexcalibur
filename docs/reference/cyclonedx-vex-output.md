@@ -67,8 +67,8 @@ The local default state is `in_triage`. Its default detail is `Provided by local
 
 CycloneDX ignores the format-specific `action_statement`, `impact_statement`,
 `fixed_version`, and `remediation_category` evidence fields. They do not change
-grouping, serialized content, or the document serial number. OpenVEX and CSAF
-use selected fields under their stricter state mappings.
+grouping, serialized content, or the document serial number. OpenVEX, CSAF, and
+SPDX 3 use selected fields under their stricter state mappings.
 
 Findings from the canonical public endpoint use source name `OSV`, URL
 `https://osv.dev/`, and the detail shown above. A custom compatible endpoint

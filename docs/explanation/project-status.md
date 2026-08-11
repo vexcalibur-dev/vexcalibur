@@ -24,6 +24,8 @@ documentation and schemas from that tag.
 - CycloneDX 1.6 VEX JSON output
 - OpenVEX 0.2.0 JSON output with explicit author metadata
 - CSAF 2.0 JSON output with the `csaf_vex` profile
+- SPDX 3.0.1 JSON-LD output with the security profile's VEX relationships and
+  explicit creator metadata
 - repeatable serialization when the SBOM, findings, and timestamp are controlled
 - bounded generation execution reports through the Linux and macOS CLI
   transaction or the cross-platform Python API
@@ -34,7 +36,8 @@ The repository runs its Python, package, documentation, and deterministic
 parser-property gates on every change. Supply-chain checks cover dependencies,
 secrets, CodeQL, OpenSSF Scorecard, and a bounded weekly Atheris campaign.
 
-OpenVEX goldens pass the pinned official schema and `go-vex` parser.
+OpenVEX goldens pass the pinned official schema and `go-vex` parser. SPDX 3
+goldens pass the pinned official JSON schema.
 
 ## Self-release evidence
 
@@ -90,7 +93,7 @@ Read release notes before upgrading, even across patch releases.
 ## Not implemented
 
 Vexcalibur does not read VEX documents or convert between VEX formats.
-OpenVEX and CSAF support is output-only.
+OpenVEX, CSAF, and SPDX 3 support is output-only.
 
 CSAF 2.1, product branches and relationships, later document revisions,
 trusted-provider metadata, distribution policy, and TLP are not implemented.

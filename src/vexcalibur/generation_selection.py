@@ -15,6 +15,7 @@ from vexcalibur.sources.osv import (
     OsvSource,
     is_canonical_public_osv_endpoint,
 )
+from vexcalibur.spdx3 import Spdx3JsonRenderer
 from vexcalibur.vex import CycloneDxJsonRenderer
 
 
@@ -47,6 +48,8 @@ def renderer_output_format(
         return ExecutionReportOutputFormat.OPENVEX
     if renderer_type is Csaf20VexJsonRenderer:
         return ExecutionReportOutputFormat.CSAF
+    if renderer_type is Spdx3JsonRenderer:
+        return ExecutionReportOutputFormat.SPDX3
     return None
 
 

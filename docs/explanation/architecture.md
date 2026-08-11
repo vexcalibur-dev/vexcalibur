@@ -37,15 +37,15 @@ CycloneDX JSON/XML file       GitHub Dependency Graph SBOM
                   |          VexDocument
                   |      atomic assertions
                   |               |
-                  |       +-------+-------+-------+
-                  |       |               |       |
-                  |       v               v       v
-                  |  CycloneDX 1.6   OpenVEX   CSAF 2.0
-                  |                   0.2.0      VEX
-                  |       \               |       /
-                  +--------+--------------+------+
-                           |
-                           v
+                  |     +---------+---------+---------+
+                  |     |         |         |         |
+                  |     v         v         v         v
+                  | CycloneDX  OpenVEX  CSAF 2.0  SPDX 3.0.1
+                  |    1.6      0.2.0     VEX        VEX
+                  |     \         |         |        /
+                  +------+--------+---------+-------+
+                         |
+                         v
                     GenerationResult
                        /         \
                       v           v
@@ -157,8 +157,9 @@ The built-in renderers also implement `VexDocumentRenderer`. Their compatibility
 
 `vexcalibur.vex` renders CycloneDX 1.6 JSON. `vexcalibur.openvex` renders
 OpenVEX 0.2.0 JSON. `vexcalibur.csaf` renders CSAF 2.0 JSON with the VEX
-profile. Each renderer owns grouping, required metadata, validation, and state
-mapping.
+profile. `vexcalibur.spdx3` renders SPDX 3.0.1 JSON-LD with the security
+profile's VEX relationships. Each renderer owns grouping, required metadata,
+validation, and state mapping.
 
 OSV says that a vulnerability matches a package version; it does not decide exploitability for a particular deployment. OSV findings therefore enter VEX as `in_triage`. A local finding can carry a reviewed state such as `not_affected` or `exploitable`.
 
@@ -178,16 +179,27 @@ text and a machine-readable remediation category before it can become
 renderer places that evidence in product-scoped remediation and threat
 objects.
 
-The OpenVEX renderer requires explicit action and impact statements for the
-states that need them. It also rejects nonidentical assertions for one
-vulnerability and product. CSAF can group same-status provenance and evidence,
-but rejects contradictory effective statuses for that pair.
+SPDX 3 is the closest structural fit. Its security profile defines one
+relationship class per VEX status, so the four dispositions map directly.
+The same lossy edge remains: `false_positive` becomes a not-affected
+relationship with the original state preserved in status notes, because the
+SPDX justification catalog has no false-positive entry. SPDX itself requires
+an action statement on every affected relationship, which matches the
+evidence rule the other renderers already enforce for `exploitable`.
+
+The OpenVEX and SPDX renderers require explicit action and impact statements
+for the states that need them. They also reject nonidentical assertions for
+one vulnerability and product. CSAF can group same-status provenance and
+evidence, but rejects contradictory effective statuses for that pair.
 
 Source `modified` timestamps describe upstream records. The OpenVEX renderer
 does not claim they are statement revision times. CSAF likewise keeps them in
 vulnerability notes rather than document tracking dates. The CycloneDX
 renderer can place them in vulnerability `updated` because that field describes
-the vulnerability record.
+the vulnerability record. SPDX makes the same distinction: the renderer emits
+a vulnerability `modifiedTime` only when the findings for that vulnerability
+report exactly one distinct time, and it never claims a source time as an
+assessment revision time.
 
 ## Execution-report boundary
 
@@ -290,5 +302,6 @@ The `vexy` executable maps a small legacy command surface to the same loaders, s
 
 See the [provider contract](../reference/provider-contract.md) for source
 extension rules. Read the [CycloneDX](../reference/cyclonedx-vex-output.md),
-[OpenVEX](../reference/openvex-output.md), and
-[CSAF](../reference/csaf-output.md) references for renderer contracts.
+[OpenVEX](../reference/openvex-output.md),
+[CSAF](../reference/csaf-output.md), and
+[SPDX 3](../reference/spdx3-output.md) references for renderer contracts.

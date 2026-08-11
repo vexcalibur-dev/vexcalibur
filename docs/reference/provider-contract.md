@@ -120,10 +120,10 @@ The effective component version comes from the PURL when the PURL is versioned. 
 | `modified` | `datetime \| None` | `None` | Source update time. |
 | `analysis_state` | `VexAnalysisState` | `VexAnalysisState.IN_TRIAGE` | VEX disposition for the component and vulnerability. |
 | `analysis_detail` | `str` | `Detected by vulnerability source; manual exploitability analysis required.` | Human-readable analysis basis. |
-| `action_statement` | `str \| None` | `None` | Remediation or mitigation guidance. OpenVEX and CSAF require it for `exploitable` findings. |
-| `impact_statement` | `str \| None` | `None` | Deployment impact. OpenVEX and CSAF require it for `false_positive` and `not_affected` findings. |
-| `fixed_version` | `str \| None` | `None` | Confirmed fixed product version. OpenVEX and CSAF require it for `resolved` findings. It must match the emitted product package URL version. |
-| `remediation_category` | `VexRemediationCategory \| None` | `None` | Machine-readable remediation kind. CSAF requires it for `exploitable` findings; CycloneDX and OpenVEX ignore it. |
+| `action_statement` | `str \| None` | `None` | Remediation or mitigation guidance. OpenVEX, CSAF, and SPDX 3 require it for `exploitable` findings. |
+| `impact_statement` | `str \| None` | `None` | Deployment impact. OpenVEX, CSAF, and SPDX 3 require it for `false_positive` and `not_affected` findings. |
+| `fixed_version` | `str \| None` | `None` | Confirmed fixed product version. OpenVEX, CSAF, and SPDX 3 require it for `resolved` findings. It must match the emitted product package URL version. |
+| `remediation_category` | `VexRemediationCategory \| None` | `None` | Machine-readable remediation kind. CSAF requires it for `exploitable` findings; SPDX 3 accepts it only there; CycloneDX and OpenVEX ignore it. |
 
 `remediation_category` accepts `mitigation`, `no_fix_planned`, `none_available`, `vendor_fix`, or `workaround`.
 
@@ -134,21 +134,23 @@ Do not place credentials, signed-download secrets, or access tokens in `source_u
 Low-level result mappers must require explicit provenance. They must not label
 arbitrary compatible-format results as an official provider by default.
 
-OpenVEX and CSAF reject `action_statement`, `impact_statement`, and
-`fixed_version` on states where they are not required. OpenVEX rejects
-nonidentical assertions for one vulnerability and emitted product. CSAF groups
-same-effective-status provenance and evidence, but rejects contradictory
-effective statuses for that pair. CSAF also requires `remediation_category` on
-`exploitable` and rejects it on other states. CycloneDX ignores all four
-evidence fields.
+OpenVEX, CSAF, and SPDX 3 reject `action_statement`, `impact_statement`, and
+`fixed_version` on states where they are not required. OpenVEX and SPDX 3
+reject nonidentical assertions for one vulnerability and emitted product. CSAF
+groups same-effective-status provenance and evidence, but rejects
+contradictory effective statuses for that pair. CSAF requires
+`remediation_category` on `exploitable` and rejects it on other states; SPDX 3
+accepts it only on `exploitable`. CycloneDX ignores all four evidence fields.
 
 The adapter retains `remediation_category`. CSAF serializes it as the category
-of a product-scoped remediation. CycloneDX and OpenVEX do not serialize it, so
-it does not change their grouping, content, or document identity.
+of a product-scoped remediation. SPDX 3 records it in status notes, so it
+participates in SPDX grouping and document identity. CycloneDX and OpenVEX do
+not serialize it, so it does not change their grouping, content, or document
+identity.
 
-An OpenVEX or CSAF product must have a version in its package URL or component
-version field. Those renderers reject an assertion that would identify every
-package version.
+An OpenVEX, CSAF, or SPDX 3 product must have a version in its package URL or
+component version field. Those renderers reject an assertion that would
+identify every package version.
 
 ## Errors
 

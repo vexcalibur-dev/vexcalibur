@@ -25,7 +25,7 @@ The top-level value is an object with one required `findings` array. Unknown fie
 
 | Field | Required | Type | Description |
 | --- | --- | --- | --- |
-| `findings` | Yes | Array | Zero to 10,000 finding objects. CycloneDX accepts an empty array, but OpenVEX and CSAF output reject it. |
+| `findings` | Yes | Array | Zero to 10,000 finding objects. CycloneDX accepts an empty array, but OpenVEX, CSAF, and SPDX 3 output reject it. |
 
 ## Finding fields
 
@@ -39,10 +39,10 @@ The top-level value is an object with one required `findings` array. Unknown fie
 | `modified` | No | Omitted | ISO-8601 timestamp string. Naive values are treated as UTC. |
 | `analysis_state` | No | `in_triage` | One of the states listed below. |
 | `analysis_detail` | No | `Provided by local findings file; manual exploitability analysis required.` | Non-empty human-readable analysis. |
-| `action_statement` | No | Omitted | Non-empty remediation or mitigation text. OpenVEX and CSAF require it for `exploitable` and reject it for other states. |
-| `impact_statement` | No | Omitted | Non-empty impact text. OpenVEX and CSAF require it for `false_positive` and `not_affected`. They reject the field for other states. |
-| `fixed_version` | No | Omitted | Non-empty version text. OpenVEX and CSAF require it for `resolved` and reject it for other states. It must match the emitted product package URL version. |
-| `remediation_category` | No | Omitted | One of the remediation categories listed below. CSAF requires it for `exploitable` and rejects it for other states. |
+| `action_statement` | No | Omitted | Non-empty remediation or mitigation text. OpenVEX, CSAF, and SPDX 3 require it for `exploitable` and reject it for other states. |
+| `impact_statement` | No | Omitted | Non-empty impact text. OpenVEX, CSAF, and SPDX 3 require it for `false_positive` and `not_affected`. They reject the field for other states. |
+| `fixed_version` | No | Omitted | Non-empty version text. OpenVEX, CSAF, and SPDX 3 require it for `resolved` and reject it for other states. It must match the emitted product package URL version. |
+| `remediation_category` | No | Omitted | One of the remediation categories listed below. CSAF requires it for `exploitable`; SPDX 3 accepts it only there. Both reject it for other states. |
 
 Supported `analysis_state` values are `resolved`, `exploitable`, `in_triage`, `false_positive`, and `not_affected`.
 
@@ -57,20 +57,24 @@ content, or document identity. CSAF emits the category with a product-scoped
 remediation and will not infer one from `action_statement` or
 `analysis_detail`.
 
-OpenVEX rejects nonidentical assertions for the same vulnerability ID and
-emitted product package URL. Differences in source, state, analysis detail,
-action statement, impact statement, fixed version, or modification time make
-OpenVEX assertions nonidentical. CSAF groups provenance and evidence when the
+OpenVEX and SPDX 3 reject nonidentical assertions for the same vulnerability
+ID and emitted product package URL. Differences in source, state, analysis
+detail, action statement, impact statement, fixed version, or modification
+time make assertions nonidentical for both; SPDX 3 also distinguishes
+remediation categories. CSAF groups provenance and evidence when the
 effective product status agrees, including multiple action or impact objects,
 but rejects contradictory effective statuses for the pair.
 
 `modified` describes the source record. CycloneDX maps it to vulnerability
 `updated`; OpenVEX keeps it in `status_notes`. CSAF keeps it in vulnerability
-notes. Neither output treats it as a document or statement revision time.
+notes. SPDX 3 keeps it in status notes and emits a vulnerability
+`modifiedTime` only when the findings for that vulnerability report exactly
+one distinct time. No output treats it as a document or statement revision
+time.
 
-OpenVEX and CSAF require a version in the emitted product package URL. They use
-the component's separate version when the package URL is unversioned and reject
-the assertion when both are unversioned.
+OpenVEX, CSAF, and SPDX 3 require a version in the emitted product package
+URL. They use the component's separate version when the package URL is
+unversioned and reject the assertion when both are unversioned.
 
 CSAF maps `false_positive` and `not_affected` to the same
 `known_not_affected` product status. It preserves the original state in notes

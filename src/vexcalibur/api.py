@@ -93,6 +93,7 @@ from vexcalibur.sources.osv import (
     OsvConfigurationError,
     OsvResponseError,
 )
+from vexcalibur.spdx3 import Spdx3JsonRenderer, Spdx3RenderError
 from vexcalibur.vex import CycloneDxJsonRenderer
 
 
@@ -509,6 +510,8 @@ __all__ = [
     "OsvConfigurationError",
     "OsvResponseError",
     "SbomError",
+    "Spdx3JsonRenderer",
+    "Spdx3RenderError",
     "VexAnalysisState",
     "VexRemediationCategory",
     "VexRenderError",

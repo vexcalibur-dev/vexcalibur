@@ -29,6 +29,7 @@ class ExecutionReportOutputFormat(str, Enum):
     CYCLONEDX = "cyclonedx"
     OPENVEX = "openvex"
     CSAF = "csaf"
+    SPDX3 = "spdx3"
     CUSTOM = "custom"
 
 

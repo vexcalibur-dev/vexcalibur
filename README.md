@@ -10,7 +10,9 @@
 Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
 Current releases write CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
-output uses the `csaf_vex` profile.
+output uses the `csaf_vex` profile. This branch also writes SPDX 3.0.1
+JSON-LD through the security profile's VEX relationships; no release through
+v0.6.3 includes it.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
@@ -20,7 +22,7 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 | --- | --- |
 | SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
-| VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile |
+| VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile; SPDX 3.0.1 JSON-LD with the security profile |
 | Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |
 | Migration | A narrow `vexy` command-line compatibility layer |
 | Python | 3.10–3.14 |

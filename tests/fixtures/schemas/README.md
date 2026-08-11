@@ -53,6 +53,43 @@ The repository exposes three CSAF conformance targets:
 - `make installed-csaf-check` generates output from an isolated wheel and
   validates that output with the same suite.
 
+## SPDX 3.0.1
+
+`spdx-3.0.1.schema.json` is copied without modification from the SPDX 3.0.1
+specification's published JSON Schema for the JSON-LD serialization. The SPDX
+project publishes it at
+[https://spdx.org/schema/3.0.1/spdx-json-schema.json](https://spdx.org/schema/3.0.1/spdx-json-schema.json);
+the file here was copied byte for byte from the built specification site in the
+[spdx/spdx-spec](https://github.com/spdx/spdx-spec) repository.
+
+- Repository branch: `gh-pages`, path `v3.0.1/rdf/schema.json`
+- Repository commit: [`eafb25cea14118a1302916253772c87aa2aa560f`](https://github.com/spdx/spdx-spec/commit/eafb25cea14118a1302916253772c87aa2aa560f)
+- SHA-256: `19d65705ee474fb99467b5e006e05cab61b561974da34ff0e4a188bcf039387c`
+- Specification version: SPDX 3.0.1, published 2024-09-27
+
+The `v3.0.1/` directory on that branch holds the built artifacts for the
+released 3.0.1 specification, so its content is expected to stay stable. The
+schema is machine-readable content in the SPDX 3.0.1 specification, which the
+SPDX project publishes under Community-Spec-1.0; do not describe the schema as
+Apache-2.0 merely because Vexcalibur's source code uses that license.
+
+To verify the committed copy from the repository root:
+
+```console
+echo "19d65705ee474fb99467b5e006e05cab61b561974da34ff0e4a188bcf039387c  tests/fixtures/schemas/spdx-3.0.1.schema.json" \
+  | sha256sum --check
+```
+
+To update it, choose a new released SPDX publication and document its source
+URL, repository commit, checksum, and specification version here. Replace the
+file byte for byte and run the SPDX schema tests as one reviewed change. Do
+not fetch a mutable upstream branch during a test run.
+
+The JSON Schema checks structure only. SPDX 3 defines constraints that JSON
+Schema cannot express, such as the requirement that a not-affected VEX
+relationship carries a justification or an impact statement; the renderer
+tests assert those rules directly.
+
 ## OpenVEX 0.2.0
 
 `openvex-0.2.0.schema.json` is copied without modification from the
