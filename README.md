@@ -45,7 +45,7 @@ if [[ -e "$VEXCALIBUR_VENV" ]]; then
   printf 'Refusing to reuse %s\n' "$VEXCALIBUR_VENV" >&2
   exit 2
 fi
-python -m venv "$VEXCALIBUR_VENV"
+python3 -m venv "$VEXCALIBUR_VENV"
 "$VEXCALIBUR_VENV/bin/python" -m pip install \
   "vexcalibur==${VEXCALIBUR_VERSION}"
 INSTALLED_VERSION="$("$VEXCALIBUR_VENV/bin/python" -c \

@@ -29,7 +29,7 @@ if [[ -e "$VEXCALIBUR_VENV" ]]; then
   printf 'Refusing to reuse %s\n' "$VEXCALIBUR_VENV" >&2
   exit 2
 fi
-python -m venv "$VEXCALIBUR_VENV"
+python3 -m venv "$VEXCALIBUR_VENV"
 "$VEXCALIBUR_VENV/bin/python" -m pip install \
   "vexcalibur==${VEXCALIBUR_VERSION}"
 INSTALLED_VERSION="$("$VEXCALIBUR_VENV/bin/python" -c \
@@ -71,9 +71,18 @@ it reaches your configured package index. Package metadata alone permits any
 3.x, so `pip` won't stop you on a newer interpreter; nothing verifies that
 combination.
 
-Once installed, the generation examples in the how-to guides read and write
-local files only. The source path below and the guides built on it are
-different — they run `uv sync --frozen`, which does reach your index.
+After that, what a command reaches depends on the options you pass, not on how
+you installed:
+
+| Options | Network |
+| --- | --- |
+| `--offline` with `--findings-file` | Local files only |
+| `--osv-url URL` | The mirror you name |
+| `--allow-public-osv` | `https://api.osv.dev` |
+| `--github-repo OWNER/REPO` | The GitHub API |
+
+The source path below runs `uv sync --frozen`, which reaches your package index
+again. So do the guides built on it.
 
 ## Put the command on your PATH
 
