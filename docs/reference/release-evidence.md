@@ -26,10 +26,10 @@ closed-world schema:
 Unknown and duplicate JSON keys are errors. `findings.json` follows the
 [local-findings contract](local-findings.md), with additional evidence rules:
 
-- its root contains only `findings`;
-- every finding explicitly uses `in_triage`;
-- every finding selects exactly one product by PURL or component reference;
-- canonical vulnerability/product pairs are unique; and
+- its root contains only `findings`.
+- every finding explicitly uses `in_triage`.
+- every finding selects exactly one product by PURL or component reference.
+- canonical vulnerability/product pairs are unique.
 - production source URLs and analysis text are suitable for public release.
 
 After selector resolution, the reviewed assertion count must equal the
@@ -157,12 +157,12 @@ Its manifest has exactly `artifacts`, `inventory`, `inventory_kind`, `release`,
 constraints are:
 
 - `schema_version` is `1`, `inventory_kind` is `publication_oracle`, and
-  `source_tree_clean` is `true`;
-- `release` and `review` use the shared record shapes;
+  `source_tree_clean` is `true`.
+- `release` and `review` use the shared record shapes.
 - `inventory` contains the same coverage, limitation, SBOM name and
   specification as the local manifest, plus `lock: uv.lock` and the digest of
-  that bundled lock;
-- `artifacts` contains sorted records for the five inventory payload files; and
+  that bundled lock.
+- `artifacts` contains sorted records for the five inventory payload files.
 - `uv_version` is a nonempty string.
 
 Only production reviewed inputs can create this inventory. The finalizer copies

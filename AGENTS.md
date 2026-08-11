@@ -40,7 +40,7 @@ lockfile live in `tests/integration/csaf-validator/`.
 Install dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 Run the local gate:
@@ -66,7 +66,7 @@ make test-live
 If the home cache is read-only, use one cache path for setup and later commands:
 
 ```bash
-UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv sync
+UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv sync --frozen
 UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv run --frozen pytest -m "not live"
 ```
 
@@ -135,9 +135,11 @@ Keep the README a concise front door. Put guided learning in tutorials, task rec
 Do not promise planned behavior. Verify commands against the current CLI and build Sphinx with warnings treated as errors:
 
 ```bash
-uv sync --extra docs
+uv sync --frozen --extra docs
 make docs
 ```
+
+Match the command runner to the reader. In a source checkout — tutorials and contributor how-tos — run every command through `uv sync --frozen` and `uv run --frozen`, including the interpreter for verification snippets (`uv run --frozen python - <<'PY'`). The interpreter uv provisions lives in the project environment, not on the reader's PATH, so a bare `python` or `python3` there can be absent or the wrong environment even after `uv sync` succeeds. For an installed release — the README install path, or any step that runs `vexcalibur` directly — use plain `vexcalibur` and plain `python`/`python3`, and never require a consumer to install uv. Release-integrity and clean-room checks are the deliberate exception: they may use an isolated `python3 -I` or a fresh `python -m venv` so a misconfigured project environment cannot influence the result or mask a bad published artifact.
 
 For a substantial documentation change, use the scorched-earth documentation review and Green Thumb prose pass when those skills are available.
 

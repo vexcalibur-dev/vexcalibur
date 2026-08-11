@@ -22,7 +22,7 @@ The GitHub Action's [compatibility
 reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
 explains how to resolve its latest tested commit and Vexcalibur package. [Orb
 issue #22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) records
-the App-backed production automation plan.
+the plan for App-backed production automation.
 
 ## Tutorials
 

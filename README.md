@@ -7,7 +7,7 @@
 [![OpenSSF Scorecard](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
 [![Dependency Review](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
 
-Vexcalibur turns software bills of materials and vulnerability findings into VEX documents. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
+Vexcalibur turns software bills of materials and vulnerability findings into VEX documents, for the security and release engineers who publish VEX statements alongside an SBOM. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
 Current releases write CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
 output uses the `csaf_vex` profile. This branch also writes SPDX 3.0.1
@@ -85,10 +85,10 @@ if ($INSTALLED_VERSION -ne $VEXCALIBUR_VERSION) {
 Clone the repository, then install its locked dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
-Dependency installation may contact the configured package index. The generation command below uses only local inputs and does not contact a vulnerability service.
+Installing the dependencies may reach the configured package index. The generate command below uses only local inputs, so it never reaches a vulnerability service.
 
 Generate a VEX document from the committed example files:
 
@@ -104,7 +104,7 @@ uv run --frozen vexcalibur generate \
 Check the result:
 
 ```bash
-python - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 
@@ -118,17 +118,17 @@ PY
 
 See the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html) for the guided version of this example.
 
-CycloneDX remains the default output. Add `--format openvex` and identify the
-document author to create OpenVEX. Add `--format csaf` and the required
-document and publisher metadata to create a CSAF 2.0 VEX document. Follow the [OpenVEX
+CycloneDX is the default. To write OpenVEX, add `--format openvex` and name the
+document author. To write CSAF 2.0, add `--format csaf` and the document and
+publisher metadata it needs. The [OpenVEX
 guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html)
-or [CSAF
+and [CSAF
 guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html)
-for a runnable example and the format's evidence rules.
+each carry a runnable example and the evidence rules for that format.
 
 ## Choose a finding source
 
-Vexcalibur requires one finding source for each generation run.
+Vexcalibur needs exactly one finding source per run.
 
 | Inventory and trust boundary | Use |
 | --- | --- |
@@ -138,7 +138,7 @@ Vexcalibur requires one finding source for each generation run.
 
 > **Warning:** `--allow-public-osv` sends package URLs and versions to `https://api.osv.dev`. Do not use it with a private SBOM or sensitive package inventory unless that disclosure is approved.
 
-The default public endpoint fails closed without that flag. Fetching an SBOM from GitHub is a separate network boundary and does not grant permission to send the resulting inventory to public OSV.
+Without that flag, the public endpoint fails closed. Fetching an SBOM from GitHub crosses a separate network boundary; it doesn't give Vexcalibur permission to send the resulting inventory to public OSV.
 
 ## Documentation
 
@@ -172,7 +172,7 @@ make check
 Documentation changes must also build without warnings:
 
 ```bash
-uv sync --extra docs
+uv sync --frozen --extra docs
 make docs
 ```
 

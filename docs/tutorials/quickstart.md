@@ -7,7 +7,7 @@ In this tutorial, we'll turn two committed example files into CycloneDX 1.6 VEX 
 You need:
 
 - Git.
-- Python 3.10 or newer.
+- Python 3.10 or newer. `uv sync --frozen` provisions the interpreter pinned in `.python-version` (currently 3.14) and downloads it if your system lacks it.
 - `uv`.
 - A POSIX-style shell.
 
@@ -24,7 +24,7 @@ version with your version manager before you continue.
 Install the locked dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 This setup step may contact your configured package index. Once the dependencies are installed, the rest of the tutorial does not need a network finding source.
@@ -57,13 +57,13 @@ The command should exit without output and create `/tmp/vexcalibur-vex.json`.
 Print the first part of the document:
 
 ```bash
-python -m json.tool /tmp/vexcalibur-vex.json | sed -n '1,80p'
+uv run --frozen python -m json.tool /tmp/vexcalibur-vex.json | sed -n '1,80p'
 ```
 
 Now check the fields this tutorial expects:
 
 ```bash
-python - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 

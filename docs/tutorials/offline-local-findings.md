@@ -7,7 +7,7 @@ The quickstart used a ready-made findings file. In this tutorial, we'll write on
 You need:
 
 - Git.
-- Python 3.10 or newer.
+- Python 3.10 or newer. `uv sync --frozen` provisions the interpreter pinned in `.python-version` (currently 3.14) and downloads it if your system lacks it.
 - `uv`.
 - A POSIX-style shell.
 
@@ -24,10 +24,10 @@ version with your version manager before you continue.
 Install the locked dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
-Dependency installation may contact your configured package index. The later generation step uses only the local SBOM and findings file.
+Installing the dependencies may contact your configured package index. The later generation step uses only the local SBOM and findings file.
 
 We'll reuse `tests/fixtures/sbom/cyclonedx-json-simple.json`. Its Django component has the reference `component:django`.
 
@@ -75,7 +75,7 @@ The command should exit without output and create `/tmp/vexcalibur-local-vex.jso
 Read the generated vulnerability entry:
 
 ```bash
-python - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 

@@ -2,7 +2,7 @@
 
 Use `vexcalibur generate` to write CycloneDX 1.6 VEX JSON from a local CycloneDX SBOM or a GitHub Dependency Graph SBOM.
 
-The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync`. When using an installed release, run `vexcalibur` directly and substitute your own file paths.
+The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync --frozen`. When using an installed release, run `vexcalibur` directly and substitute your own file paths.
 
 Choose one inventory input and one finding source:
 
@@ -91,7 +91,7 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- github-repo-public-example:end -->
 
-Vexcalibur requests GitHub's asynchronous SPDX 2.3 JSON report. It waits until the report is ready. It downloads the report and extracts package URL references. The resulting components use the same finding and rendering path as a local SBOM.
+Vexcalibur requests GitHub's asynchronous SPDX 2.3 JSON report. It waits until the report is ready, then downloads it and extracts package URL references. The resulting components use the same finding and rendering path as a local SBOM.
 
 Fetching the SBOM and querying a vulnerability service are separate network decisions. `--github-repo` does not grant permission to send the inventory to public OSV.
 
@@ -215,7 +215,7 @@ uv run --frozen vexcalibur generate \
 Parse the file and check its format discriminators:
 
 ```bash
-python - <<'PY'
+uv run --frozen python - <<'PY'
 import json
 from pathlib import Path
 

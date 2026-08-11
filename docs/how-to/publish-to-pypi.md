@@ -139,9 +139,9 @@ commit.
 Push the release commit to `main`. The `Release` workflow normally starts from
 that push. You may also dispatch it manually:
 
-- leave `version` empty to use Conventional Commit selection; or
-- set `version` to an explicit `MAJOR.MINOR.PATCH`;
-- leave `recovery-tag` empty.
+- leave `version` empty to use Conventional Commit selection
+- set `version` to an explicit `MAJOR.MINOR.PATCH`
+- leave `recovery-tag` empty
 
 `version` and `recovery-tag` are mutually exclusive.
 
@@ -289,15 +289,15 @@ the automation bot, directly targets a commit that remains an ancestor of
 
 It downloads all schema-2 assets and verifies:
 
-- GitHub release and per-asset attestations, with bounded retries;
-- the closed-world manifest and `SHA256SUMS` contract;
-- the exact lock-derived constraints and normalized SBOM;
+- GitHub release and per-asset attestations, with bounded retries
+- the closed-world manifest and `SHA256SUMS` contract
+- the exact lock-derived constraints and normalized SBOM
 - wheel and source-distribution names, metadata, version, source identity, and
-  archive safety;
-- installed-wheel behavior;
-- execution-report provenance, counts, size, and document digests;
-- CycloneDX, official OpenVEX, and strict CSAF validation; and
-- exact hashes already present on PyPI.
+  archive safety
+- installed-wheel behavior
+- execution-report provenance, counts, size, and document digests
+- CycloneDX, official OpenVEX, and strict CSAF validation
+- exact hashes already present on PyPI
 
 Release resolution, asset validation, and the immediate pre-OIDC check each
 query GitHub independently and require every asset to be in the completed state
