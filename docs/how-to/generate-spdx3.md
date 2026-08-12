@@ -13,7 +13,7 @@ pass that name with `--creator`.
 Before you begin:
 
 - Install Vexcalibur `v0.7.0` or newer, the first release with SPDX 3 output.
-  See [Install Vexcalibur](install.md).
+  See [Install Vexcalibur](../install.md).
 - Have a CycloneDX SBOM and a reviewed findings file ready. The example calls
   them `sbom.json` and `findings.json`.
 - Open a Bash-compatible shell.

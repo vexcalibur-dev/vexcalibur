@@ -24,7 +24,8 @@ closed-world schema:
 | `conclusion` | Nonempty review conclusion and qualifications |
 
 Unknown and duplicate JSON keys are errors. `findings.json` follows the
-[local-findings contract](local-findings.md), with additional evidence rules:
+[local-findings contract](../reference/local-findings.md), with additional
+evidence rules:
 
 - its root contains only `findings`.
 - every finding explicitly uses `in_triage`.
