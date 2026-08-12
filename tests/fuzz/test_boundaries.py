@@ -34,6 +34,27 @@ CORPUS_EXPECTATIONS: dict[str, tuple[str, str | None]] = {
     "osv/valid-gzip-query.json": ("accepted", None),
     "report/malformed-utf8.hex": ("rejected", "VexRenderError"),
     "report/valid-multibyte.txt": ("accepted", None),
+    "report-parser/deep-nesting.json": ("rejected", "GenerationExecutionReportParseError"),
+    "report-parser/duplicate-key.json": ("rejected", "GenerationExecutionReportParseError"),
+    "report-parser/count-over-limit.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/malformed-utf8.hex": ("rejected", "GenerationExecutionReportParseError"),
+    "report-parser/multibyte-command.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/noncanonical-whitespace.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/unsupported-schema-version.json": (
+        "rejected",
+        "GenerationExecutionReportParseError",
+    ),
+    "report-parser/valid-maximum-count.json": ("accepted", None),
+    "report-parser/valid-zero-findings.json": ("accepted", None),
     "sbom/forbidden-entity.xml": ("rejected", "SbomError"),
     "sbom/invalid-spec-version.json": ("rejected", "SbomError"),
     "sbom/non-string-spec-version.json": ("rejected", "SbomError"),

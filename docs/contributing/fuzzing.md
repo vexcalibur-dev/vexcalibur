@@ -24,7 +24,12 @@ failure is a crash to investigate.
 | `osv` | OSV response transport and query parsers | Identity, valid and malformed gzip, HTTP errors, pagination, evolving fields, and terminal-safe vulnerability IDs are covered without network access. |
 | `identity` | CycloneDX component normalization | Equivalent generated JSON and XML produce the same component identity. |
 | `report` | Generation execution-report serialization and schema validation | Strict UTF-8, canonical JSON, schema validation, and the rendered-document digest and byte count remain deterministic. The harness checks that bounded synthetic reports stay below 16 KiB; ordinary regression tests cover rejection at the exact size boundary. |
+| `report-parser` | Byte-input path of the supported `parse_generation_execution_report()` API | Accepted bytes round-trip canonically. Invalid UTF-8, duplicate keys, excessive nesting, unsupported schema versions, and invalid counts produce the documented parse error. |
 | `consumer` | Published execution-report consumer | Arbitrary report bytes are either rejected by a typed parser or validate deterministically against a matching document. Schema bytes must match the reviewed schema exactly before validation, so substituted schemas and external references never run. |
+
+The parser target sends bytes directly to the supported API. Ordinary
+regression tests cover its separate text-input path, including the size check
+that runs before UTF-8 encoding.
 
 Inputs are synthetic. The harness never calls GitHub, OSV, or another service.
 Do not add private SBOMs, credentials, embargoed vulnerability data, or customer
@@ -62,7 +67,7 @@ published wheels support CPython 3.12–3.14 on Linux x86-64. The scheduled job
 uses CPython 3.14 on an x86-64 Ubuntu runner. Other platforms can run the
 Hypothesis layer but cannot install the locked Atheris group.
 
-Run every target locally:
+From the repository root on supported Linux x86-64, run every target:
 
 ```bash
 make fuzz-coverage
@@ -71,8 +76,17 @@ make fuzz-coverage
 Select one target while developing:
 
 ```bash
-FUZZ_TARGET=osv FUZZ_MAX_TOTAL_TIME=60 make fuzz-coverage
+FUZZ_TARGET=report-parser FUZZ_MAX_TOTAL_TIME=60 make fuzz-coverage
 ```
+
+Use `report` for the report producer, `report-parser` for the supported Python
+parser, and `consumer` for the published schema-validation example.
+
+The local defaults allocate four minutes and 30 seconds across all nine
+targets. The scheduled workflow allocates 15 minutes to fuzzing, plus setup and
+dependency-audit time within its 20-minute job limit. A successful campaign
+prints `DONE` and final statistics for every selected target, exits with status
+`0`, and creates no crash reproducer under `fuzz-artifacts/`.
 
 Defaults are deliberately finite:
 
@@ -81,7 +95,7 @@ Defaults are deliberately finite:
 | Input length | 65,536 bytes | 65,536 bytes |
 | One input | 5 seconds | 5 seconds |
 | Resident memory | 2,048 MiB | 2,048 MiB |
-| Campaign per target | 30 seconds | 120 seconds |
+| Campaign per target | 30 seconds | 100 seconds |
 | Whole CI job | Not applicable | 20 minutes |
 
 Lower the local input cap with `FUZZ_MAX_LEN`. The shared oracle always rejects

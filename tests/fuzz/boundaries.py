@@ -8,6 +8,7 @@ import importlib.util
 import json
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -18,6 +19,10 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 from packageurl import PackageURL
 
+from vexcalibur.api import (
+    GenerationExecutionReportParseError,
+    parse_generation_execution_report,
+)
 from vexcalibur.domain import ComponentIdentity
 from vexcalibur.generation_result import (
     MAX_EXECUTION_REPORT_BYTES,
@@ -39,16 +44,6 @@ from vexcalibur.sources.osv import OsvClient, OsvClientError
 
 MAX_FUZZ_INPUT_BYTES = 64 * 1024
 OSV_PAGE_SEPARATOR = b"\n--vexcalibur-fuzz-page--\n"
-FUZZ_TARGETS = (
-    "json",
-    "sbom",
-    "github",
-    "local",
-    "osv",
-    "identity",
-    "report",
-    "consumer",
-)
 _REPORT_CONSUMER_PATH = (
     Path(__file__).parents[2] / "docs" / "examples" / "validate_execution_report.py"
 )
@@ -93,6 +88,14 @@ Outcome = tuple[str, str]
 Exercise = Callable[[bytes], str]
 
 
+@dataclass(frozen=True, slots=True)
+class FuzzTarget:
+    """Production boundary and the typed rejections it documents."""
+
+    exercise: Exercise
+    expected_errors: tuple[type[Exception], ...]
+
+
 class _BytesStream(httpx.SyncByteStream):
     """Expose one raw HTTP response chunk without HTTPX pre-decoding it."""
 
@@ -108,14 +111,13 @@ def deterministic_outcome(target: str, data: bytes) -> Outcome:
     if len(data) > MAX_FUZZ_INPUT_BYTES:
         raise ValueError(f"fuzz input exceeds {MAX_FUZZ_INPUT_BYTES} bytes")
     try:
-        exercise = _EXERCISES[target]
-        expected_errors = _EXPECTED_ERRORS[target]
+        configured_target = FUZZ_TARGETS[target]
     except KeyError as exc:
         raise ValueError(f"unknown fuzz target: {target}") from exc
 
     try:
-        return ("accepted", exercise(data))
-    except expected_errors as exc:
+        return ("accepted", configured_target.exercise(data))
+    except configured_target.expected_errors as exc:
         detail = exc.kind.value if isinstance(exc, StrictJsonError) else type(exc).__name__
         return ("rejected", detail)
 
@@ -364,6 +366,14 @@ def _exercise_report(data: bytes) -> str:
     return _digest(serialized)
 
 
+def _exercise_report_parser(data: bytes) -> str:
+    parsed = parse_generation_execution_report(data)
+    canonical = parsed.to_json().encode("ascii")
+    if data != canonical:
+        raise AssertionError("execution report parser accepted noncanonical JSON")
+    return _digest(canonical)
+
+
 def _exercise_consumer(data: bytes) -> str:
     selector = data[0] if data else 0
     payload = data[1:] if data else b""
@@ -436,29 +446,28 @@ def _digest(value: bytes) -> str:
     return hashlib.sha256(value, usedforsecurity=False).hexdigest()
 
 
-_EXERCISES: dict[str, Exercise] = {
-    "json": _exercise_json,
-    "sbom": _exercise_sbom,
-    "github": _exercise_github,
-    "local": _exercise_local,
-    "osv": _exercise_osv,
-    "identity": _exercise_identity,
-    "report": _exercise_report,
-    "consumer": _exercise_consumer,
-}
-
-_EXPECTED_ERRORS: dict[str, tuple[type[Exception], ...]] = {
-    "json": (StrictJsonError,),
-    "sbom": (SbomError,),
-    "github": (StrictJsonError, GithubSbomClientError),
-    "local": (LocalFindingsError,),
-    "osv": (OsvClientError,),
-    "identity": (),
-    "report": (VexRenderError,),
-    "consumer": (
-        SchemaError,
-        UnicodeError,
-        ValidationError,
-        ValueError,
+FUZZ_TARGETS: dict[str, FuzzTarget] = {
+    "json": FuzzTarget(_exercise_json, (StrictJsonError,)),
+    "sbom": FuzzTarget(_exercise_sbom, (SbomError,)),
+    "github": FuzzTarget(
+        _exercise_github,
+        (StrictJsonError, GithubSbomClientError),
+    ),
+    "local": FuzzTarget(_exercise_local, (LocalFindingsError,)),
+    "osv": FuzzTarget(_exercise_osv, (OsvClientError,)),
+    "identity": FuzzTarget(_exercise_identity, ()),
+    "report": FuzzTarget(_exercise_report, (VexRenderError,)),
+    "report-parser": FuzzTarget(
+        _exercise_report_parser,
+        (GenerationExecutionReportParseError,),
+    ),
+    "consumer": FuzzTarget(
+        _exercise_consumer,
+        (
+            SchemaError,
+            UnicodeError,
+            ValidationError,
+            ValueError,
+        ),
     ),
 }
