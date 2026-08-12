@@ -15,8 +15,8 @@ Do not add private reports, embargoed advisory data, credentials, or customer
 identifiers here.
 
 Maintainers should follow [Build and review local release
-evidence](../docs/how-to/build-release-evidence.md) before changing either JSON
-file. The [release-evidence reference](../docs/reference/release-evidence.md)
+evidence](../docs/contributing/build-release-evidence.md) before changing either JSON
+file. The [release-evidence reference](../docs/contributing/release-evidence.md)
 defines both local and immutable-publication bundles and their omission rules.
 
 `recovery-contract.json` is separate release metadata. Its schema version marks

@@ -16,7 +16,7 @@ RECOVERY_TAG_PATTERN = f"^v{VERSION_BODY_PATTERN}$"
 
 
 def test_windows_documentation_uses_the_canonical_platform_contract() -> None:
-    documentation = (ROOT / "docs/development/ci.md").read_text(encoding="utf-8")
+    documentation = (ROOT / "docs/contributing/ci.md").read_text(encoding="utf-8")
     contract = (ROOT / "scripts/check-execution-report-windows.ps1").read_text(encoding="utf-8")
     assignment = contract.index("$env:VEXCALIBUR_EXPECTED_PYTHON = $ExpectedPython")
     installed_check = contract.index("& $python tests/integration/check_installed_windows.py")
@@ -46,8 +46,7 @@ def test_execution_report_schema_checkout_bytes_are_pinned_to_lf() -> None:
 
 
 def test_release_recovery_guide_preflights_before_dispatch() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
+    documentation = (ROOT / "docs/contributing/publish-to-pypi.md").read_text(encoding="utf-8")
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     pypi_workflow = (ROOT / ".github/workflows/pypi.yml").read_text(encoding="utf-8")
     section = documentation.split("## Recover an interrupted GitHub Release", maxsplit=1)[1]
@@ -56,7 +55,6 @@ def test_release_recovery_guide_preflights_before_dispatch() -> None:
     assert RECOVERY_TAG_PATTERN in section
     assert RECOVERY_TAG_PATTERN in workflow
     assert RECOVERY_TAG_PATTERN in pypi_workflow
-    assert readme.count(RELEASE_VERSION_PATTERN) == 2
     contracts = (
         "Release tag must look like v1.2.3 without leading zeros.",
         "git pull --ff-only origin main",
@@ -82,7 +80,7 @@ def test_release_recovery_guide_preflights_before_dispatch() -> None:
 
 
 def test_release_recovery_guide_requires_exact_tag_schema_version() -> None:
-    documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
+    documentation = (ROOT / "docs/contributing/publish-to-pypi.md").read_text(encoding="utf-8")
 
     assert documentation.count("has_exact_tag_schema_version() {") == 1
     assert 'type(message.get("schema_version")) is int' in documentation
@@ -92,7 +90,7 @@ def test_release_recovery_guide_requires_exact_tag_schema_version() -> None:
 def test_release_recovery_guide_fails_closed_when_status_cannot_run(tmp_path: Path) -> None:
     if BASH is None:
         raise RuntimeError("bash is required to test documented recovery")
-    documentation = (ROOT / "docs/how-to/publish-to-pypi.md").read_text(encoding="utf-8")
+    documentation = (ROOT / "docs/contributing/publish-to-pypi.md").read_text(encoding="utf-8")
     section = documentation.split("## Recover an interrupted GitHub Release", maxsplit=1)[1]
     script = section.split("```bash\n", maxsplit=1)[1].split("\n```", maxsplit=1)[0]
     script = script.replace("REPLACE_WITH_RELEASE_TAG", "v1.2.3")
@@ -125,7 +123,7 @@ def test_release_recovery_guide_fails_closed_when_status_cannot_run(tmp_path: Pa
 def test_publication_verification_guide_stops_after_a_failed_fetch(tmp_path: Path) -> None:
     if BASH is None:
         raise RuntimeError("bash is required to test publication verification")
-    documentation = (ROOT / "docs/reference/release-evidence.md").read_text(encoding="utf-8")
+    documentation = (ROOT / "docs/contributing/release-evidence.md").read_text(encoding="utf-8")
     section = documentation.split(
         "Verify a schema-2 publication bundle against an exact tag and commit:",
         maxsplit=1,

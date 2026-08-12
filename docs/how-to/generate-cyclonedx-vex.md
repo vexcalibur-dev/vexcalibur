@@ -2,7 +2,7 @@
 
 Use `vexcalibur generate` to write CycloneDX 1.6 VEX JSON from a local CycloneDX SBOM or a GitHub Dependency Graph SBOM.
 
-These examples call an installed `vexcalibur`. If you don't have one yet, follow [Install Vexcalibur](install.md) first. Substitute your own SBOM and findings paths throughout.
+These examples call an installed `vexcalibur`. If you don't have one yet, follow [Install Vexcalibur](../install.md) first. Substitute your own SBOM and findings paths throughout.
 
 Choose one inventory input and one finding source:
 
@@ -133,59 +133,17 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}
 ```
 
-## Run the released GitHub Action
+## Run it in GitHub Actions
 
-This workflow uses the tested `v0.2.2` Action pair: Action commit
-`80c930ee228c2757a4aadb51ce29a79c5066d6ca` and `vexcalibur==0.3.1`. It keeps
-the vulnerability lookup local and uploads the generated VEX file only after
-the generation step succeeds.
+A companion Action wraps this command for workflows:
+[vexcalibur-dev/vexcalibur-action](https://github.com/vexcalibur-dev/vexcalibur-action).
 
-```yaml
-name: Generate VEX
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  vex:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Generate CycloneDX VEX
-        uses: vexcalibur-dev/vexcalibur-action@80c930ee228c2757a4aadb51ce29a79c5066d6ca # v0.2.2
-        with:
-          package-spec: vexcalibur==0.3.1
-          args: |
-            generate
-            ${{ github.workspace }}/path/to/sbom.json
-            --offline
-            --findings-file
-            ${{ github.workspace }}/path/to/findings.json
-            --output
-            ${{ runner.temp }}/vex.json
-
-      - name: Upload VEX
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: cyclonedx-vex
-          path: ${{ runner.temp }}/vex.json
-          if-no-files-found: error
-```
-
-Replace both `path/to` values with files in your repository. A passing
-**Generate CycloneDX VEX** step followed by a `cyclonedx-vex` artifact is the
-success signal.
-
-The Action and package are separate trust decisions. To update either pin, use
-the Action release's compatibility declaration, pinned here to immutable
-Action commit `80c930ee228c2757a4aadb51ce29a79c5066d6ca`, to select a package
-version and Action commit tested together:
-[compatibility declaration](https://github.com/vexcalibur-dev/vexcalibur-action/blob/80c930ee228c2757a4aadb51ce29a79c5066d6ca/docs/reference/compatibility.md)
+The Action defines its own inputs and its own pinning, and it publishes a
+compatibility declaration naming the Vexcalibur version each Action commit was
+tested against. Those belong to the Action and change on its release schedule,
+so use [its
+documentation](https://github.com/vexcalibur-dev/vexcalibur-action#readme)
+rather than a workflow copied from this page.
 
 ## Read XML input
 

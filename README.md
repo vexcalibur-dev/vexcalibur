@@ -28,72 +28,38 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 
 ## Install a release
 
-Open the [release page](https://github.com/vexcalibur-dev/vexcalibur/releases)
-and choose an exact version. The commands prompt for that version so an
-unresolved placeholder cannot reach `pip`:
+Vexcalibur needs Python 3.10 through 3.14.
 
 ```bash
-set -euo pipefail
-
-read -r -p "Vexcalibur version from the release page: " VEXCALIBUR_VERSION
-if [[ ! "$VEXCALIBUR_VERSION" =~ ^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
-  printf 'Enter a MAJOR.MINOR.PATCH release version\n' >&2
-  exit 2
-fi
-VEXCALIBUR_VENV=".venv-vexcalibur-${VEXCALIBUR_VERSION}"
-if [[ -e "$VEXCALIBUR_VENV" ]]; then
-  printf 'Refusing to reuse %s\n' "$VEXCALIBUR_VENV" >&2
-  exit 2
-fi
-VEXCALIBUR_PYTHON="${VEXCALIBUR_PYTHON:-python3}"
-if ! "$VEXCALIBUR_PYTHON" -c \
-  'import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 14) else 1)'; then
-  printf 'Set VEXCALIBUR_PYTHON to a Python 3.10-3.14 interpreter\n' >&2
-  exit 2
-fi
-"$VEXCALIBUR_PYTHON" -m venv "$VEXCALIBUR_VENV"
-"$VEXCALIBUR_VENV/bin/python" -m pip install \
-  "vexcalibur==${VEXCALIBUR_VERSION}"
-INSTALLED_VERSION="$("$VEXCALIBUR_VENV/bin/python" -c \
-  'from importlib.metadata import version; print(version("vexcalibur"))')"
-test "$INSTALLED_VERSION" = "$VEXCALIBUR_VERSION"
-"$VEXCALIBUR_VENV/bin/vexcalibur" --help
+python3 -m venv .venv
+source .venv/bin/activate
+pip install vexcalibur
+vexcalibur --help
 ```
 
-In PowerShell 7.3 or newer, use:
+In PowerShell, the virtual environment puts its commands under `Scripts`:
 
 ```powershell
-$ErrorActionPreference = "Stop"
-$VEXCALIBUR_PYTHON = if ($env:VEXCALIBUR_PYTHON) { $env:VEXCALIBUR_PYTHON } else { "py" }
-& $VEXCALIBUR_PYTHON -c `
-    'import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 14) else 1)'
-if ($LASTEXITCODE -ne 0) {
-    throw "Set VEXCALIBUR_PYTHON to a Python 3.10-3.14 interpreter"
-}
-$PSNativeCommandUseErrorActionPreference = $true
-$VEXCALIBUR_VERSION = Read-Host "Vexcalibur version from the release page"
-if ($VEXCALIBUR_VERSION -notmatch '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$') {
-    throw "Enter a MAJOR.MINOR.PATCH release version"
-}
-$VEXCALIBUR_VENV = ".venv-vexcalibur-$VEXCALIBUR_VERSION"
-if (Test-Path -LiteralPath $VEXCALIBUR_VENV) {
-    throw "Refusing to reuse $VEXCALIBUR_VENV"
-}
-& $VEXCALIBUR_PYTHON -m venv $VEXCALIBUR_VENV
-$PYTHON = Join-Path $VEXCALIBUR_VENV "Scripts/python.exe"
-$VEXCALIBUR = Join-Path $VEXCALIBUR_VENV "Scripts/vexcalibur.exe"
-& $PYTHON -m pip install "vexcalibur==$VEXCALIBUR_VERSION"
-$INSTALLED_VERSION = & $PYTHON -c `
-    'from importlib.metadata import version; print(version("vexcalibur"))'
-if ($INSTALLED_VERSION -ne $VEXCALIBUR_VERSION) {
-    throw "Installed $INSTALLED_VERSION instead of $VEXCALIBUR_VERSION"
-}
-& $VEXCALIBUR --help
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install vexcalibur
+vexcalibur --help
 ```
 
+With `uv`, one command handles the environment and there's nothing to activate:
+
+```bash
+uv tool install vexcalibur
+```
+
+That gives you the latest release, which is what you want to try it out.
+Vexcalibur is pre-1.0, so pin an exact version in anything you automate. The
+[install guide](https://vexcalibur-dev.github.io/vexcalibur/install.html)
+covers pinning, PATH setup, and how to check which formats your release
+supports.
+
 Once it's installed, [generate your first document](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html)
-against your own SBOM. The [install guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/install.html)
-covers PATH setup and how to check which formats your release supports.
+against your own SBOM.
 
 ## Try local generation from a checkout
 
@@ -158,24 +124,61 @@ Without that flag, the public endpoint fails closed. Fetching an SBOM from GitHu
 
 ## Documentation
 
-- Start with the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html).
-- Follow the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html) generation guide.
-- Use the [CLI reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html) for flags and failure behavior.
-- Use the [Python API guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/use-python-api.html) and [API reference](https://vexcalibur-dev.github.io/vexcalibur/reference/python-api.html) when embedding Vexcalibur.
-- The default-branch [execution report reference](https://vexcalibur-dev.github.io/vexcalibur/reference/execution-report.html) covers machine-readable generation metadata. The [Python report guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-execution-report-from-python.html) covers the cross-platform API. Before using either path, verify that the selected release contains the report API or lists `--execution-report` in `vexcalibur generate --help`.
-- The CLI report transaction supports Linux and macOS. Windows embeddings can construct and validate the same report through the supported Python facade.
-- Read the [provider contract](https://vexcalibur-dev.github.io/vexcalibur/reference/provider-contract.html) and [renderer contract](https://vexcalibur-dev.github.io/vexcalibur/reference/renderer-contract.html) before adding an integration.
-- Read the [CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html), [OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html), or [CSAF](https://vexcalibur-dev.github.io/vexcalibur/reference/csaf-output.html) output contract before consuming generated files.
-- Read the [architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html) before adding a source or output format.
-- Read the [self-release evidence design](https://vexcalibur-dev.github.io/vexcalibur/explanation/self-release-evidence.html), inspect a [local bundle](https://vexcalibur-dev.github.io/vexcalibur/how-to/build-release-evidence.html), or follow the [immutable release runbook](https://vexcalibur-dev.github.io/vexcalibur/how-to/publish-to-pypi.html).
-- Check [project status](https://vexcalibur-dev.github.io/vexcalibur/explanation/project-status.html) for current limits.
-
 The complete manual is at [vexcalibur-dev.github.io/vexcalibur][vexcalibur-docs].
+
+### Getting started
+
+Work through the
+[quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html),
+then follow the
+[CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html),
+[OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-openvex.html),
+[CSAF](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-csaf.html), or
+[SPDX 3](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-spdx3.html)
+generation guide. Check [project
+status](https://vexcalibur-dev.github.io/vexcalibur/explanation/project-status.html)
+for current limits.
+
+### Running it
+
+The [CLI
+reference](https://vexcalibur-dev.github.io/vexcalibur/reference/cli.html)
+covers flags and failure behavior. Read the
+[CycloneDX](https://vexcalibur-dev.github.io/vexcalibur/reference/cyclonedx-vex-output.html),
+[OpenVEX](https://vexcalibur-dev.github.io/vexcalibur/reference/openvex-output.html),
+[CSAF](https://vexcalibur-dev.github.io/vexcalibur/reference/csaf-output.html), or
+[SPDX 3](https://vexcalibur-dev.github.io/vexcalibur/reference/spdx3-output.html)
+output contract before consuming generated files.
+
+### Embedding it
+
+The [Python API
+guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/use-python-api.html)
+and [API
+reference](https://vexcalibur-dev.github.io/vexcalibur/reference/python-api.html)
+cover the supported facade. Read the [provider
+contract](https://vexcalibur-dev.github.io/vexcalibur/reference/provider-contract.html)
+and [renderer
+contract](https://vexcalibur-dev.github.io/vexcalibur/reference/renderer-contract.html)
+before adding an integration, and the
+[architecture](https://vexcalibur-dev.github.io/vexcalibur/explanation/architecture.html)
+before adding a source or output format.
+
+### Execution reports
+
+The [execution report
+reference](https://vexcalibur-dev.github.io/vexcalibur/reference/execution-report.html)
+covers the machine-readable generation metadata, and the [Python report
+guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-execution-report-from-python.html)
+covers the cross-platform API. Both describe the default branch, so verify that
+your release lists `--execution-report` in `vexcalibur generate --help` first.
+The CLI report transaction supports Linux and macOS; Windows embeddings build
+and validate the same report through the Python facade.
 
 ## Contributing
 
 The complete local gate runs on Linux and needs the host tools listed in
-[Reproduce important gates](https://vexcalibur-dev.github.io/vexcalibur/development/ci.html#reproduce-important-gates).
+[Reproduce important gates](https://vexcalibur-dev.github.io/vexcalibur/contributing/ci.html#reproduce-important-gates).
 That guide includes exact portable commands for macOS and Windows. Required
 pull-request CI runs the Linux-only checks.
 
@@ -199,11 +202,11 @@ the deterministic fuzz smoke profile:
 make fuzz-smoke
 ```
 
-See the [contribution guide](https://github.com/vexcalibur-dev/vexcalibur/blob/main/CONTRIBUTING.md),
-the [security policy](https://github.com/vexcalibur-dev/vexcalibur/security/policy), the
-[fuzzing guide](https://vexcalibur-dev.github.io/vexcalibur/development/fuzzing.html),
-and the [Python style policy](https://vexcalibur-dev.github.io/vexcalibur/development/python-style.html)
-before opening a pull request.
+See the [contribution guide](https://github.com/vexcalibur-dev/vexcalibur/blob/main/CONTRIBUTING.md)
+and the [security policy](https://github.com/vexcalibur-dev/vexcalibur/security/policy)
+before opening a pull request. The [contributor
+documentation](https://vexcalibur-dev.github.io/vexcalibur/contributing/index.html)
+collects the style policy, fuzzing guide, CI layout, and governance checks.
 
 Use the [issue forms](https://github.com/vexcalibur-dev/vexcalibur/issues) for questions, bugs, and feature requests. The organization [support policy](https://github.com/vexcalibur-dev/.github/blob/main/SUPPORT.md) explains which public route to use, and the [code of conduct](https://github.com/vexcalibur-dev/.github/blob/main/CODE_OF_CONDUCT.md) applies to project spaces.
 

@@ -11,7 +11,7 @@ category, and use an absolute namespace URL controlled by that publisher.
 
 Before you begin:
 
-- Install Vexcalibur `v0.3.0` or newer. See [Install Vexcalibur](install.md).
+- Install Vexcalibur `v0.3.0` or newer. See [Install Vexcalibur](../install.md).
 - Have a CycloneDX SBOM and a reviewed findings file ready. The example calls
   them `sbom.json` and `findings.json`.
 - Open a Bash-compatible shell.

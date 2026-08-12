@@ -2,6 +2,11 @@
 
 Vexcalibur is pre-1.0, so a small change can still alter a public contract. Keep each pull request focused. State any effect on CLI behavior, Python APIs, VEX output, or data-sharing boundaries.
 
+This file covers the expectations for a pull request. The [contributor
+documentation](docs/contributing/index.md) goes deeper on one area each: the
+style policy, the fuzzing guide, the CI layout, the governance checks, and the
+release runbooks.
+
 ## Set up the repository
 
 Install these prerequisites:
@@ -12,7 +17,7 @@ Install these prerequisites:
 - The `uv`, `actionlint`, and `shellcheck` versions in `.tool-versions`.
 
 The complete `make check` gate also needs the Linux host tools listed in
-[Reproduce important gates](docs/development/ci.md#reproduce-important-gates).
+[Reproduce important gates](docs/contributing/ci.md#reproduce-important-gates).
 On macOS or Windows, follow the portable procedure in that section. Required
 pull-request CI is the authoritative result for the Linux-only recovery,
 workflow-shell, and fuzz gates.
@@ -39,7 +44,7 @@ make check
 
 Maintainers changing GitHub, release, environment, or security settings must
 also run the read-only live policy check described in [Verify GitHub
-governance](docs/development/github-governance.md):
+governance](docs/contributing/github-governance.md):
 
 ```bash
 make governance-check
@@ -67,7 +72,7 @@ boundary. Atheris requires CPython 3.12–3.14 on Linux x86-64:
 make fuzz-coverage
 ```
 
-The [fuzzing guide](docs/development/fuzzing.md) defines target scope, resource
+The [fuzzing guide](docs/contributing/fuzzing.md) defines target scope, resource
 limits, corpus rules, and crash triage. Never add private SBOMs, credentials,
 or embargoed findings to a corpus.
 
@@ -102,7 +107,7 @@ make release-evidence-check
 ```
 
 Use the exact wheel-selection and review procedure in [Build and review local
-release evidence](docs/how-to/build-release-evidence.md). Never convert an
+release evidence](docs/contributing/build-release-evidence.md). Never convert an
 empty result into `not_affected` or add non-public advisory data to the checked
 inputs.
 
@@ -122,11 +127,11 @@ make installed-cli-check
 
 ## Follow the project conventions
 
-The enforceable Python rules live in [docs/development/python-style.md](docs/development/python-style.md). The vendored Google guide is background material; `pyproject.toml` and the project policy win when they differ.
+The enforceable Python rules live in [docs/contributing/python-style.md](docs/contributing/python-style.md). The vendored Google guide is background material; `pyproject.toml` and the project policy win when they differ.
 
 Package versions come from Git tags through `setuptools-scm`. Do not put a release version in `pyproject.toml` or package source. A build may create `src/vexcalibur/_version.py`; leave that generated file uncommitted.
 
-Use `vMAJOR.MINOR.PATCH` release tags. The automated release and PyPI workflows validate the exact release commit and its built metadata. Maintainers should follow the [PyPI publishing runbook](docs/how-to/publish-to-pypi.md).
+Use `vMAJOR.MINOR.PATCH` release tags. The automated release and PyPI workflows validate the exact release commit and its built metadata. Maintainers should follow the [PyPI publishing runbook](docs/contributing/publish-to-pypi.md).
 
 ## Prepare the pull request
 

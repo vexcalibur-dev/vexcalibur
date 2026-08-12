@@ -12,4 +12,4 @@ This directory holds third-party reference material. It does not define Vexcalib
 
 The sync workflow removes trailing whitespace and repairs a few upstream-local links. The text otherwise remains upstream material under its own license. Vexcalibur remains Apache-2.0 licensed.
 
-Follow the [local Python style policy](../development/python-style.md) when the guide and this repository differ.
+Follow the [local Python style policy](../contributing/python-style.md) when the guide and this repository differ.

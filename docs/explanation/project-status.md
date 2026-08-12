@@ -67,7 +67,7 @@ exchange. The current production review makes zero assertions; a separate
 synthetic `in_triage` fixture exercises CycloneDX, OpenVEX, and CSAF equivalence.
 
 This is maintainer and release tooling, not part of the public package API.
-Read [Why Vexcalibur publishes evidence about itself](self-release-evidence.md)
+Read [Why Vexcalibur publishes evidence about itself](../contributing/self-release-evidence.md)
 for its trust, isolation, and recovery boundaries.
 
 ## CSAF conformance

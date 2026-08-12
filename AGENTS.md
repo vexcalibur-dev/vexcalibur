@@ -115,7 +115,7 @@ Public vulnerability services fail closed.
 
 ## Style and tests
 
-Follow [docs/development/python-style.md](docs/development/python-style.md) and `pyproject.toml`. The vendored Google Python guide is reference material, not the local contract.
+Follow [docs/contributing/python-style.md](docs/contributing/python-style.md) and `pyproject.toml`. The vendored Google Python guide is reference material, not the local contract.
 
 Put tests under `tests/`. Mark external calls with `@pytest.mark.live`. Prefer deterministic fixtures and golden output.
 
@@ -147,17 +147,38 @@ For a substantial documentation change, use the scorched-earth documentation rev
 
 `setuptools-scm` derives versions from `vMAJOR.MINOR.PATCH` tags. Do not add a literal project version or commit generated `src/vexcalibur/_version.py`.
 
+The tag is the release. Nothing commits to the repository after the release
+version is calculated: no version bump, no changelog write-back, no
+substituting the tag into tracked files. A process that commits after tagging
+leaves the tagged commit holding something other than the released bytes, which
+breaks the evidence tying a release to what shipped. Anything needing the
+version derives it at build time from the tag.
+
+That covers documentation, not only code. Don't write the current release
+version into prose, install commands, or examples, because no release step
+updates it afterward. Install commands install unpinned. Where a guide has to
+show how to pin, use a permanently true version such as the first release and
+say it is there for the form. Where a reader needs the current version, give
+them a command that computes it rather than a number to copy. Historical
+references are fine — which release first shipped a format, or a minimum
+supported version — because they stay true.
+
+Versions owned by another repository don't belong here either. The GitHub
+Action depends on Vexcalibur rather than the reverse, so its commit pins,
+inputs, and compatibility declarations are documented in
+`vexcalibur-dev/vexcalibur-action`.
+
 `.github/workflows/release.yml` derives a version from Conventional Commits and validates the exact `main` commit. The `vexcalibur-dev-automation` GitHub App creates the tag and GitHub Release.
 
 `.github/workflows/pypi.yml` accepts only an automation-authored immutable
 release whose exact tagged commit remains an ancestor of current `main`. It
 publishes through Trusted Publishing.
 
-Follow [docs/how-to/publish-to-pypi.md](docs/how-to/publish-to-pypi.md) for release work. Do not add a manual upload path without a security review.
+Follow [docs/contributing/publish-to-pypi.md](docs/contributing/publish-to-pypi.md) for release work. Do not add a manual upload path without a security review.
 
 GitHub organization, repository, environment, and security settings are covered
 by the read-only policy in
-[docs/development/github-governance.md](docs/development/github-governance.md).
+[docs/contributing/github-governance.md](docs/contributing/github-governance.md).
 Run `make governance-check` after changing those settings. The command must fail
 if any required endpoint is inaccessible; do not add a stored administrator
 token to CI to make it periodic.

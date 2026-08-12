@@ -133,7 +133,7 @@ make release-evidence-check
 ```
 
 See [Build and review local release
-evidence](../how-to/build-release-evidence.md) for input review, expected files,
+evidence](build-release-evidence.md) for input review, expected files,
 and failure recovery. The full schema-2 graph is intentionally exercised on
 hosted pull-request runners because it verifies GitHub artifact IDs and
 transport digests. An untagged candidate gets an ephemeral local `v0.0.0` tag;

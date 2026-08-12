@@ -8,7 +8,7 @@ OpenVEX requires a document author and at least one statement. Some statuses als
 
 Before you begin:
 
-- Install Vexcalibur `v0.2.0` or newer. See [Install Vexcalibur](install.md).
+- Install Vexcalibur `v0.2.0` or newer. See [Install Vexcalibur](../install.md).
 - Have a CycloneDX SBOM and a reviewed findings file ready. The example calls
   them `sbom.json` and `findings.json`.
 - Open a Bash-compatible shell.

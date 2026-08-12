@@ -4,7 +4,7 @@ In this tutorial, we'll turn two committed example files into CycloneDX 1.6 VEX 
 
 We work from a source checkout here so that you get the same inputs and the
 same output we describe. To run Vexcalibur against your own SBOM instead,
-[install a release](../how-to/install.md) and follow the [CycloneDX generation
+[install a release](../install.md) and follow the [CycloneDX generation
 guide](../how-to/generate-cyclonedx-vex.md).
 
 ## Set up Vexcalibur

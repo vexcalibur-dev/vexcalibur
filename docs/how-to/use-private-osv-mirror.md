@@ -2,7 +2,7 @@
 
 Use an internal OSV-compatible endpoint when package names, versions, or dependency inventory must not go to public OSV.
 
-These examples call an installed `vexcalibur`. If you don't have one yet, follow [Install Vexcalibur](install.md) first.
+These examples call an installed `vexcalibur`. If you don't have one yet, follow [Install Vexcalibur](../install.md) first.
 
 You need an endpoint that implements OSV `/v1/querybatch` and a runner that can reach it.
 
