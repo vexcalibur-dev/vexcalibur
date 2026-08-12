@@ -20,6 +20,15 @@ FINDINGS_FILE = FIXTURE_ROOT / "findings" / "all-analysis-states.json"
 TIMESTAMP = "2026-06-23T00:00:00Z"
 STABLE_HELP_ENV = {"COLUMNS": "120", "NO_COLOR": "1", "TERM": "dumb"}
 
+# The documented migration example addresses readers who installed a release,
+# so it names input files the reader supplies. Map those names onto the
+# fixtures the golden comparison expects.
+DOCUMENTED_INPUT_PATHS = {
+    "legacy-config.yml": str(LEGACY_CONFIG),
+    "sbom.xml": str(LEGACY_SBOM),
+    "findings.json": str(FINDINGS_FILE),
+}
+
 runner = CliRunner()
 
 
@@ -342,8 +351,8 @@ def _read_golden_stdout(case_name: str) -> str:
 def _documented_vexy_args(marker: str) -> list[str]:
     command = _extract_marked_bash_command(ROOT / "docs" / "reference" / "cli.md", marker)
     args = shlex.split(command)
-    assert args[:4] == ["uv", "run", "--frozen", "vexy"]
-    return args[4:]
+    assert args[0] == "vexy"
+    return [DOCUMENTED_INPUT_PATHS.get(arg, arg) for arg in args[1:]]
 
 
 def _extract_marked_bash_command(path: Path, marker: str) -> str:

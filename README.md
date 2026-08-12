@@ -9,10 +9,9 @@
 
 Vexcalibur turns software bills of materials and vulnerability findings into VEX documents, for the security and release engineers who publish VEX statements alongside an SBOM. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
-Current releases write CycloneDX 1.6, OpenVEX 0.2.0, and CSAF 2.0 JSON. CSAF
-output uses the `csaf_vex` profile. This branch also writes SPDX 3.0.1
-JSON-LD through the security profile's VEX relationships; no release through
-v0.6.3 includes it.
+Current releases write CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, and SPDX 3.0.1
+JSON. CSAF output uses the `csaf_vex` profile, and SPDX 3 output goes through
+the security profile's VEX relationships. SPDX 3 arrived in `v0.7.0`.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
@@ -46,7 +45,13 @@ if [[ -e "$VEXCALIBUR_VENV" ]]; then
   printf 'Refusing to reuse %s\n' "$VEXCALIBUR_VENV" >&2
   exit 2
 fi
-python -m venv "$VEXCALIBUR_VENV"
+VEXCALIBUR_PYTHON="${VEXCALIBUR_PYTHON:-python3}"
+if ! "$VEXCALIBUR_PYTHON" -c \
+  'import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 14) else 1)'; then
+  printf 'Set VEXCALIBUR_PYTHON to a Python 3.10-3.14 interpreter\n' >&2
+  exit 2
+fi
+"$VEXCALIBUR_PYTHON" -m venv "$VEXCALIBUR_VENV"
 "$VEXCALIBUR_VENV/bin/python" -m pip install \
   "vexcalibur==${VEXCALIBUR_VERSION}"
 INSTALLED_VERSION="$("$VEXCALIBUR_VENV/bin/python" -c \
@@ -59,6 +64,12 @@ In PowerShell 7.3 or newer, use:
 
 ```powershell
 $ErrorActionPreference = "Stop"
+$VEXCALIBUR_PYTHON = if ($env:VEXCALIBUR_PYTHON) { $env:VEXCALIBUR_PYTHON } else { "py" }
+& $VEXCALIBUR_PYTHON -c `
+    'import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 14) else 1)'
+if ($LASTEXITCODE -ne 0) {
+    throw "Set VEXCALIBUR_PYTHON to a Python 3.10-3.14 interpreter"
+}
 $PSNativeCommandUseErrorActionPreference = $true
 $VEXCALIBUR_VERSION = Read-Host "Vexcalibur version from the release page"
 if ($VEXCALIBUR_VERSION -notmatch '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$') {
@@ -68,7 +79,7 @@ $VEXCALIBUR_VENV = ".venv-vexcalibur-$VEXCALIBUR_VERSION"
 if (Test-Path -LiteralPath $VEXCALIBUR_VENV) {
     throw "Refusing to reuse $VEXCALIBUR_VENV"
 }
-py -m venv $VEXCALIBUR_VENV
+& $VEXCALIBUR_PYTHON -m venv $VEXCALIBUR_VENV
 $PYTHON = Join-Path $VEXCALIBUR_VENV "Scripts/python.exe"
 $VEXCALIBUR = Join-Path $VEXCALIBUR_VENV "Scripts/vexcalibur.exe"
 & $PYTHON -m pip install "vexcalibur==$VEXCALIBUR_VERSION"
@@ -80,9 +91,14 @@ if ($INSTALLED_VERSION -ne $VEXCALIBUR_VERSION) {
 & $VEXCALIBUR --help
 ```
 
-## Try local generation
+Once it's installed, [generate your first document](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html)
+against your own SBOM. The [install guide](https://vexcalibur-dev.github.io/vexcalibur/how-to/install.html)
+covers PATH setup and how to check which formats your release supports.
 
-Clone the repository, then install its locked dependencies:
+## Try local generation from a checkout
+
+Use this path to work on Vexcalibur itself, or to run unreleased output
+formats. Clone the repository, then install its locked dependencies:
 
 ```bash
 uv sync --frozen

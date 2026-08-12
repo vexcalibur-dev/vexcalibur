@@ -2,7 +2,7 @@
 
 Use an internal OSV-compatible endpoint when package names, versions, or dependency inventory must not go to public OSV.
 
-The `uv run --frozen` examples assume a Vexcalibur source checkout. Run them from its root after installing dependencies with `uv sync --frozen`. When using an installed release, run `vexcalibur` directly.
+These examples call an installed `vexcalibur`. If you don't have one yet, follow [Install Vexcalibur](install.md) first.
 
 You need an endpoint that implements OSV `/v1/querybatch` and a runner that can reach it.
 
@@ -11,8 +11,8 @@ You need an endpoint that implements OSV `/v1/querybatch` and a runner that can 
 Pass the mirror's base URL:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  path/to/private-sbom.json \
+vexcalibur generate \
+  private-sbom.json \
   --osv-url https://osv.internal.example \
   --output /tmp/vexcalibur-vex.json
 ```
@@ -32,8 +32,8 @@ that URL is private, provide a public name and URL that identify the feed or
 organization responsible for it:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  path/to/private-sbom.json \
+vexcalibur generate \
+  private-sbom.json \
   --osv-url https://osv.internal.example/private \
   --osv-source-name "Example Security Feed" \
   --osv-source-url https://security.example.test/vulnerability-data \
@@ -54,7 +54,7 @@ different provider.
 Keep the mirror selected when the SBOM comes from GitHub:
 
 ```bash
-uv run --frozen vexcalibur generate \
+vexcalibur generate \
   --github-repo internal/example \
   --github-api-url https://github.example.test/api/v3 \
   --github-token-env GH_ENTERPRISE_TOKEN \
@@ -69,7 +69,7 @@ This command contacts GitHub for the SBOM and the private mirror for findings. I
 Use the mirror with `query-osv`:
 
 ```bash
-uv run --frozen vexcalibur query-osv \
+vexcalibur query-osv \
   pkg:pypi/example@1.0.0 \
   --osv-url https://osv.internal.example
 ```

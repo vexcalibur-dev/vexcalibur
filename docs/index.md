@@ -3,7 +3,7 @@
 Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
 documents. It reads CycloneDX files or a GitHub Dependency Graph SBOM,
 collects findings from OSV-compatible services or local JSON, and writes
-CycloneDX 1.6, OpenVEX 0.2.0, or CSAF 2.0 JSON.
+CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX 3.0.1 JSON.
 
 Public OSV access fails closed. Vexcalibur sends package URLs and versions to `https://api.osv.dev` only when a command includes `--allow-public-osv`.
 
@@ -31,6 +31,7 @@ the plan for App-backed production automation.
 
 ## How-to guides
 
+- [Install Vexcalibur](how-to/install.md)
 - [Generate VEX from Python](how-to/use-python-api.md)
 - [Generate an execution report from Python](how-to/generate-execution-report-from-python.md)
 - [Generate CycloneDX VEX](how-to/generate-cyclonedx-vex.md)
@@ -76,6 +77,7 @@ the plan for App-backed production automation.
 
 tutorials/quickstart
 tutorials/offline-local-findings
+how-to/install
 how-to/use-python-api
 how-to/generate-execution-report-from-python
 how-to/generate-cyclonedx-vex

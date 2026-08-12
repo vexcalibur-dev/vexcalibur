@@ -12,42 +12,35 @@ pass that name with `--creator`.
 
 Before you begin:
 
-- Install Git, Python 3.10 or newer, and the `uv` version in `.tool-versions`.
-- Clone this repository and check out the exact release you intend to use.
-  No release through `v0.6.3` includes SPDX 3 output, so choose a newer
-  release and use the guide from that checkout.
-- Open a Bash-compatible shell in the repository root.
+- Install Vexcalibur `v0.7.0` or newer, the first release with SPDX 3 output.
+  See [Install Vexcalibur](install.md).
+- Have a CycloneDX SBOM and a reviewed findings file ready. The example calls
+  them `sbom.json` and `findings.json`.
+- Open a Bash-compatible shell.
 - Confirm that `/tmp` is writable, or replace the example output path.
 
-The offline example needs no service credentials. Dependency installation may
-contact your configured Python package index.
+This example needs no service credentials and contacts no network service.
 
 ## Generate from local inputs
 
-Install the locked dependencies from the repository root:
+Confirm that your release supports SPDX 3:
 
 ```bash
-uv sync --frozen
+vexcalibur generate --help
 ```
 
-Confirm that the checked-out release supports SPDX 3:
+The `--format` choices must include `spdx3`. If they don't, install a newer
+release.
 
-```bash
-uv run --frozen vexcalibur generate --help
-```
-
-The `--format` choices must include `spdx3`. If they don't, use a newer
-release and its matching documentation.
-
-The example below reads committed fixtures. It does not contact GitHub or an
+The command below reads only local files. It does not contact GitHub or an
 OSV service.
 
 <!-- spdx3-local-example:start -->
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
+vexcalibur generate \
+  sbom.json \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
+  --findings-file findings.json \
   --format spdx3 \
   --creator "Example Security Team" \
   --timestamp 2026-06-23T00:00:00Z \
@@ -55,25 +48,24 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- spdx3-local-example:end -->
 
-The command should exit with status `0` and print nothing. It writes five
+The command should exit with status `0` and print nothing. It writes grouped
 assessment relationships to `/tmp/vex.spdx3.json`.
 
-## Validate the result
+Findings that agree on the vulnerability, source, state, and evidence become a
+single relationship whose `to` lists every affected product, so the
+relationship count can be lower than the finding count. The [SPDX 3 output
+reference](../reference/spdx3-output.md) lists the exact grouping values.
 
-Validate the output against the pinned official schema used by the test suite:
+## Check the result
+
+Confirm the context and count the assessment relationships:
 
 ```bash
-uv run --frozen python - <<'PY'
+python - <<'PY'
 import json
 from pathlib import Path
 
-from jsonschema import Draft202012Validator, FormatChecker
-
 document = json.loads(Path("/tmp/vex.spdx3.json").read_text())
-schema = json.loads(
-    Path("tests/fixtures/schemas/spdx-3.0.1.schema.json").read_text()
-)
-Draft202012Validator(schema, format_checker=FormatChecker()).validate(document)
 
 assert document["@context"] == "https://spdx.org/rdf/3.0.1/spdx-context.jsonld"
 relationships = [
@@ -81,12 +73,19 @@ relationships = [
     for element in document["@graph"]
     if str(element.get("type", "")).endswith("VulnAssessmentRelationship")
 ]
-assert len(relationships) == 5
-print("validated SPDX 3.0.1")
+assert relationships
+print(f"SPDX 3.0.1 document with {len(relationships)} assessment relationships")
 PY
 ```
 
-You should see `validated SPDX 3.0.1`.
+This is a field check, not validation against the full SPDX 3 schema. The
+repository test suite validates generated documents against the pinned
+official 3.0.1 schema on every change; see the [SPDX 3 output
+reference](../reference/spdx3-output.md) for the exact pin.
+
+To run that schema validation yourself, install from source and use the
+committed schema at `tests/fixtures/schemas/spdx-3.0.1.schema.json` with the
+checkout's `jsonschema` dependency.
 
 ## Supply status evidence
 

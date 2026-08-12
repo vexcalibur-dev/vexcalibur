@@ -11,42 +11,34 @@ category, and use an absolute namespace URL controlled by that publisher.
 
 Before you begin:
 
-- Install Git, Python 3.10 or newer, and the `uv` version in `.tool-versions`.
-- Clone this repository at release `v0.3.0` or newer and check out the exact
-  release you intend to use. Use the guide from that checkout because the
-  hosted documentation tracks current development.
-- Open a Bash-compatible shell in the repository root.
+- Install Vexcalibur `v0.3.0` or newer. See [Install Vexcalibur](install.md).
+- Have a CycloneDX SBOM and a reviewed findings file ready. The example calls
+  them `sbom.json` and `findings.json`.
+- Open a Bash-compatible shell.
 - Confirm that `/tmp` is writable, or replace the example output path.
 
-The offline example needs no service credentials. Dependency installation may
-contact your configured Python package index.
+This example needs no service credentials and contacts no network service.
 
 ## Generate from local inputs
 
-Install the locked dependencies from the repository root:
+Confirm that your release supports CSAF:
 
 ```bash
-uv sync --frozen
+vexcalibur generate --help
 ```
 
-Confirm that the checked-out release supports CSAF:
+The `--format` choices must include `csaf`. If they don't, install a newer
+release.
 
-```bash
-uv run --frozen vexcalibur generate --help
-```
-
-The `--format` choices must include `csaf`. If they don't, use a newer release
-and its matching documentation.
-
-The example below reads committed fixtures. It does not contact GitHub or an
+The command below reads only local files. It does not contact GitHub or an
 OSV service.
 
 <!-- csaf-local-example:start -->
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
+vexcalibur generate \
+  sbom.json \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
+  --findings-file findings.json \
   --format csaf \
   --csaf-version 2.0 \
   --csaf-document-id ACME-VEX-2026-001 \
@@ -60,8 +52,9 @@ uv run --frozen vexcalibur generate \
 ```
 <!-- csaf-local-example:end -->
 
-The command should exit with status `0` and print nothing. It writes five
-vulnerability entries covering two versioned products.
+The command should exit with status `0` and print nothing. It writes one
+vulnerability entry per vulnerability ID, each covering the versioned products
+that ID affects. Several findings for the same ID group into that one entry.
 
 The output basename is not arbitrary. Vexcalibur derives it from the tracking
 ID according to the CSAF filename rule. `ACME-VEX-2026-001` therefore requires
@@ -73,7 +66,7 @@ Check the profile, publisher claim, first revision, products, and vulnerability
 count:
 
 ```bash
-uv run --frozen python - <<'PY'
+python - <<'PY'
 import json
 from pathlib import Path
 
@@ -86,13 +79,17 @@ assert metadata["publisher"]["name"] == "ACME Product Security"
 assert metadata["tracking"]["id"] == "ACME-VEX-2026-001"
 assert metadata["tracking"]["version"] == "1"
 assert metadata["tracking"]["revision_history"][0]["number"] == "1"
-assert len(document["product_tree"]["full_product_names"]) == 2
-assert len(document["vulnerabilities"]) == 5
-print("generated CSAF 2.0 VEX")
+assert document["product_tree"]["full_product_names"]
+assert document["vulnerabilities"]
+print(
+    f"generated CSAF 2.0 VEX with "
+    f"{len(document['vulnerabilities'])} vulnerability entries"
+)
 PY
 ```
 
-You should see `generated CSAF 2.0 VEX`.
+The script prints the entry count. A failed assertion tells you which part of
+the contract the document broke.
 
 Repository tests run the generated contract through the pinned OASIS schema
 and the complete mandatory-test suite. See the [CSAF output

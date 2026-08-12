@@ -93,10 +93,10 @@ Naive local timestamps are interpreted as UTC. A trailing `Z` is normalized to a
 Pass `--timestamp` and control the finding input when repeatable output matters:
 
 ```bash
-uv run --frozen vexcalibur generate \
-  tests/fixtures/sbom/cyclonedx-json-simple.json \
+vexcalibur generate \
+  sbom.json \
   --offline \
-  --findings-file tests/fixtures/findings/all-analysis-states.json \
+  --findings-file findings.json \
   --timestamp 2026-06-23T00:00:00Z \
   --output /tmp/vexcalibur-vex.json
 ```
