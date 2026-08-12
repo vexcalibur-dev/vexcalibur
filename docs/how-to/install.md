@@ -29,7 +29,13 @@ if [[ -e "$VEXCALIBUR_VENV" ]]; then
   printf 'Refusing to reuse %s\n' "$VEXCALIBUR_VENV" >&2
   exit 2
 fi
-python3 -m venv "$VEXCALIBUR_VENV"
+VEXCALIBUR_PYTHON="${VEXCALIBUR_PYTHON:-python3}"
+if ! "$VEXCALIBUR_PYTHON" -c \
+  'import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 14) else 1)'; then
+  printf 'Set VEXCALIBUR_PYTHON to a Python 3.10-3.14 interpreter\n' >&2
+  exit 2
+fi
+"$VEXCALIBUR_PYTHON" -m venv "$VEXCALIBUR_VENV"
 "$VEXCALIBUR_VENV/bin/python" -m pip install \
   "vexcalibur==${VEXCALIBUR_VERSION}"
 INSTALLED_VERSION="$("$VEXCALIBUR_VENV/bin/python" -c \
@@ -42,6 +48,12 @@ In PowerShell 7.3 or newer, use:
 
 ```powershell
 $ErrorActionPreference = "Stop"
+$VEXCALIBUR_PYTHON = if ($env:VEXCALIBUR_PYTHON) { $env:VEXCALIBUR_PYTHON } else { "py" }
+& $VEXCALIBUR_PYTHON -c `
+    'import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 14) else 1)'
+if ($LASTEXITCODE -ne 0) {
+    throw "Set VEXCALIBUR_PYTHON to a Python 3.10-3.14 interpreter"
+}
 $PSNativeCommandUseErrorActionPreference = $true
 $VEXCALIBUR_VERSION = Read-Host "Vexcalibur version from the release page"
 if ($VEXCALIBUR_VERSION -notmatch '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$') {
@@ -51,7 +63,7 @@ $VEXCALIBUR_VENV = ".venv-vexcalibur-$VEXCALIBUR_VERSION"
 if (Test-Path -LiteralPath $VEXCALIBUR_VENV) {
     throw "Refusing to reuse $VEXCALIBUR_VENV"
 }
-py -m venv $VEXCALIBUR_VENV
+& $VEXCALIBUR_PYTHON -m venv $VEXCALIBUR_VENV
 $PYTHON = Join-Path $VEXCALIBUR_VENV "Scripts/python.exe"
 $VEXCALIBUR = Join-Path $VEXCALIBUR_VENV "Scripts/vexcalibur.exe"
 & $PYTHON -m pip install "vexcalibur==$VEXCALIBUR_VERSION"
@@ -67,9 +79,16 @@ The final command prints the `query-osv` and `generate` help. That's the
 success signal.
 
 The install needs Python 3.10 through 3.14, the range the project tests, and
-it reaches your configured package index. Package metadata alone permits any
-3.x, so `pip` won't stop you on a newer interpreter; nothing verifies that
-combination.
+it reaches your configured package index.
+
+Package metadata alone permits any 3.x, so `pip` would happily build you an
+untested environment on 3.15. That's why the script probes the interpreter
+first and stops rather than installing. If your default `python3` or `py` sits
+outside the range, point `VEXCALIBUR_PYTHON` at one that doesn't:
+
+```bash
+VEXCALIBUR_PYTHON=python3.12
+```
 
 After that, what a command reaches depends on the options you pass, not on how
 you installed:
