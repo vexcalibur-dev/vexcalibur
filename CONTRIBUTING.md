@@ -50,12 +50,14 @@ governance](docs/contributing/github-governance.md):
 make governance-check
 ```
 
-CI also checks formatting and enforces 75 percent branch coverage. On Linux,
-run those two policies explicitly:
+CI also checks formatting. It enforces aggregate, critical-file, and
+changed-line branch coverage. On Linux, refresh the base and run the same
+policies from the repository root:
 
 ```bash
+git fetch origin main
 uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/examples/*.py
-uv run --frozen pytest -m "not live and not fuzz" --cov-fail-under=75
+make coverage COVERAGE_COMPARE_REF=origin/main
 make fuzz-smoke
 ```
 

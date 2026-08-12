@@ -101,7 +101,8 @@ uv run --frozen ruff format --check src tests scripts/*.py docs/conf.py docs/exa
 uv run --frozen ruff check src tests scripts/*.py docs/conf.py docs/examples/*.py
 uv run --frozen mypy src
 make workflow-lint
-uv run --frozen pytest -m "not live" --cov-fail-under=75
+make coverage COVERAGE_COMPARE_REF=origin/main
+make fuzz-smoke
 make docs
 uv run --frozen pip-audit --cache-dir /tmp/vexcalibur-pip-audit-cache
 make secrets

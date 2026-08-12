@@ -1,4 +1,4 @@
-.PHONY: help install install-docs test test-live fuzz-smoke fuzz-coverage installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop release-evidence release-evidence-check lint workflow-lint format typecheck governance-check audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
+.PHONY: help install install-docs test test-live coverage coverage-policy fuzz-smoke fuzz-coverage installed-cli-check installed-csaf-check openvex-interop csaf-validator-install csaf-schema-check csaf-interop release-evidence release-evidence-check lint workflow-lint format typecheck governance-check audit secrets secrets-pr check docs build pre-commit pre-commit-install secrets-baseline clean
 
 UV := uv
 PACKAGE := vexcalibur
@@ -13,6 +13,9 @@ CSAF_SCHEMA_SHA256 := 29c114b35b0a30831f1674f2ab8b3ed9b2890cfeaa63b924ac6ed9d70e
 RELEASE_EVIDENCE_OUTPUT ?= build/release-evidence
 RELEASE_SHA ?= $(shell git rev-parse --verify HEAD)
 PYTHON_QUALITY_PATHS := src tests scripts/*.py docs/conf.py docs/examples/*.py
+COVERAGE_COMPARE_REF ?= origin/main
+export COVERAGE_COMPARE_REF
+export COVERAGE_TARGET_REF
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -26,11 +29,18 @@ install-docs: ## Install project and documentation dependencies
 test: ## Run offline tests
 	$(UV) run --frozen pytest -m "not live and not fuzz"
 
+coverage: ## Run the complete local coverage policy
+	$(MAKE) test
+	$(MAKE) coverage-policy
+
+coverage-policy: ## Enforce aggregate, critical-file, and optional changed-line floors
+	$(UV) run --no-sync python scripts/check_coverage_policy.py coverage.json
+
 test-live: ## Run live compatibility tests against external services
 	$(UV) run --frozen pytest -m live
 
 fuzz-smoke: ## Run deterministic property tests without a Hypothesis database
-	HYPOTHESIS_PROFILE=fuzz-smoke $(UV) run --frozen pytest -m fuzz tests/fuzz
+	HYPOTHESIS_PROFILE=fuzz-smoke $(UV) run --frozen pytest --no-cov -m fuzz tests/fuzz
 
 fuzz-coverage: ## Run bounded Atheris targets (set FUZZ_TARGET to select one)
 	$(UV) sync --frozen --group fuzz
@@ -115,7 +125,7 @@ secrets-baseline: ## Refresh detect-secrets baseline
 	$(UV) run --frozen detect-secrets scan --baseline .secrets.baseline
 
 clean: ## Remove generated local artifacts
-	rm -rf build dist *.egg-info src/*.egg-info .coverage .pytest_cache .hypothesis .mypy_cache .ruff_cache htmlcov coverage.xml
+	rm -rf build dist *.egg-info src/*.egg-info .coverage .pytest_cache .hypothesis .mypy_cache .ruff_cache htmlcov coverage.xml coverage.json
 	rm -rf fuzz-artifacts .fuzz-corpus
 	rm -f src/$(PACKAGE)/_version.py
 	rm -rf docs/_build $(CSAF_VALIDATOR_DIR)/node_modules

@@ -12,7 +12,7 @@ The `CI` workflow runs on pull requests and pushes to `main`:
 | Area | Checks |
 | --- | --- |
 | Quality | Frozen lock, Ruff formatting and linting, strict MyPy |
-| Tests | Offline suite on Python 3.10 through 3.14 |
+| Tests | Offline suite and 75% aggregate branch coverage on Python 3.10 through 3.14; critical-file coverage on Python 3.14; changed-line coverage on pull requests |
 | Native report behavior | Fail-closed source checks plus installed wheel and source distribution checks on Windows; report transactions and installed wheel and source distribution checks on macOS with Python 3.10 and 3.14 |
 | Parser properties | Deterministic Hypothesis smoke profile with a five-minute bound |
 | Packaging | Wheel and source distribution, installed `vexcalibur` and `vexy` entry points |
@@ -56,10 +56,10 @@ This harness tests trusted repository code. It is not a security sandbox for
 arbitrary shell input, and it doesn't require Linux namespace tools. These
 test-only constraints don't change Vexcalibur's runtime requirements.
 
-The complete offline suite needs Linux, Bash, Git, `jq`, `uv`, and the standard
-GNU commands `awk`, `chmod`, `cmp`, `comm`, `find`, `grep`, `mkdir`, `mktemp`,
-`sed`, `sha256sum`, `sort`, `stat`, `tail`, and `wc`. These are developer and CI
-prerequisites. Git must support
+The complete offline suite needs Linux, Bash, Git, GNU Make, `jq`, `uv`, and
+the standard GNU commands `awk`, `chmod`, `cmp`, `comm`, `find`, `grep`,
+`mkdir`, `mktemp`, `sed`, `sha256sum`, `sort`, `stat`, `tail`, and `wc`. These
+are developer and CI prerequisites. Git must support
 `git init --initial-branch=main --object-format=sha1`. Installing and running
 Vexcalibur does not require these tools.
 
@@ -77,12 +77,52 @@ packaging tools, workflow and shell lint, and the deterministic fuzz smoke
 profile. Those gates depend on Linux or GNU shell tools and are not covered by
 the portable commands.
 
-Run the complete offline test suite:
+From the repository root, refresh `origin/main`, then run the ordinary offline
+suite and the complete coverage policy:
 
 ```bash
+git fetch origin main
 uv sync --frozen
-uv run --frozen pytest -m "not live" --cov-fail-under=75
+make coverage COVERAGE_COMPARE_REF=origin/main
 ```
+
+To compare with another base that is already present in the local repository,
+replace `origin/main` with its exact commit ID.
+
+The command ends with `Changed-line branch coverage` and exits zero when all
+three coverage checks pass. It enforces the repository-wide 75% floor first,
+then checks each critical file against its own floor. The critical set covers
+execution-report parsing and validation, output transactions, and GitHub SBOM
+validation. It also covers archive limits, the independent report oracle,
+release evidence, and the coverage checker itself.
+
+The final check compares executable lines under `src/vexcalibur` and in the
+critical Python helpers under `scripts` with `origin/main`. A line with an
+incomplete branch counts as uncovered. Changed comments and other
+non-executable lines don't affect the score, but a new monitored module with no
+coverage record fails closed. The changed-line floor is 90%.
+
+Coverage ignores `TYPE_CHECKING` and `__main__` guards. Use the
+`# coverage: platform-only` marker for an executable path that a required
+Windows or macOS job tests but the Linux coverage run can't reach. Link the
+passing native-platform test in the pull request. Coverage does not honor
+`pragma: no cover`, so code can't use that broader comment to bypass a floor.
+
+Pull-request CI compares the event's exact base and checked-out commits. This
+keeps test-side worktree changes from changing the set of lines under review.
+The Python 3.14 test log lists uncovered files and line numbers. The checker
+reads the local Git repository and `coverage.json`; it doesn't upload coverage
+or call an external service. CI keeps `coverage.xml` only as a downloadable
+artifact.
+
+`scripts/check_coverage_policy.py` records all three floors.
+
+When a critical file grows, add tests before changing its floor. Lower a floor
+only for an unreachable defensive condition, and explain that path in the pull
+request.
+Run the command above before and after the change so the review shows both the
+measured baseline and the proposed margin. Don't raise a floor to 100% unless
+every supported platform can reproduce it.
 
 `setuptools-scm` derives the package version from the Git commit and tags, so
 the uv cache key includes both. Vexcalibur also asks uv to reinstall the local
