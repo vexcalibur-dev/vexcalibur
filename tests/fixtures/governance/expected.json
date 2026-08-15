@@ -256,13 +256,21 @@
     "enabled_repositories": "all",
     "sha_pinning_required": true
   },
+  "organization_owners": [
+    {"login": "dannysauer"}
+  ],
+  "release_repository_admins": {
+    "vexcalibur": [{"login": "dannysauer"}],
+    "vexcalibur-action": [{"login": "dannysauer"}],
+    "vexcalibur-orb": [{"login": "dannysauer"}]
+  },
   "organization_installations": {
     "installations": [
       {
         "app_id": 4250150,
         "app_slug": "vexcalibur-dev-automation",
         "target_type": "Organization",
-        "repository_selection": "all",
+        "repository_selection": "selected",
         "permissions": {
           "administration": "read",
           "contents": "write",

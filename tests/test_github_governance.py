@@ -72,6 +72,103 @@ def test_release_workflow_app_permissions_match_governance_policy() -> None:
     assert requested == expected
 
 
+def test_additional_organization_owner_is_drift(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    owners = cast(list[dict[str, object]], raw["organization_owners"])
+    owners.append({"login": "additional-maintainer"})
+    path = tmp_path / "additional-owner.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    violations = governance.validate_snapshot(governance.load_snapshot(path))
+
+    assert any("organization owners" in violation for violation in violations)
+
+
+def test_malformed_organization_owner_fails_closed(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    raw["organization_owners"] = [{"login": None}]
+    path = tmp_path / "malformed-owner.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(
+        governance.GovernanceReadError,
+        match="organization owner omitted a non-empty string login",
+    ):
+        governance.validate_snapshot(governance.load_snapshot(path))
+
+
+def test_additional_release_repository_admin_is_drift(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    repository_admins = cast(dict[str, list[dict[str, object]]], raw["release_repository_admins"])
+    repository_admins["vexcalibur-action"].append({"login": "additional-maintainer"})
+    path = tmp_path / "additional-repository-administrator.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    violations = governance.validate_snapshot(governance.load_snapshot(path))
+
+    assert any("vexcalibur-action administrators" in violation for violation in violations)
+
+
+def test_malformed_release_repository_admin_fails_closed(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    repository_admins = cast(dict[str, list[dict[str, object]]], raw["release_repository_admins"])
+    repository_admins["vexcalibur-orb"] = [{"login": None}]
+    path = tmp_path / "malformed-repository-administrator.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(
+        governance.GovernanceReadError,
+        match="vexcalibur-orb administrator omitted a non-empty string login",
+    ):
+        governance.validate_snapshot(governance.load_snapshot(path))
+
+
+def test_missing_release_repository_admin_inventory_fails_closed(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    repository_admins = cast(dict[str, list[dict[str, object]]], raw["release_repository_admins"])
+    del repository_admins["vexcalibur"]
+    path = tmp_path / "missing-repository-administrators.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(governance.GovernanceReadError, match="array of objects"):
+        governance.load_snapshot(path)
+
+
+def test_all_repository_app_installation_is_drift(tmp_path: Path) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    installations = cast(dict[str, list[dict[str, object]]], raw["organization_installations"])[
+        "installations"
+    ]
+    installations[0]["repository_selection"] = "all"
+    path = tmp_path / "all-repository-installation.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    violations = governance.validate_snapshot(governance.load_snapshot(path))
+
+    assert any(
+        "release automation App repository selection" in violation for violation in violations
+    )
+
+
+def test_malformed_app_repository_selection_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    raw = cast(dict[str, object], json.loads(FIXTURE.read_text(encoding="utf-8")))
+    installations = cast(dict[str, list[dict[str, object]]], raw["organization_installations"])[
+        "installations"
+    ]
+    installations[0]["repository_selection"] = None
+    path = tmp_path / "malformed-repository-selection.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    exit_code = governance.main(["--snapshot", str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "malformed repository selection" in captured.err
+
+
 def test_offline_cli_accepts_expected_snapshot(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = governance.main(["--snapshot", str(FIXTURE)])
 

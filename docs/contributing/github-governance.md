@@ -94,23 +94,39 @@ their equivalent release and consumer boundaries. The zero-approval
 solo-maintainer ruleset means these are explicit ownership and review-routing
 controls, not a claim of independent approval.
 
-## Controls that still need external administration
+## Accepted external-administration limits
 
-The checker records the current baseline; it does not claim every desired
-control is complete. Core, Action, and Orb use one long-lived automation App
-key. A compromise can therefore create a first release tag in any of those
-repositories where the key is available, although the no-bypass rules prevent
-later tag updates or deletion. GitHub rejects the built-in Actions integration
-as a tag-ruleset bypass actor, so removing the App without a separately scoped
-identity or credential broker would weaken restricted `v*` tag creation.
+Core, Action, and Orb deliberately use one long-lived automation App key. One
+maintainer owns and administers all three repositories, so the project accepts
+that shared release identity instead of managing three private keys. The App
+installation is limited to those three release repositories.
 
-The checker confirms that the App is unsuspended and has administration-read,
-contents-write, and metadata-read permission. Administration read lets release
-automation inspect repository rules without changing them. The checker also
-records the current `all`-repositories installation selection. Narrowing the
-installation and giving each release path its own identity remains tracked in
-[issue #101](https://github.com/vexcalibur-dev/vexcalibur/issues/101). The
-private-key lifecycle is not API-readable.
+A compromised key could create new release tags and GitHub Releases in any of
+the selected repositories where the App is an allowed actor. Tag immutability
+prevents updates or deletion of an existing tag name. It does not prevent the
+compromised identity from creating additional unauthorized tag names.
+
+GitHub rejects the built-in Actions integration as a tag-ruleset bypass actor.
+Removing the App without another release identity or a credential broker would
+therefore weaken restricted `v*` tag creation.
+
+The checker confirms that the App is unsuspended, uses selected-repository
+access, and has administration-read, contents-write, and metadata-read
+permission. Administration read lets release automation inspect repository
+rules without changing them. It also confirms that `dannysauer` remains the
+only organization owner and the only administrator on each release repository.
+[Issue
+#101](https://github.com/vexcalibur-dev/vexcalibur/issues/101) records the risk
+decision.
+
+GitHub's organization installation response reports selected-repository mode,
+but it does not list the selected repositories. Inspect the App installation
+after adding an organization repository, changing a release path, or reviewing
+this risk. The selection must contain only `vexcalibur`, `vexcalibur-action`,
+and `vexcalibur-orb`. Reconsider the shared identity if those repositories gain
+different administrators, release permissions, or trust requirements, or if a
+practical short-lived credential broker becomes available. The checker cannot
+inspect the private-key lifecycle.
 
 Future releases are immutable, but release notes and assets created before that
 organization policy remain legacy-mutable; their tag refs are protected. The
