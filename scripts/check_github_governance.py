@@ -22,6 +22,8 @@ GITHUB_ACTIONS_INTEGRATION_ID = 15368
 CODEQL_INTEGRATION_ID = 57789
 CIRCLECI_INTEGRATION_ID = 18001
 RELEASE_AUTOMATION_INTEGRATION_ID = 4250150
+EXPECTED_ORGANIZATION_OWNERS = ("dannysauer",)
+EXPECTED_RELEASE_REPOSITORY_ADMINS = ("dannysauer",)
 
 RequiredStatusCheck = tuple[str, int | None]
 
@@ -142,6 +144,8 @@ class GovernanceSnapshot:
 
     repository_rulesets: Mapping[str, Sequence[JsonObject]]
     repositories: Mapping[str, JsonObject]
+    release_repository_admins: Mapping[str, Sequence[JsonObject]]
+    organization_owners: Sequence[JsonObject]
     organization_installations: JsonObject
     organization_actions_permissions: JsonObject
     organization_immutable_releases: JsonObject
@@ -178,12 +182,32 @@ def collect_snapshot(client: ApiClient) -> GovernanceSnapshot:
             "GitHub returned an unexpected body while checking Orb vulnerability alerts"
         )
 
+    organization_owners_endpoint = f"orgs/{ORGANIZATION}/members?role=admin&per_page=100"
+    organization_owners = tuple(
+        _require_mapping(value, organization_owners_endpoint)
+        for value in _require_sequence(
+            client.get(organization_owners_endpoint), organization_owners_endpoint
+        )
+    )
+    release_repository_admins: dict[str, tuple[JsonObject, ...]] = {}
+    for repository in TAG_CREATION_BYPASSES:
+        endpoint = (
+            f"repos/{ORGANIZATION}/{repository}/collaborators"
+            "?affiliation=all&permission=admin&per_page=100"
+        )
+        release_repository_admins[repository] = tuple(
+            _require_mapping(value, endpoint)
+            for value in _require_sequence(client.get(endpoint), endpoint)
+        )
+
     return GovernanceSnapshot(
         repository_rulesets=repository_rulesets,
         repositories={
             repository: _get_mapping(client, f"repos/{ORGANIZATION}/{repository}")
             for repository in REQUIRED_CHECKS
         },
+        release_repository_admins=release_repository_admins,
+        organization_owners=organization_owners,
         organization_installations=_get_mapping(
             client, f"orgs/{ORGANIZATION}/installations?per_page=100"
         ),
@@ -224,6 +248,9 @@ def load_snapshot(path: Path) -> GovernanceSnapshot:
     root = _require_mapping(raw, str(path))
     raw_rulesets = _require_mapping(root.get("repository_rulesets"), str(path))
     raw_repositories = _require_mapping(root.get("repositories"), str(path))
+    raw_release_repository_admins = _require_mapping(
+        root.get("release_repository_admins"), str(path)
+    )
     repository_rulesets: dict[str, tuple[JsonObject, ...]] = {}
     repositories: dict[str, JsonObject] = {}
     for repository in REQUIRED_CHECKS:
@@ -238,6 +265,11 @@ def load_snapshot(path: Path) -> GovernanceSnapshot:
     return GovernanceSnapshot(
         repository_rulesets=repository_rulesets,
         repositories=repositories,
+        release_repository_admins={
+            repository: _mapping_sequence(raw_release_repository_admins.get(repository))
+            for repository in TAG_CREATION_BYPASSES
+        },
+        organization_owners=_snapshot_mapping_sequence(root, "organization_owners", path),
         organization_installations=_snapshot_mapping(root, "organization_installations", path),
         organization_actions_permissions=_snapshot_mapping(
             root, "organization_actions_permissions", path
@@ -311,11 +343,45 @@ def validate_snapshot(snapshot: GovernanceSnapshot) -> tuple[str, ...]:
         snapshot.organization_immutable_releases.get("enforced_repositories"),
         "all",
     )
+    _validate_organization_owners(snapshot, errors)
+    _validate_release_repository_admins(snapshot, errors)
     _validate_release_automation_installation(snapshot, errors)
     _validate_orb_security(snapshot, errors)
     _validate_codeql_default_setups(snapshot, errors)
     _validate_pypi_environment(snapshot, errors)
     return tuple(sorted(errors))
+
+
+def _validate_organization_owners(snapshot: GovernanceSnapshot, errors: list[str]) -> None:
+    _expect(
+        errors,
+        "organization owners",
+        _administrator_logins(snapshot.organization_owners, "organization owner"),
+        EXPECTED_ORGANIZATION_OWNERS,
+    )
+
+
+def _validate_release_repository_admins(snapshot: GovernanceSnapshot, errors: list[str]) -> None:
+    for repository in TAG_CREATION_BYPASSES:
+        _expect(
+            errors,
+            f"{repository} administrators",
+            _administrator_logins(
+                snapshot.release_repository_admins.get(repository, ()),
+                f"{repository} administrator",
+            ),
+            EXPECTED_RELEASE_REPOSITORY_ADMINS,
+        )
+
+
+def _administrator_logins(administrators: Sequence[JsonObject], label: str) -> tuple[str, ...]:
+    logins: list[str] = []
+    for administrator in administrators:
+        login = administrator.get("login")
+        if not isinstance(login, str) or not login:
+            raise GovernanceReadError(f"{label} omitted a non-empty string login")
+        logins.append(login)
+    return tuple(sorted(logins))
 
 
 def _validate_release_automation_installation(
@@ -346,11 +412,19 @@ def _validate_release_automation_installation(
         installation.get("target_type"),
         "Organization",
     )
+    repository_selection = installation.get("repository_selection")
+    if not isinstance(repository_selection, str) or repository_selection not in {
+        "all",
+        "selected",
+    }:
+        raise GovernanceReadError(
+            "release automation App installation has malformed repository selection"
+        )
     _expect(
         errors,
         "release automation App repository selection",
-        installation.get("repository_selection"),
-        "all",
+        repository_selection,
+        "selected",
     )
     _expect(
         errors,
@@ -697,6 +771,13 @@ def _require_sequence(value: object, source: str) -> Sequence[object]:
 
 def _snapshot_mapping(root: JsonObject, key: str, path: Path) -> JsonObject:
     return _require_mapping(root.get(key), f"{path}:{key}")
+
+
+def _snapshot_mapping_sequence(root: JsonObject, key: str, path: Path) -> tuple[JsonObject, ...]:
+    source = f"{path}:{key}"
+    return tuple(
+        _require_mapping(value, source) for value in _require_sequence(root.get(key), source)
+    )
 
 
 def _snapshot_bool(root: JsonObject, key: str, path: Path) -> bool:
