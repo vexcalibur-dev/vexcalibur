@@ -66,9 +66,7 @@ class ExampleSource(GenerationSourcePreflight):
 
     def validate_before_inventory_load(self) -> None:
         if not self.public_data_sharing_allowed:
-            raise VulnerabilitySourceInputError(
-                "public data sharing requires explicit consent"
-            )
+            raise VulnerabilitySourceInputError("public data sharing requires explicit consent")
 
     def findings_for_components(
         self,
