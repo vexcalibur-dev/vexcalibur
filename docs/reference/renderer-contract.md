@@ -13,8 +13,7 @@ def render(
     components: tuple[ComponentIdentity, ...],
     findings: tuple[VulnerabilityFinding, ...],
     timestamp: datetime | None = None,
-) -> str:
-    ...
+) -> str: ...
 ```
 
 | Parameter | Contract |
