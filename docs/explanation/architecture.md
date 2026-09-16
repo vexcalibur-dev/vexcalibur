@@ -81,6 +81,25 @@ Components without package URLs do not cross this boundary. Source adapters need
 
 The component model has one version rule across local files, GitHub SPDX, OSV queries, and rendering. A PURL version is authoritative when present. A separate CycloneDX `version` or SPDX `versionInfo` is the fallback for an unversioned PURL. When both exist, their decoded values must match.
 
+(inventory-scope)=
+## Inventory scope
+
+A repository graph and a release inventory answer different questions.
+[GitHub's SBOM API](https://docs.github.com/en/rest/dependency-graph/sboms)
+exports the repository dependency graph. That graph can include development
+dependencies, different versions from multiple manifests, and metadata
+retained after a manifest was removed. Generating a report now does not prove
+that every entry belongs to the current build.
+
+Vexcalibur validates the supplied inventory, but it cannot determine which
+packages belong in your artifact. Dropping a version that looks old could
+silently remove a real component. When a VEX statement concerns a particular
+build or deployment, use a CycloneDX SBOM generated for that artifact.
+
+The execution report records source categories, counts, and the generated
+document's digest. It does not certify inventory provenance or completeness.
+A schema-valid inventory can still be the wrong inventory for an artifact.
+
 ## Finding-source boundary
 
 A `VulnerabilitySource` receives all normalized components and returns `VulnerabilityFinding` values.
