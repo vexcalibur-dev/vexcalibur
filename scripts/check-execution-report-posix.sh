@@ -23,6 +23,7 @@ if [[ -z "$expected_version" ]]; then
 fi
 
 uv run --frozen pytest -q \
+  tests/test_installed_cli_fixture.py \
   tests/test_execution_report_destination.py \
   tests/test_execution_report_destination_cli.py \
   tests/test_execution_report_destination_locks.py \
