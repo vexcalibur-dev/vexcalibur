@@ -89,6 +89,16 @@ JSON input rejects duplicate object keys, more than 100 nested arrays or objects
 
 GitHub input requests an asynchronous SPDX 2.3 JSON report and extracts package URL references. The repository package itself and packages without package URLs are omitted. A package with multiple distinct package URL references is rejected.
 
+`--github-repo` selects a repository, not a commit, tag, build, or deployed
+environment. Its dependency graph may include development dependencies and
+entries retained from removed manifests. Vexcalibur does not compare that
+inventory with a checkout, discard entries it considers stale, or filter it to
+runtime dependencies.
+
+For VEX about a particular artifact, supply a CycloneDX SBOM generated for that
+artifact. Input validation and a successful execution report do not prove
+that an inventory matches the artifact. See {ref}`Inventory scope <inventory-scope>`.
+
 ### Finding source
 
 Choose one source mode:
