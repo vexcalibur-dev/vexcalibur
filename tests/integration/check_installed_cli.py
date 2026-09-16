@@ -546,10 +546,14 @@ def _local_osv_failure_server() -> Iterator[str]:
 
 class _OsvFailureHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
+        # Unread POST bytes can reset the connection when this fixture closes it.
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        response = b'{"error":"service unavailable"}'
         self.send_response(503)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
         self.end_headers()
-        self.wfile.write(b'{"error":"service unavailable"}')
+        self.wfile.write(response)
 
     def log_message(self, format: str, *args: object) -> None:
         return
