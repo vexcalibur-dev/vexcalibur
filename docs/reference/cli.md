@@ -76,16 +76,18 @@ Provide exactly one inventory source:
 
 | Input | Description |
 | --- | --- |
-| `INPUT_FILE` | Readable CycloneDX JSON or XML file |
+| `INPUT_FILE` | Readable CycloneDX JSON or XML, or SPDX 3 JSON-LD file |
 | `--github-repo OWNER/REPO` | GitHub Dependency Graph SBOM |
 
-Local input accepts CycloneDX 1.4, 1.5, and 1.6. JSON must be UTF-8. XML must have a CycloneDX `bom` root in the matching namespace. Parser-detected encodings such as UTF-16 are accepted.
+Local input accepts CycloneDX 1.4, 1.5, and 1.6, and SPDX 3.0.1 JSON-LD. JSON must be UTF-8. XML content is CycloneDX and must have a CycloneDX `bom` root in the matching namespace. Parser-detected encodings such as UTF-16 are accepted. A JSON document selects its format from one top-level marker: `bomFormat` for CycloneDX or `@graph` for SPDX 3. A document carrying both markers is rejected instead of guessed.
 
 XML input rejects DTD, entity, and external-reference declarations.
 
 Local inventory input must resolve to a regular file. A symbolic link to a regular file is accepted; FIFOs, devices, sockets, directories, and links to those objects are rejected before content is read. Vexcalibur reads at most 10 MiB from the same opened descriptor that it inspects. GitHub report downloads have the same byte limit.
 
 JSON input rejects duplicate object keys, more than 100 nested arrays or objects, and integer literals longer than 1,000 decimal digits. A document may contain at most 10,000 components and 50 component nesting levels. Parsed components with package URLs must have unique references.
+
+SPDX 3 input must declare the SPDX 3.0.1 JSON-LD context string as its `@context`. The loader reads `software_Package` elements from `@graph`, including the derived `ai_AIPackage` and `dataset_DatasetPackage` types: the package URL comes from `software_packageUrl` or an `externalIdentifier` entry of type `packageUrl` (inline, or a reference to an `ExternalIdentifier` in `@graph`), equivalent values collapse, and distinct values for one package are rejected. The `spdxId` becomes the component reference, `software_packageVersion` supplies a version for an unversioned package URL, and packages without package URLs are omitted.
 
 GitHub input requests an asynchronous SPDX 2.3 JSON report and extracts package URL references. The repository package itself and packages without package URLs are omitted. A package with multiple distinct package URL references is rejected.
 
@@ -122,7 +124,7 @@ must not contain credentials, a query, or a fragment. The `OSV` name and every
 HTTPS URL on the official `osv.dev` origin are reserved for canonical public
 OSV provenance.
 
-OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, or GitHub SPDX `versionInfo`. When an inventory supplies both an explicit version and a PURL version, their decoded values must match. The command rejects a contradiction and fails instead of treating an empty query set as authoritative.
+OSV generation needs at least one versioned component with a package URL. A version may come from the PURL, CycloneDX `version`, GitHub SPDX `versionInfo`, or SPDX 3 `software_packageVersion`. When an inventory supplies both an explicit version and a PURL version, their decoded values must match. The command rejects a contradiction and fails instead of treating an empty query set as authoritative.
 
 An explicit empty local findings array is valid for CycloneDX output. OpenVEX,
 CSAF, and SPDX 3 reject it because their standalone VEX documents need at
@@ -321,7 +323,7 @@ It does not restore Sonatype OSS Index behavior, CycloneDX XML VEX output, or Cy
 | Option | Default | Behavior |
 | --- | --- | --- |
 | `-c PATH`, `--config PATH` | — | Accepted but not read. Legacy credentials and sources are ignored. |
-| `-i PATH`, `--in-file PATH` | Required | CycloneDX JSON or XML path. Standard input (`-`) is rejected. |
+| `-i PATH`, `--in-file PATH` | Required | CycloneDX JSON or XML, or SPDX 3 JSON-LD path. Standard input (`-`) is rejected. |
 | `--format TEXT` | `json` | Only `json` is accepted. |
 | `--schema-version TEXT` | `1.6` | Only `1.6` is accepted. |
 | `-o PATH`, `--o PATH`, `--output PATH` | `cyclonedx-vex.json` | Output path. Use `-` for standard output. |

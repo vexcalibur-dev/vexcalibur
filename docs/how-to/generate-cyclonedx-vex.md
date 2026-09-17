@@ -1,6 +1,6 @@
 # Generate CycloneDX VEX
 
-Use `vexcalibur generate` to write CycloneDX 1.6 VEX JSON from a local CycloneDX SBOM or a GitHub Dependency Graph SBOM.
+Use `vexcalibur generate` to write CycloneDX 1.6 VEX JSON from a local CycloneDX or SPDX 3 SBOM, or a GitHub Dependency Graph SBOM.
 
 These examples call an installed `vexcalibur`. If you don't have one yet, follow [Install Vexcalibur](../install.md) first. Substitute your own SBOM and findings paths throughout.
 
@@ -8,7 +8,7 @@ Choose one inventory input and one finding source:
 
 | Input | Option |
 | --- | --- |
-| Local CycloneDX JSON or XML | Positional `INPUT_FILE` |
+| Local CycloneDX JSON or XML, or SPDX 3 JSON-LD | Positional `INPUT_FILE` |
 | GitHub Dependency Graph SBOM | `--github-repo OWNER/REPO` |
 
 | Finding source | Option |

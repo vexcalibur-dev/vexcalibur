@@ -35,6 +35,7 @@ DOCS_ROOT = Path(__file__).parent.parent / "docs"
 # make the documented assertions hold.
 DOCUMENTED_INPUT_PATHS = {
     "sbom.json": str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
+    "sbom.spdx3.json": str(FIXTURE_ROOT / "spdx3-json-simple.json"),
     "sbom.xml": str(FIXTURE_ROOT / "cyclonedx-xml-1.5-simple.xml"),
     "findings.json": str(FINDINGS_ROOT / "all-analysis-states.json"),
 }
@@ -1139,6 +1140,109 @@ def test_generate_offline_accepts_xml_input_file(
     assert "Traceback" not in result.output
 
 
+def test_generate_offline_accepts_spdx3_input_file(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeOsvClient:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError("offline generation should not construct an OSV client")
+
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", FakeOsvClient)
+    findings_path = tmp_path / "findings.json"
+    findings_path.write_text(
+        """
+        {
+          "findings": [
+            {
+              "id": "CVE-2026-0001",
+              "purl": "pkg:pypi/django@1.2",
+              "analysis_state": "not_affected",
+              "analysis_detail": "Reviewed and not affected."
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "spdx3-json-simple.json"),
+            "--offline",
+            "--findings-file",
+            str(findings_path),
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"id": "CVE-2026-0001"' in result.output
+    assert '"state": "not_affected"' in result.output
+    assert "pkg:pypi/django@1.2" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_reports_unsupported_sbom_formats_without_traceback(
+    tmp_path: Path,
+) -> None:
+    sbom_path = tmp_path / "unknown.json"
+    sbom_path.write_text('{"components": []}', encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(sbom_path),
+            "--offline",
+            "--findings-file",
+            str(FINDINGS_ROOT / "all-analysis-states.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "SBOM ingest failed" in result.output
+    assert "expected CycloneDX 1.4-1.6 JSON or XML, or SPDX 3.0.1 JSON-LD" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_generate_spdx3_input_supports_spdx3_output(tmp_path: Path) -> None:
+    output_path = tmp_path / "vex.spdx3.json"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(FIXTURE_ROOT / "spdx3-json-simple.json"),
+            "--offline",
+            "--findings-file",
+            str(FINDINGS_ROOT / "spdx3-input-findings.json"),
+            "--format",
+            "spdx3",
+            "--creator",
+            "Example Security Team",
+            "--timestamp",
+            "2026-06-23T00:00:00Z",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == ""
+    document = json.loads(output_path.read_text(encoding="utf-8"))
+    packages = [
+        element for element in document["@graph"] if element.get("type") == "software_Package"
+    ]
+    assert sorted(package["software_packageUrl"] for package in packages) == [
+        "pkg:npm/minimist@0.0.8",
+        "pkg:pypi/django@1.2",
+    ]
+
+
 def test_generate_findings_file_uses_local_findings_without_osv_client(
     monkeypatch,
     tmp_path: Path,
@@ -1976,6 +2080,29 @@ def test_documented_spdx3_local_example_executes(tmp_path: Path) -> None:
         if str(element.get("type", "")).endswith("VulnAssessmentRelationship")
     ]
     assert len(relationship_types) == 5
+
+
+def test_documented_spdx3_input_example_executes(tmp_path: Path) -> None:
+    output_path = tmp_path / "vexcalibur-vex.json"
+    args = _documented_generate_args(
+        DOCS_ROOT / "how-to" / "use-spdx3-sbom-input.md",
+        "spdx3-input-example",
+    )
+    args = [str(output_path) if arg.endswith("/vexcalibur-vex.json") else arg for arg in args]
+    args = [
+        str(FINDINGS_ROOT / "spdx3-input-findings.json")
+        if arg == DOCUMENTED_INPUT_PATHS["findings.json"]
+        else arg
+        for arg in args
+    ]
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 0
+    assert result.output == ""
+    document = json.loads(output_path.read_text(encoding="utf-8"))
+    assert document["bomFormat"] == "CycloneDX"
+    assert len(document["vulnerabilities"]) == 2
 
 
 def test_generate_spdx3_requires_creator_before_network(monkeypatch) -> None:

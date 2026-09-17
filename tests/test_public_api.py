@@ -65,6 +65,8 @@ EXPECTED_PUBLIC_EXPORTS = (
     "generate_vex_from_source",
     "generate_vex_from_source_result",
     "load_cyclonedx_sbom",
+    "load_sbom",
+    "load_spdx3_sbom",
     "parse_generation_execution_report",
 )
 

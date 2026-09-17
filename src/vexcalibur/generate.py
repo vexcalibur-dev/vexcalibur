@@ -38,7 +38,8 @@ from vexcalibur.render import (
     VexRenderer,
     VexRenderError,
 )
-from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
+from vexcalibur.sbom import SbomError
+from vexcalibur.sbom_selection import load_sbom
 from vexcalibur.sources.local import LocalFindingsSource
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL,
@@ -57,10 +58,10 @@ def generate_vex_from_source(
     timestamp: datetime | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a CycloneDX SBOM and source provider.
+    """Generate VEX JSON from a local SBOM and source provider.
 
     Args:
-        input_file: CycloneDX JSON or XML file to read.
+        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
         source: Provider used to find vulnerabilities for the SBOM components.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.
@@ -76,7 +77,7 @@ def generate_vex_from_source(
         VexRenderError: The findings cannot be rendered within output limits.
     """
     return _render_legacy_generation(
-        components=load_cyclonedx_sbom(input_file),
+        components=load_sbom(input_file),
         source=source,
         timestamp=timestamp,
         renderer=renderer,
@@ -91,8 +92,8 @@ def generate_vex_from_source_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate a report-aware result from a CycloneDX SBOM and provider."""
-    components = load_cyclonedx_sbom(input_file)
+    """Generate a report-aware result from a local SBOM and provider."""
+    components = load_sbom(input_file)
     selected_renderer = select_renderer(renderer)
     return _generate_result(
         components=components,
@@ -328,13 +329,13 @@ def generate_vex_from_sbom(
     osv_headers: Mapping[str, str] | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a CycloneDX SBOM using an OSV-compatible source.
+    """Generate VEX JSON from a local SBOM using an OSV-compatible source.
 
     Public OSV receives package inventory only when ``allow_public_osv`` is
     true. A private mirror may be selected with ``osv_base_url``.
 
     Args:
-        input_file: CycloneDX JSON or XML file to read.
+        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.
         osv_client: Injected OSV client, primarily for private endpoints and
@@ -358,7 +359,7 @@ def generate_vex_from_sbom(
         VexRenderError: The findings cannot be rendered within output limits.
     """
     return _render_legacy_generation(
-        components=load_cyclonedx_sbom(input_file),
+        components=load_sbom(input_file),
         source=_osv_source(
             client=osv_client,
             osv_base_url=osv_base_url,
@@ -385,8 +386,8 @@ def generate_vex_from_sbom_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate a report-aware result from a local CycloneDX SBOM."""
-    components = load_cyclonedx_sbom(input_file)
+    """Generate a report-aware result from a local SBOM."""
+    components = load_sbom(input_file)
     source = _osv_source(
         client=osv_client,
         osv_base_url=osv_base_url,
@@ -699,10 +700,10 @@ def generate_vex_from_local_findings(
     timestamp: datetime | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a CycloneDX SBOM and local findings.
+    """Generate VEX JSON from a local SBOM and local findings.
 
     Args:
-        input_file: CycloneDX JSON or XML file to read.
+        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
         findings_file: Local findings JSON file to read.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.

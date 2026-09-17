@@ -7,11 +7,13 @@
 [![OpenSSF Scorecard](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/scorecard.yml)
 [![Dependency Review](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/vexcalibur-dev/vexcalibur/actions/workflows/dependency-review.yml)
 
-Vexcalibur turns software bills of materials and vulnerability findings into VEX documents, for the security and release engineers who publish VEX statements alongside an SBOM. It reads CycloneDX SBOMs or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
+Vexcalibur turns software bills of materials and vulnerability findings into VEX documents, for the security and release engineers who publish VEX statements alongside an SBOM. It reads CycloneDX SBOMs, SPDX 3 SBOMs, or a GitHub Dependency Graph SBOM. Findings come from an OSV-compatible service or a local file.
 
 Current releases write CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, and SPDX 3.0.1
 JSON. CSAF output uses the `csaf_vex` profile, and SPDX 3 output goes through
-the security profile's VEX relationships. SPDX 3 arrived in `v0.7.0`.
+the security profile's VEX relationships. SPDX 3 output arrived in `v0.7.0`.
+This branch also reads local SPDX 3.0.1 JSON-LD SBOMs; no release through
+`v0.7.2` includes that input.
 
 The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
 
@@ -19,7 +21,7 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 
 | Area | Support |
 | --- | --- |
-| SBOM input | CycloneDX JSON and XML 1.4–1.6; GitHub Dependency Graph SPDX 2.3 JSON |
+| SBOM input | CycloneDX JSON and XML 1.4–1.6; SPDX 3.0.1 JSON-LD; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
 | VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile; SPDX 3.0.1 JSON-LD with the security profile |
 | Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |

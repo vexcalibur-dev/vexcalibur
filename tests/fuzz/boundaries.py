@@ -39,6 +39,7 @@ from vexcalibur.github_sbom import (
 from vexcalibur.json_boundary import StrictJsonError, strict_json_loads
 from vexcalibur.render import VexRenderError
 from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
+from vexcalibur.sbom_selection import load_sbom
 from vexcalibur.sources.local import LocalFindingsError, load_local_findings
 from vexcalibur.sources.osv import OsvClient, OsvClientError
 
@@ -146,7 +147,7 @@ def _exercise_sbom(data: bytes) -> str:
     with TemporaryDirectory(prefix="vexcalibur-fuzz-sbom-") as directory:
         path = Path(directory, "input.sbom")
         path.write_bytes(data)
-        return _component_signature(load_cyclonedx_sbom(path))
+        return _component_signature(load_sbom(path))
 
 
 def _exercise_github(data: bytes) -> str:

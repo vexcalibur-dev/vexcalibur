@@ -255,7 +255,10 @@ def generate(
             file_okay=True,
             dir_okay=False,
             readable=True,
-            help="CycloneDX JSON or XML SBOM to convert into VEX. Omit when using --github-repo.",
+            help=(
+                "CycloneDX JSON or XML, or SPDX 3 JSON-LD SBOM to convert into VEX. "
+                "Omit when using --github-repo."
+            ),
         ),
     ] = None,
     output_file: Annotated[

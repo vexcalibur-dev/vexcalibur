@@ -18,7 +18,7 @@ failure is a crash to investigate.
 | Target | Production boundary | Additional invariant |
 | --- | --- | --- |
 | `json` | strict UTF-8 JSON decoder | Duplicate keys, excessive nesting, oversized integers, and non-finite numbers have typed failures. |
-| `sbom` | CycloneDX JSON/XML loader | XML defenses and component-count, depth, reference, version, and package-URL rules remain fail-closed. |
+| `sbom` | Local SBOM loader (CycloneDX JSON/XML and SPDX 3 JSON-LD, with format selection) | Format selection, XML defenses, the SPDX 3 context pin, and component-count, depth, reference, version, and package-URL rules remain fail-closed. |
 | `github` | GitHub SPDX 2.3 response mapper | Malformed shapes, ambiguous package URLs, duplicate references, and conflicting versions have typed failures. |
 | `local` | Local findings loader | Selectors, URLs, timestamps, enums, and component matching have typed failures. |
 | `osv` | OSV response transport and query parsers | Identity, valid and malformed gzip, HTTP errors, pagination, evolving fields, and terminal-safe vulnerability IDs are covered without network access. |

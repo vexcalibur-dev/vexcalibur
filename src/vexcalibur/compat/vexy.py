@@ -67,7 +67,10 @@ def main(
         typer.Option(
             "--in-file",
             "-i",
-            help="CycloneDX JSON or XML SBOM file to read. Stdin input is not supported.",
+            help=(
+                "CycloneDX JSON or XML, or SPDX 3 JSON-LD SBOM file to read. "
+                "Stdin input is not supported."
+            ),
         ),
     ] = "",
     output_format: Annotated[
@@ -230,7 +233,7 @@ def _resolve_input_file(input_file: str) -> Path:
         msg = "missing required legacy input option -i/--in-file"
         raise _VexyCompatError(msg)
     if input_file == "-":
-        msg = "reading CycloneDX SBOM input from stdin is not supported; pass a file path"
+        msg = "reading SBOM input from stdin is not supported; pass a file path"
         raise _VexyCompatError(msg)
 
     path = Path(input_file)

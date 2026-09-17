@@ -42,7 +42,7 @@
   "unsupported_stdin": {
     "exit_code": 1,
     "stdout": "",
-    "stderr": "vexy compatibility failed: reading CycloneDX SBOM input from stdin is not supported; pass a file path\n"
+    "stderr": "vexy compatibility failed: reading SBOM input from stdin is not supported; pass a file path\n"
   },
   "missing_input": {
     "exit_code": 1,

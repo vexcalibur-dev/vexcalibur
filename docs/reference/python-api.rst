@@ -186,12 +186,15 @@ publication transaction.
 SBOM ingest and GitHub
 ----------------------
 
-``load_cyclonedx_sbom`` reads CycloneDX JSON or XML 1.4, 1.5, or 1.6. It
-returns component identities sorted by package URL and reference. Components
-without package URLs are omitted.
+``load_cyclonedx_sbom`` reads CycloneDX JSON or XML 1.4, 1.5, or 1.6.
+``load_spdx3_sbom`` reads SPDX 3.0.1 JSON-LD. ``load_sbom`` selects the parser
+from the file's content: XML is CycloneDX, and a JSON document picks its format
+from one top-level marker, ``bomFormat`` for CycloneDX or ``@graph`` for
+SPDX 3. Each loader returns component identities sorted by package URL and
+reference. Components without package URLs are omitted.
 
-The loader opens its path once in nonblocking mode and requires the opened
-target to be a regular file. A symbolic link to a regular file works. The
+The loaders open their path once in nonblocking mode and require the opened
+target to be a regular file. A symbolic link to a regular file works. Each
 loader reads at most 10 MiB, accepts at most 10,000 components and 50 nested
 component levels, and rejects duplicate returned references. JSON input also
 rejects duplicate keys, more than 100 nested arrays or objects, and integer
@@ -221,6 +224,10 @@ references from that inventory. It does not send those components to a finding
 service.
 
 .. autofunction:: load_cyclonedx_sbom
+
+.. autofunction:: load_sbom
+
+.. autofunction:: load_spdx3_sbom
 
 Sources and renderers
 ---------------------
