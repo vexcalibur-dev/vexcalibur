@@ -276,14 +276,14 @@ def test_query_osv_allows_cleartext_loopback_osv_url(monkeypatch) -> None:
 def test_query_osv_requires_at_least_one_purl() -> None:
     result = runner.invoke(cli.app, ["query-osv"])
 
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     assert "Missing argument" in result.output
 
 
 def test_query_osv_reports_invalid_purl_without_traceback() -> None:
     result = runner.invoke(cli.app, ["query-osv", "not a purl"])
 
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     assert "not a purl" in result.output
     assert "not a valid package URL" in result.output
     assert "Traceback" not in result.output
@@ -1441,6 +1441,13 @@ def test_generate_accepts_xml_input_file(monkeypatch) -> None:
     assert captured_input_files == [FIXTURE_ROOT / "cyclonedx-xml-simple.xml"]
 
 
+def test_generate_rejects_unknown_option_with_usage_status() -> None:
+    result = runner.invoke(cli.app, ["generate", "--not-an-option"])
+
+    assert result.exit_code == 2
+    assert "Traceback" not in result.output
+
+
 def test_generate_reports_invalid_timestamp_without_traceback() -> None:
     result = runner.invoke(
         cli.app,
@@ -1452,7 +1459,7 @@ def test_generate_reports_invalid_timestamp_without_traceback() -> None:
         ],
     )
 
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     assert "not a valid ISO-8601 timestamp" in result.output
     assert "Traceback" not in result.output
 

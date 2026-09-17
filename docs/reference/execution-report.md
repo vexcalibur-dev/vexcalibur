@@ -316,6 +316,10 @@ An exit status of `0` means the installed command exposes the option.
 Consumers should reject an unknown `schema_version`. They should not infer a
 schema from `vexcalibur_version`.
 
+The [1.x compatibility policy](compatibility.md) preserves the report contract
+for existing invocations. New report schemas must be opt-in during 1.x;
+new opt-in feature categories require an updated reviewed schema copy.
+
 Schema version 1 added `spdx3` to the `output_format` values when SPDX 3
 output shipped. A report can only carry that value when the operator selects
 `--format spdx3`, so reports for the other formats validate unchanged against

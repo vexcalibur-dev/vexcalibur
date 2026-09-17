@@ -7,7 +7,9 @@ The package installs two executables:
 | `vexcalibur` | Primary interface |
 | `vexy` | Compatibility interface for a limited set of legacy invocations |
 
-These commands are pre-1.0. Flags, defaults, messages, and exit behavior may change between releases.
+Before 1.0, pin an exact release. The [compatibility policy](compatibility.md)
+defines the command, default, exit-status, and machine-readable output
+guarantees that begin at 1.0. Human-readable messages are not parsing contracts.
 
 Run `vexcalibur --help` or `vexcalibur COMMAND --help` for help generated from the installed version. Expected input and source errors are printed without a Python traceback. Automation should treat every nonzero status as failure.
 
@@ -58,7 +60,7 @@ CI log, or VEX document.
 | Condition | Status | Error prefix or output |
 | --- | --- | --- |
 | All queries succeed | `0` | One standard-output line per PURL |
-| Missing argument or invalid PURL | Nonzero Typer usage error | Typer usage or parameter message |
+| Missing argument or invalid PURL | `2` | Typer usage or parameter message |
 | Public OSV without consent | `1` | `OSV query failed:` |
 | Invalid URL, HTTP failure, bad response, or pagination failure | `1` | `OSV query failed:` |
 
@@ -262,7 +264,7 @@ exact contract.
 | Condition | Status | Error prefix |
 | --- | --- | --- |
 | Generation succeeds | `0` | JSON on standard output or in `--output` |
-| Bad timestamp | Nonzero Typer parameter error | Typer parameter message |
+| Bad timestamp or unknown option | `2` | Typer usage or parameter message |
 | Missing or conflicting input/source options | `1` | `Invalid generate options:` |
 | Invalid local SBOM or unqueryable inventory | `1` | `SBOM ingest failed:` |
 | GitHub configuration, request, or SPDX failure | `1` | `GitHub SBOM ingest failed:` |

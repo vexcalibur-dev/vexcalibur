@@ -4,6 +4,8 @@ A provider turns normalized SBOM components into `VulnerabilityFinding` values. 
 
 The compatibility guarantee for this contract begins with Vexcalibur 1.0.
 Before 1.0, pin an exact release.
+The [compatibility policy](compatibility.md) explains which extension changes
+can ship within 1.x.
 
 This reference covers both first-party sources maintained with Vexcalibur and
 external sources owned by an embedding application. External source code stays
