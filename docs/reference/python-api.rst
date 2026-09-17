@@ -21,6 +21,9 @@ are identified in the API reference and release notes, emit
 major release. A security fix may reject input that was previously accepted as
 unsafe; release notes call out that change.
 
+The :doc:`compatibility policy <compatibility>` also covers CLI behavior,
+generated documents, execution reports, and integration versioning.
+
 The installation metadata accepts Python 3.10 or later within Python 3. CI
 currently tests Python 3.10 through 3.14. Other Python 3 versions are
 unverified. Dropping a tested Python version changes the installation contract

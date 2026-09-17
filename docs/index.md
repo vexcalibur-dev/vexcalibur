@@ -51,6 +51,7 @@ Field-by-field contracts for the command line, the Python API, the input and
 output formats, and the two extension points.
 
 - [Command-line interface](reference/cli.md)
+- [Compatibility policy](reference/compatibility.md)
 - [Python API](reference/python-api.rst)
 - [CycloneDX VEX output](reference/cyclonedx-vex-output.md)
 - [OpenVEX output](reference/openvex-output.md)
@@ -73,16 +74,19 @@ yet.
 
 - [GitHub Actions](https://github.com/vexcalibur-dev/vexcalibur-action) uses the
   released companion Action to run Vexcalibur in a workflow.
-- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) documents its
-  current release status in the Orb README. Treat any development reference as
+- [CircleCI](https://github.com/vexcalibur-dev/vexcalibur-orb) uses the
+  released companion Orb. Its README covers registry setup and production
+  use. Treat any development reference as
   mutable and inspection-only. Do not import one into a project with
   environment variables, contexts, private source, or other credentials.
 
 The GitHub Action's [compatibility
 reference](https://github.com/vexcalibur-dev/vexcalibur-action/blob/main/docs/reference/compatibility.md)
-explains how to resolve its latest tested commit and Vexcalibur package. [Orb
-issue #22](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/22) records
-the plan for App-backed production automation.
+explains how to resolve its latest tested commit and Vexcalibur package. The
+Orb's [interface reference](https://github.com/vexcalibur-dev/vexcalibur-orb/blob/main/docs/reference/orb.md)
+documents its parameters and failure behavior; its
+[consumer check](https://github.com/vexcalibur-dev/vexcalibur-orb/blob/main/docs/how-to/check-published-consumer.md)
+verifies published components and execution-report artifacts in CircleCI.
 
 ## Contributing to Vexcalibur
 
@@ -129,6 +133,7 @@ how-to/generate-execution-report-from-python
 :maxdepth: 2
 
 reference/cli
+reference/compatibility
 reference/python-api
 reference/cyclonedx-vex-output
 reference/openvex-output

@@ -2,6 +2,11 @@
 
 Vexcalibur has published releases and supports the workflows in this manual. It has not reached 1.0, so those releases do not yet promise a stable CLI or Python API.
 
+The [compatibility policy](../reference/compatibility.md) defines the
+guarantees that begin at 1.0. The [readiness
+tracker](https://github.com/vexcalibur-dev/vexcalibur/issues/136) records the
+remaining release gates; this manual does not claim they are complete.
+
 Pin exact package and action versions in automation. Do not use a mutable branch for a production workflow.
 
 This manual follows the default branch, so it can describe a capability before
@@ -32,6 +37,7 @@ documentation and schemas from that tag.
   transaction or the cross-platform Python API
 - a limited `vexy` compatibility executable
 - a released companion GitHub Action
+- a released CircleCI Orb
 
 The repository runs its Python, package, documentation, and deterministic
 parser-property gates on every change. Supply-chain checks cover dependencies,
@@ -84,7 +90,7 @@ These surfaces may change between releases:
 
 - command names, flags, defaults, messages, and exit behavior.
 - Python imports, signatures, types, and exceptions.
-- output details outside the documented CycloneDX, OpenVEX, and CSAF contracts.
+- output details outside the documented CycloneDX, OpenVEX, CSAF, and SPDX 3 contracts.
 - provider configuration and extension hooks.
 - GitHub token lookup and Enterprise configuration.
 - compatibility pairings between the package and its integrations.
