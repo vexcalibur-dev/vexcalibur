@@ -118,6 +118,30 @@ def load_cyclonedx_json(path: Path) -> tuple[ComponentIdentity, ...]:
     )
 
 
+def component_identities_from_cyclonedx_json(
+    raw_bom: Any,
+    *,
+    path: Path,
+) -> tuple[ComponentIdentity, ...]:
+    """Extract component identities from decoded CycloneDX JSON."""
+    return _component_identities_from_bom(
+        _bom_from_raw_json(raw_bom, path=path),
+        path=path,
+    )
+
+
+def component_identities_from_cyclonedx_xml(
+    raw_content: bytes,
+    *,
+    path: Path,
+) -> tuple[ComponentIdentity, ...]:
+    """Extract component identities from CycloneDX XML bytes."""
+    return _component_identities_from_bom(
+        _parse_cyclonedx_xml(raw_content, path=path),
+        path=path,
+    )
+
+
 def _read_sbom_bytes(path: Path) -> bytes:
     try:
         return read_bounded_regular_file(
@@ -136,6 +160,10 @@ def _parse_cyclonedx_json(raw_content: bytes, *, path: Path) -> Bom:
         msg = _sbom_json_error_message(path=path, error=exc)
         raise SbomError(msg) from exc
 
+    return _bom_from_raw_json(raw_bom, path=path)
+
+
+def _bom_from_raw_json(raw_bom: Any, *, path: Path) -> Bom:
     _validate_cyclonedx_json_shape(raw_bom, path=path)
 
     try:

@@ -1,0 +1,60 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.0/spdx-context.jsonld",
+  "@graph": [
+    {
+      "@id": "_:creationinfo",
+      "type": "CreationInfo",
+      "specVersion": "3.0.1",
+      "created": "2026-06-01T00:00:00Z",
+      "createdBy": [
+        "https://sbom.example.test/demo#agent"
+      ]
+    },
+    {
+      "type": "Agent",
+      "spdxId": "https://sbom.example.test/demo#agent",
+      "creationInfo": "_:creationinfo",
+      "name": "Example SBOM Producer"
+    },
+    {
+      "type": "SpdxDocument",
+      "spdxId": "https://sbom.example.test/demo#document",
+      "creationInfo": "_:creationinfo",
+      "profileConformance": [
+        "core",
+        "software"
+      ],
+      "rootElement": [
+        "https://sbom.example.test/demo#django"
+      ]
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://sbom.example.test/demo#django",
+      "creationInfo": "_:creationinfo",
+      "name": "django",
+      "software_packageVersion": "1.2",
+      "software_packageUrl": "pkg:pypi/django@1.2"
+    },
+    {
+      "type": "software_Package",
+      "creationInfo": "_:creationinfo",
+      "name": "minimist",
+      "software_packageVersion": "0.0.8",
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:npm/minimist@0.0.8"
+        }
+      ]
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://sbom.example.test/demo#no-purl",
+      "creationInfo": "_:creationinfo",
+      "name": "no-purl",
+      "software_packageVersion": "1.0.0"
+    }
+  ]
+}

@@ -65,6 +65,8 @@ EXPECTED_PUBLIC_EXPORTS = (
     "generate_vex_from_source",
     "generate_vex_from_source_result",
     "load_cyclonedx_sbom",
+    "load_sbom",
+    "load_spdx3_sbom",
     "parse_generation_execution_report",
 )
 
@@ -74,6 +76,18 @@ def test_public_api_exports_only_declared_names() -> None:
     assert len(api.__all__) == len(set(api.__all__))
     for name in api.__all__:
         assert getattr(api, name) is not None
+
+
+def test_public_spdx3_loaders_return_package_identities() -> None:
+    path = FIXTURES / "sbom" / "spdx3-json-simple.json"
+
+    components = api.load_sbom(path)
+
+    assert components == api.load_spdx3_sbom(path)
+    assert [component.purl.to_string() for component in components] == [
+        "pkg:npm/minimist@0.0.8",
+        "pkg:pypi/django@1.2",
+    ]
 
 
 def test_public_api_pins_enum_names_and_values() -> None:

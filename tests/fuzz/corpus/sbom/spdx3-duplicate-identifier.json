@@ -1,0 +1,1 @@
+{"@context":"https://spdx.org/rdf/3.0.1/spdx-context.jsonld","@graph":[{"@id":"_:purl","type":"ExternalIdentifier","externalIdentifierType":"packageUrl","identifier":"pkg:pypi/one@1"},{"@id":"_:purl","type":"ExternalIdentifier","externalIdentifierType":"packageUrl","identifier":"pkg:pypi/two@1"},{"type":"software_Package","externalIdentifier":["_:purl"]}]}

@@ -84,6 +84,7 @@ from vexcalibur.github_sbom import (
 from vexcalibur.openvex import OpenVexJsonRenderer, OpenVexRenderError
 from vexcalibur.render import VexRenderer, VexRenderError
 from vexcalibur.sbom import SbomError, load_cyclonedx_sbom
+from vexcalibur.sbom_selection import load_sbom
 from vexcalibur.sources.local import LocalFindingsError
 from vexcalibur.sources.osv import (
     DEFAULT_OSV_API_URL as _DEFAULT_OSV_API_URL,
@@ -94,6 +95,7 @@ from vexcalibur.sources.osv import (
     OsvResponseError,
 )
 from vexcalibur.spdx3 import Spdx3JsonRenderer, Spdx3RenderError
+from vexcalibur.spdx3_sbom import load_spdx3_sbom
 from vexcalibur.vex import CycloneDxJsonRenderer
 
 
@@ -108,10 +110,10 @@ def generate_vex_from_sbom(
     osv_headers: _Mapping[str, str] | None = None,
     renderer: VexRenderer | None = None,
 ) -> str:
-    """Generate VEX JSON from a CycloneDX SBOM using an OSV-compatible source.
+    """Generate VEX JSON from a local SBOM using an OSV-compatible source.
 
     Args:
-        input_file: CycloneDX JSON or XML file to read.
+        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.
         osv_base_url: OSV-compatible endpoint.
@@ -156,7 +158,7 @@ def generate_vex_from_sbom_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from a local CycloneDX SBOM.
+    """Generate report-aware VEX from a local SBOM file.
 
     The arguments, consent policy, and provider failures match
     ``generate_vex_from_sbom``. ``execution_context`` may classify a custom
@@ -380,7 +382,7 @@ def generate_vex_from_source_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from a CycloneDX SBOM and custom source.
+    """Generate report-aware VEX from a local SBOM and custom source.
 
     The source owns its network, authentication, and disclosure policy. Its
     documented exceptions propagate unchanged unless it raises
@@ -455,7 +457,7 @@ def generate_vex_from_local_findings_result(
     renderer: VexRenderer | None = None,
     execution_context: GenerationExecutionContext | None = None,
 ) -> GenerationResult:
-    """Generate report-aware VEX from local CycloneDX and findings files.
+    """Generate report-aware VEX from local SBOM and findings files.
 
     Returns:
         The rendered document and immutable inputs needed to derive its report.
@@ -532,5 +534,7 @@ __all__ = [
     "generate_vex_from_source",
     "generate_vex_from_source_result",
     "load_cyclonedx_sbom",
+    "load_sbom",
+    "load_spdx3_sbom",
     "parse_generation_execution_report",
 ]

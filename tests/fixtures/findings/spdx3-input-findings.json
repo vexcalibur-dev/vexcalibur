@@ -1,0 +1,21 @@
+{
+  "findings": [
+    {
+      "id": "CVE-2026-0101",
+      "purl": "pkg:pypi/django@1.2",
+      "source_name": "Contract Test",
+      "source_url": "https://security.example.test/vulns/CVE-2026-0101",
+      "analysis_state": "in_triage",
+      "analysis_detail": "Impact analysis is still underway."
+    },
+    {
+      "id": "CVE-2026-0102",
+      "component_ref": "pkg:npm/minimist@0.0.8",
+      "source_name": "Contract Test",
+      "source_url": "https://security.example.test/vulns/CVE-2026-0102",
+      "analysis_state": "not_affected",
+      "analysis_detail": "The affected configuration is disabled.",
+      "impact_statement": "The deployment does not enable the affected configuration."
+    }
+  ]
+}

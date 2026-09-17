@@ -14,7 +14,8 @@ Before you begin:
 
 - Install Vexcalibur `v0.7.0` or newer, the first release with SPDX 3 output.
   See [Install Vexcalibur](../install.md).
-- Have a CycloneDX SBOM and a reviewed findings file ready. The example calls
+- Have a CycloneDX SBOM or [supported SPDX 3 input](use-spdx3-sbom-input.md)
+  and a reviewed findings file ready. The example calls
   them `sbom.json` and `findings.json`.
 - Open a Bash-compatible shell.
 - Confirm that `/tmp` is writable, or replace the example output path.

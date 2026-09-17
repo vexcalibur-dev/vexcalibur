@@ -17,6 +17,7 @@ documentation and schemas from that tag.
 ## Capabilities on this branch
 
 - CycloneDX JSON and XML SBOM input for versions 1.4, 1.5, and 1.6
+- SPDX 3.0.1 JSON-LD SBOM input for local files
 - GitHub Dependency Graph SBOM input through `--github-repo OWNER/REPO`
 - public OSV queries with `--allow-public-osv`
 - private OSV-compatible endpoints through `--osv-url`
@@ -93,7 +94,8 @@ Read release notes before upgrading, even across patch releases.
 ## Not implemented
 
 Vexcalibur does not read VEX documents or convert between VEX formats.
-OpenVEX, CSAF, and SPDX 3 support is output-only.
+OpenVEX and CSAF support is output-only. SPDX 3 support covers VEX output and
+local SBOM input; it still does not read SPDX VEX assessments.
 
 CSAF 2.1, product branches and relationships, later document revisions,
 trusted-provider metadata, distribution policy, and TLP are not implemented.
