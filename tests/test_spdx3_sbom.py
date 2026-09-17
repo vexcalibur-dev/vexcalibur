@@ -73,6 +73,63 @@ def test_omits_packages_without_package_urls() -> None:
     assert all(component.name != "no-purl" for component in components)
 
 
+@pytest.mark.parametrize(
+    "package_type", ("software_Package", "ai_AIPackage", "dataset_DatasetPackage")
+)
+def test_rejects_inline_packages_instead_of_partial_inventory(
+    tmp_path: Path, package_type: str
+) -> None:
+    document = _document(
+        _package(),
+        extra_elements=({"type": "SpdxDocument", "element": [None, _package(type=package_type)]},),
+    )
+
+    with pytest.raises(SbomError, match="package definitions must be top-level"):
+        load_spdx3_sbom(_write(tmp_path, document))
+
+
+@pytest.mark.parametrize("over_limit", (False, True))
+def test_bounds_expanded_referenced_purls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, over_limit: bool
+) -> None:
+    purl = "pkg:pypi/demo@1.0.0"
+    monkeypatch.setattr(
+        "vexcalibur.spdx3_sbom.MAX_EXPANDED_PURL_BYTES", 2 * len(purl) - int(over_limit)
+    )
+    packages = []
+    for index in range(2):
+        package = _package(spdxId=f"https://example.test/{index}", externalIdentifier=["_:purl"])
+        del package["software_packageUrl"]
+        packages.append(package)
+    document = _document(
+        *packages,
+        extra_elements=(
+            {
+                "type": "ExternalIdentifier",
+                "@id": "_:purl",
+                "externalIdentifierType": "packageUrl",
+                "identifier": purl,
+            },
+        ),
+    )
+    path = _write(tmp_path, document)
+
+    if over_limit:
+        with pytest.raises(SbomError, match="expanded package URL byte limit"):
+            load_spdx3_sbom(path)
+    else:
+        components = load_spdx3_sbom(path)
+        assert len(components) == 2
+        assert components[0].purl is components[1].purl
+
+
+def test_rejects_unencodable_package_urls(tmp_path: Path) -> None:
+    document = _document(_package(software_packageUrl="pkg:pypi/\ud800@1.0.0"))
+
+    with pytest.raises(SbomError, match="purl is invalid"):
+        load_spdx3_sbom(_write(tmp_path, document))
+
+
 def test_ignores_elements_that_are_not_packages(tmp_path: Path) -> None:
     document = _document(
         _package(),
@@ -251,6 +308,30 @@ def test_rejects_duplicate_spdx_ids(tmp_path: Path) -> None:
 
     with pytest.raises(SbomError, match="duplicate package spdxId values"):
         load_spdx3_sbom(_write(tmp_path, _document(first, second)))
+
+
+@pytest.mark.parametrize("value", ([], {}, None, 7, True))
+def test_rejects_nonstrings_in_graph_type(tmp_path: Path, value: Any) -> None:
+    document = _document(_package(type=value))
+    with pytest.raises(SbomError, match=r"type.*must be.*string"):
+        load_spdx3_sbom(_write(tmp_path, document))
+
+
+@pytest.mark.parametrize("second_purl", ("pkg:pypi/demo@1.0.0", "pkg:pypi/other@1.0.0"))
+def test_rejects_duplicate_external_identifier_ids(tmp_path: Path, second_purl: str) -> None:
+    identifiers = tuple(
+        {
+            "@id": "_:package-url",
+            "type": "ExternalIdentifier",
+            "externalIdentifierType": "packageUrl",
+            "identifier": purl,
+        }
+        for purl in ("pkg:pypi/demo@1.0.0", second_purl)
+    )
+    package = _package(externalIdentifier=["_:package-url"])
+    del package["software_packageUrl"]
+    with pytest.raises(SbomError, match=r"duplicate.*identifier"):
+        load_spdx3_sbom(_write(tmp_path, _document(package, extra_elements=identifiers)))
 
 
 def test_rejects_an_unsupported_context(tmp_path: Path) -> None:

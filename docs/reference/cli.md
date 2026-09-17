@@ -85,9 +85,21 @@ XML input rejects DTD, entity, and external-reference declarations.
 
 Local inventory input must resolve to a regular file. A symbolic link to a regular file is accepted; FIFOs, devices, sockets, directories, and links to those objects are rejected before content is read. Vexcalibur reads at most 10 MiB from the same opened descriptor that it inspects. GitHub report downloads have the same byte limit.
 
-JSON input rejects duplicate object keys, more than 100 nested arrays or objects, and integer literals longer than 1,000 decimal digits. A document may contain at most 10,000 components and 50 component nesting levels. Parsed components with package URLs must have unique references.
+JSON input rejects duplicate object keys, more than 100 nested arrays or objects, and integer literals longer than 1,000 decimal digits. A document may contain at most 10,000 components. CycloneDX component nesting is limited to 50 levels. Parsed components with package URLs must have unique references.
 
 SPDX 3 input must declare the SPDX 3.0.1 JSON-LD context string as its `@context`. The loader reads `software_Package` elements from `@graph`, including the derived `ai_AIPackage` and `dataset_DatasetPackage` types: the package URL comes from `software_packageUrl` or an `externalIdentifier` entry of type `packageUrl` (inline, or a reference to an `ExternalIdentifier` in `@graph`), equivalent values collapse, and distinct values for one package are rejected. The `spdxId` becomes the component reference, `software_packageVersion` supplies a version for an unversioned package URL, and packages without package URLs are omitted.
+
+This extracts package identities from the supported compact JSON form; it
+does not validate the full SPDX document or perform general JSON-LD expansion.
+Every graph node must have a string `type`. Contexts and referenced documents
+are never fetched. A missing or blank `spdxId` falls back to the canonical
+package URL; otherwise its outer whitespace is removed.
+
+Package definitions must be top-level `@graph` entries; inline packages are
+rejected. External identifier references must resolve locally, even when a
+direct package URL is present. Duplicate external identifier node IDs are
+rejected. Expanded canonical package URLs are limited to 10 MiB across all
+packages, counting repeated references once per package.
 
 GitHub input requests an asynchronous SPDX 2.3 JSON report and extracts package URL references. The repository package itself and packages without package URLs are omitted. A package with multiple distinct package URL references is rejected.
 

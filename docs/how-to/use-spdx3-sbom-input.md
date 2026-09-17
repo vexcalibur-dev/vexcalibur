@@ -24,9 +24,16 @@ Vexcalibur reads `software_Package` elements from the document's `@graph`,
 including the derived `ai_AIPackage` and `dataset_DatasetPackage` types. The
 `@context` must be the SPDX 3.0.1 JSON-LD context string.
 
+This is package-identity extraction from SPDX's compact JSON form, not full
+SPDX validation or general JSON-LD processing. Each graph node needs a string
+`type`. Vexcalibur does not expand contexts or fetch referenced documents.
+Package definitions must be top-level `@graph` entries. Inline packages, such
+as objects inside `SpdxDocument.element`, are rejected rather than silently
+omitted; flatten those definitions into the graph before generating VEX.
+
 | SPDX 3 field | Used as |
 | --- | --- |
-| `spdxId` | Component reference for findings matching |
+| `spdxId` | Component reference for findings matching; a missing or blank value falls back to the canonical package URL |
 | `name` | Component name; the package URL name is the fallback |
 | `software_packageUrl` | Package URL |
 | `externalIdentifier` entry of type `packageUrl` | Package URL |
@@ -37,6 +44,13 @@ An `externalIdentifier` entry may be the inline object or a reference to an
 URL in either field, or in both when the values are equivalent. Two distinct
 package URLs on one package are rejected. Packages without package URLs are
 omitted, because finding sources and VEX assertions need package identity.
+
+Every external identifier reference must resolve within the graph, even when
+the package also supplies `software_packageUrl`. An unresolved identifier
+could hide a conflicting package URL, so Vexcalibur rejects it instead of
+assuming the known URL is unique. The sum of canonical package URL bytes
+across accepted packages may not exceed 10 MiB; repeated references count
+once per package toward this limit.
 
 ## Generate from local inputs
 
@@ -86,7 +100,9 @@ PY
 ## Match findings to SPDX packages
 
 A local finding names its component by `component_ref` or by `purl`. For SPDX
-input, `component_ref` must equal the package's `spdxId`. When the SBOM's
+input, `component_ref` must equal the package's nonblank `spdxId`, with outer
+whitespace removed. If it is missing or blank, use the canonical package URL.
+When the SBOM's
 identifiers are long IRIs, matching by package URL is usually easier:
 
 ```json

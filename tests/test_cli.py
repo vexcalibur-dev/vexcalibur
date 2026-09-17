@@ -1186,6 +1186,27 @@ def test_generate_offline_accepts_spdx3_input_file(
     assert "Traceback" not in result.output
 
 
+@pytest.mark.parametrize("value", ([], {}))
+def test_generate_rejects_malformed_spdx_type_without_traceback(tmp_path: Path, value) -> None:
+    document = json.loads((FIXTURE_ROOT / "spdx3-json-simple.json").read_text())
+    document["@graph"][0]["type"] = value
+    sbom_path = tmp_path / "malformed.json"
+    sbom_path.write_text(json.dumps(document))
+    result = runner.invoke(
+        cli.app,
+        [
+            "generate",
+            str(sbom_path),
+            "--offline",
+            "--findings-file",
+            str(FINDINGS_ROOT / "spdx3-input-findings.json"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "type values must be strings" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_generate_reports_unsupported_sbom_formats_without_traceback(
     tmp_path: Path,
 ) -> None:
@@ -1506,6 +1527,13 @@ def test_vexcalibur_root_shows_help_without_args() -> None:
     assert result.exit_code == 0
     assert "query-osv" in result.output
     assert "generate" in result.output
+
+
+def test_generate_help_advertises_spdx3_input() -> None:
+    result = runner.invoke(cli.app, ["generate", "--help"], terminal_width=120)
+
+    assert result.exit_code == 0
+    assert "SPDX 3 JSON-LD" in result.output
 
 
 def test_generate_openvex_matches_golden() -> None:

@@ -87,4 +87,8 @@ At least one of `component_ref` and `purl` is required.
 
 For local CycloneDX input, `component_ref` is the component's `bom-ref`. For GitHub SPDX input, it is the package `SPDXID` when present and otherwise the package URL.
 
+For local SPDX 3 input, `component_ref` is the package's nonblank `spdxId`
+with outer whitespace removed. A missing or blank `spdxId` falls back to the
+canonical package URL.
+
 When both selectors appear, they must identify the same component. A package URL that appears under more than one component reference is ambiguous and rejected; use `component_ref` in that case.
