@@ -664,10 +664,11 @@ def _github_spdx_package_purl(package: dict[str, Any], *, source: str) -> Packag
             raise GithubSbomClientError(msg)
         try:
             package_url = PackageURL.from_string(reference_locator)
+            canonical_purl = package_url.to_string()
         except ValueError as exc:
             msg = f"GitHub SBOM {source} package purl is invalid: {exc}"
             raise GithubSbomClientError(msg) from exc
-        package_urls[package_url.to_string()] = package_url
+        package_urls[canonical_purl] = package_url
     if len(package_urls) > 1:
         msg = f"GitHub SBOM {source} package has multiple distinct package URL references"
         raise GithubSbomClientError(msg)

@@ -90,6 +90,51 @@ def test_public_spdx3_loaders_return_package_identities() -> None:
     ]
 
 
+@pytest.mark.parametrize("loader", (api.load_cyclonedx_sbom, api.load_sbom))
+@pytest.mark.parametrize("ref", (None, "component:demo"))
+@pytest.mark.parametrize(
+    "purl",
+    (
+        "pkg:pypi/\ud800@1",
+        "pkg:maven/\ud800/demo@1",
+        "pkg:pypi/demo@\ud800",
+        "pkg:pypi/demo@1?key=\ud800",
+        "pkg:pypi/demo@1#\ud800",
+    ),
+)
+def test_public_cyclonedx_loaders_reject_unencodable_purls(
+    tmp_path: Path, loader, ref: str | None, purl: str
+) -> None:
+    component = {"type": "library", "name": "demo", "purl": purl}
+    if ref is not None:
+        component["bom-ref"] = ref
+    path = tmp_path / "sbom.json"
+    path.write_text(
+        json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [component]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(api.SbomError) as error:
+        loader(path)
+
+    assert str(error.value).encode("utf-8")
+
+
+def test_public_cyclonedx_loader_rejects_surrogate_xml_reference(tmp_path: Path) -> None:
+    path = tmp_path / "sbom.xml"
+    path.write_text(
+        '<bom xmlns="http://cyclonedx.org/schema/bom/1.6"><components>'
+        '<component type="library"><name>demo</name><purl>pkg:pypi/&#xD800;@1</purl>'
+        "</component></components></bom>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(api.SbomError) as error:
+        api.load_sbom(path)
+
+    assert str(error.value).encode("utf-8")
+
+
 def test_public_api_pins_enum_names_and_values() -> None:
     assert {member.name: member.value for member in api.VexAnalysisState} == {
         "RESOLVED": "resolved",
