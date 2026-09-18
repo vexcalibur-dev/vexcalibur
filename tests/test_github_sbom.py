@@ -408,7 +408,18 @@ def test_component_identities_from_github_spdx_sbom_rejects_unsupported_spdx_ver
         )
 
 
-def test_component_identities_from_github_spdx_sbom_rejects_invalid_purl() -> None:
+@pytest.mark.parametrize(
+    "purl",
+    (
+        "not a purl",
+        "pkg:pypi/\ud800@1",
+        "pkg:maven/\ud800/demo@1",
+        "pkg:pypi/demo@\ud800",
+        "pkg:pypi/demo@1?key=\ud800",
+        "pkg:pypi/demo@1#\ud800",
+    ),
+)
+def test_component_identities_from_github_spdx_sbom_rejects_invalid_purl(purl: str) -> None:
     raw_response = {
         "sbom": {
             "spdxVersion": "SPDX-2.3",
@@ -420,7 +431,7 @@ def test_component_identities_from_github_spdx_sbom_rejects_invalid_purl() -> No
                         {
                             "referenceCategory": "PACKAGE-MANAGER",
                             "referenceType": "purl",
-                            "referenceLocator": "not a purl",
+                            "referenceLocator": purl,
                         }
                     ],
                 }
@@ -428,8 +439,10 @@ def test_component_identities_from_github_spdx_sbom_rejects_invalid_purl() -> No
         }
     }
 
-    with pytest.raises(GithubSbomClientError, match="package purl is invalid"):
+    with pytest.raises(GithubSbomClientError, match="package purl is invalid") as error:
         component_identities_from_github_spdx_sbom(raw_response, source="owner/repo")
+
+    assert str(error.value).encode("utf-8")
 
 
 def test_component_identities_from_github_spdx_sbom_rejects_conflicting_versions() -> None:

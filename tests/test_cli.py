@@ -1464,6 +1464,40 @@ def test_generate_reports_invalid_timestamp_without_traceback() -> None:
     assert "Traceback" not in result.output
 
 
+def test_generate_reports_unencodable_purl_without_querying_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unexpected_query(*args, **kwargs):
+        pytest.fail("Malformed inventory must not reach the provider")
+
+    monkeypatch.setattr("vexcalibur.sources.osv.OsvClient", unexpected_query)
+    path = tmp_path / "sbom.json"
+    path.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "components": [
+                    {
+                        "type": "library",
+                        "name": "demo",
+                        "bom-ref": "demo",
+                        "purl": "pkg:pypi/\ud800@1",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli.app, ["generate", str(path)])
+
+    assert result.exit_code == 1
+    assert "SBOM ingest failed:" in result.output
+    assert "Traceback" not in result.output
+    assert result.output.encode("utf-8")
+
+
 def test_generate_reports_sbom_errors_without_traceback(tmp_path: Path) -> None:
     sbom_path = tmp_path / "invalid.json"
     sbom_path.write_text("{not json", encoding="utf-8")

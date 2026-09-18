@@ -539,7 +539,12 @@ def _component_identity(component: Component) -> ComponentIdentity:
         msg = "component must have a package URL"
         raise SbomError(msg)
 
-    ref = component.bom_ref.value or component.purl.to_string()
+    try:
+        canonical_purl = component.purl.to_string()
+    except ValueError as exc:
+        msg = "SBOM component purl cannot be canonicalized"
+        raise SbomError(msg) from exc
+    ref = component.bom_ref.value or canonical_purl
     return ComponentIdentity(
         ref=ref,
         name=component.name,
