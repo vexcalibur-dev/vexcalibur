@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "review_kind": "production",
-  "analysis_revision": 9,
-  "reviewed_at": "2026-09-16T20:47:09Z",
+  "analysis_revision": 10,
+  "reviewed_at": "2026-09-18T19:20:22Z",
   "reviewed_by": "Vexcalibur dependency review automation",
   "inventory": {
     "path": "uv.lock",
-    "sha256": "4a63185a065d24f8:f8ea0275b5eb24ee:17e7e4097e0c7dd8:1b91e32b19dc0000",
+    "sha256": "112e7f78c62460b5:4f309c602f446909:194c2f027751a4c8:eb0eebc54bbbf466",
     "coverage": "cross-platform-reference-runtime"
   },
   "findings": {
@@ -18,5 +18,5 @@
       "in_triage"
     ]
   },
-  "conclusion": "Analysis revision 9 covers the development-only pip update from 26.1.2 to 26.2 and redundant dependency-marker removal. With the repository-pinned uv, the cross-platform runtime export is unchanged; the export of all groups and extras differs only in pip's version and hashes. The findings snapshot remains empty. This is not a claim that the inventory has no vulnerabilities."
+  "conclusion": "Analysis revision 10 covers the AnyIO update from 4.14.1 to 4.14.2 and an installed-package minimum of 4.14.2 for the disclosed TLS hostname, supplementary-group, and process-pool fixes. The repository-pinned uv also normalized redundant dependency markers. The cross-platform export of all groups and extras differs only in AnyIO's version and hashes. The findings snapshot remains empty; it does not assert that the inventory has no vulnerabilities."
 }
