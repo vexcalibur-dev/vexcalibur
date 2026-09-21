@@ -2,10 +2,8 @@
 
 A provider turns normalized SBOM components into `VulnerabilityFinding` values. A built-in renderer adapts them into atomic assertions before it writes a format. Neither stage needs the provider's request or storage format.
 
-The compatibility guarantee for this contract begins with Vexcalibur 1.0.
-Before 1.0, pin an exact release.
 The [compatibility policy](compatibility.md) explains which extension changes
-can ship within 1.x.
+can ship within 1.x. Pin an exact package version in the embedding application.
 
 This reference covers both first-party sources maintained with Vexcalibur and
 external sources owned by an embedding application. External source code stays

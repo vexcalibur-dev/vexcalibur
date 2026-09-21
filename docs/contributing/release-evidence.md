@@ -1,7 +1,7 @@
 # Release-evidence reference
 
 This page defines Vexcalibur's repository-maintained evidence formats. They are
-not part of the package's pre-1.0 Python API.
+not part of the package's supported Python API.
 
 ## Reviewed inputs
 

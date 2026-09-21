@@ -4,7 +4,7 @@ This file gives automated contributors the repository rules needed to work safel
 
 ## Project state
 
-Vexcalibur is a pre-1.0 VEX toolkit. It reads CycloneDX files, SPDX 3 files,
+Vexcalibur is an ecosystem-neutral VEX toolkit. It reads CycloneDX files, SPDX 3 files,
 or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services
 or local JSON. It renders CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX
 3.0.1 JSON.

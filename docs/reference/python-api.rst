@@ -5,11 +5,14 @@ Python API
 extension code from this module rather than from implementation modules such as
 ``vexcalibur.generate`` or ``vexcalibur.sources.osv``.
 
-The compatibility guarantee begins with Vexcalibur 1.0. Before 1.0, pin an
-exact Vexcalibur release. For a 1.x release, the contract covers exported names,
+For a 1.x release, the compatibility contract covers exported names,
 call signatures and defaults, documented return types and behavior, documented
 exceptions, public dataclass fields, protocol methods, and enum names and
 values. Modules and names outside this facade may change in any release.
+
+Pin an exact package version in automation. The :doc:`compatibility policy
+<compatibility>` defines release-series guarantees; these do not apply
+retroactively to 0.x releases.
 
 A minor release may add an export, add an optional keyword argument with a
 default to a caller-facing function or constructor, or add a more specific
