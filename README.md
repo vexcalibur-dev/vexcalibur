@@ -12,10 +12,11 @@ Vexcalibur turns software bills of materials and vulnerability findings into VEX
 Current releases write CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, and SPDX 3.0.1
 JSON. CSAF output uses the `csaf_vex` profile, and SPDX 3 output goes through
 the security profile's VEX relationships. SPDX 3 output arrived in `v0.7.0`.
-This branch also reads local SPDX 3.0.1 JSON-LD SBOMs; no release through
-`v0.7.2` includes that input.
+Local SPDX 3.0.1 JSON-LD SBOM input arrived in `v0.8.0`.
 
-The project is usable, but still pre-1.0. Pin an exact release because command flags, Python APIs, and detailed output may change.
+Use Vexcalibur from the CLI, the supported Python API, or a CI integration.
+The [compatibility policy](https://vexcalibur-dev.github.io/vexcalibur/reference/compatibility.html)
+defines the guarantees for each release series.
 
 ## What works today
 
@@ -24,7 +25,7 @@ The project is usable, but still pre-1.0. Pin an exact release because command f
 | SBOM input | CycloneDX JSON and XML 1.4–1.6; SPDX 3.0.1 JSON-LD; GitHub Dependency Graph SPDX 2.3 JSON |
 | Finding sources | Public OSV with explicit consent; private OSV-compatible endpoints; local findings files |
 | VEX output | CycloneDX 1.6 JSON; OpenVEX 0.2.0 JSON; CSAF 2.0 JSON with the `csaf_vex` profile; SPDX 3.0.1 JSON-LD with the security profile |
-| Automation | A companion [GitHub Action](https://github.com/vexcalibur-dev/vexcalibur-action) |
+| Automation | A published [GitHub Action](https://github.com/marketplace/actions/vexcalibur-action) and [CircleCI Orb](https://circleci.com/developer/orbs/orb/vexcalibur-dev/vexcalibur) |
 | Migration | A narrow `vexy` command-line compatibility layer |
 | Python | 3.10–3.14 |
 
@@ -55,7 +56,7 @@ uv tool install vexcalibur
 ```
 
 That gives you the latest release, which is what you want to try it out.
-Vexcalibur is pre-1.0, so pin an exact version in anything you automate. The
+Pin an exact version in anything you automate so upgrades are deliberate. The
 [install guide](https://vexcalibur-dev.github.io/vexcalibur/install.html)
 covers pinning, PATH setup, and how to check which formats your release
 supports.
@@ -65,8 +66,8 @@ against your own SBOM.
 
 ## Try local generation from a checkout
 
-Use this path to work on Vexcalibur itself, or to run unreleased output
-formats. Clone the repository, then install its locked dependencies:
+Use this path to work on Vexcalibur itself or try changes that have not reached
+a release. Clone the repository, then install its locked dependencies:
 
 ```bash
 uv sync --frozen

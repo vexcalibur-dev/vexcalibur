@@ -1,11 +1,15 @@
 # Project status and compatibility
 
-Vexcalibur has published releases and supports the workflows in this manual. It has not reached 1.0, so those releases do not yet promise a stable CLI or Python API.
+Vexcalibur is a released VEX toolkit with a command-line interface, a supported
+Python API, and integrations for GitHub Actions and CircleCI. The workflows
+below are implemented; the limits at the end of this page are intentional
+boundaries, not features supplied by an integration.
 
 The [compatibility policy](../reference/compatibility.md) defines the
-guarantees that begin at 1.0. The [readiness
-tracker](https://github.com/vexcalibur-dev/vexcalibur/issues/136) records the
-remaining release gates; this manual does not claim they are complete.
+guarantees for the CLI, Python facade, extension protocols, and generated
+documents in the 1.x series. Earlier releases do not carry those guarantees.
+Use the [release page](https://github.com/vexcalibur-dev/vexcalibur/releases)
+to select a published version; this manual does not declare a release.
 
 Pin exact package and action versions in automation. Do not use a mutable branch for a production workflow.
 
@@ -84,18 +88,17 @@ precise versioned products and state-specific evidence. CSAF goldens and
 installed-wheel output pass the pinned OASIS schema and mandatory semantic-test
 suite.
 
-## Unstable before 1.0
+## Upgrade expectations
 
-These surfaces may change between releases:
+The compatibility policy covers documented behavior, not every implementation
+detail. Human-readable diagnostics and help layout are not machine-readable
+contracts. Python imports outside `vexcalibur.api` are internal, and generated
+document bytes can change across package or dependency upgrades.
 
-- command names, flags, defaults, messages, and exit behavior.
-- Python imports, signatures, types, and exceptions.
-- output details outside the documented CycloneDX, OpenVEX, CSAF, and SPDX 3 contracts.
-- provider configuration and extension hooks.
-- GitHub token lookup and Enterprise configuration.
-- compatibility pairings between the package and its integrations.
-
-Read release notes before upgrading, even across patch releases.
+Retain a generated document and its execution report when exact bytes matter.
+Read release notes before upgrading, including security fixes that reject
+previously accepted unsafe input. The Action and Orb version independently;
+check their documented package support when changing an integration pin.
 
 ## Not implemented
 

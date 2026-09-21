@@ -7,7 +7,9 @@ writes CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX 3.0.1 JSON.
 
 Public OSV access fails closed. Vexcalibur sends package URLs and versions to `https://api.osv.dev` only when a command includes `--allow-public-osv`.
 
-Vexcalibur is pre-1.0. Pin an exact release and review the [project status](explanation/project-status.md) before depending on a public contract.
+Pin an exact release in automation. The [compatibility policy](reference/compatibility.md)
+defines the public contracts, and [project status](explanation/project-status.md)
+describes supported workflows and their limits.
 
 New here? [Install a release](install.md), then work through the
 [quickstart](tutorials/quickstart.md).
@@ -64,8 +66,8 @@ output formats, and the two extension points.
 
 ### Explanation
 
-Why Vexcalibur is built the way it is, and what it does and doesn't promise
-yet.
+Why Vexcalibur is built the way it is, what it supports, and where its limits
+apply.
 
 - [Architecture and trust boundaries](explanation/architecture.md)
 - [Project status and compatibility](explanation/project-status.md)

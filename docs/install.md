@@ -58,9 +58,10 @@ them afterward, run `uv tool update-shell` and open a new shell.
 
 ## Pin a version
 
-The commands above install the latest release. Vexcalibur is pre-1.0, so
-command flags, Python APIs, and output detail can change between releases. Pin
-an exact version in anything you automate.
+The commands above install the latest release. Pin an exact version in
+automation so a new release cannot change the installed package without a
+deliberate upgrade. The [compatibility policy](reference/compatibility.md)
+defines which interfaces remain compatible within a release series.
 
 A pin is a version specifier on the install command:
 
@@ -132,6 +133,7 @@ arrived in these releases:
 | CSAF 2.0 output | `v0.3.0` |
 | `--execution-report` | `v0.6.0` |
 | SPDX 3.0.1 output | `v0.7.0` |
+| Local SPDX 3.0.1 SBOM input | `v0.8.0` |
 
 If the format you need is missing, install a newer release rather than working
 around it.

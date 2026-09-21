@@ -7,9 +7,9 @@ The package installs two executables:
 | `vexcalibur` | Primary interface |
 | `vexy` | Compatibility interface for a limited set of legacy invocations |
 
-Before 1.0, pin an exact release. The [compatibility policy](compatibility.md)
+Pin an exact release in automation. The [compatibility policy](compatibility.md)
 defines the command, default, exit-status, and machine-readable output
-guarantees that begin at 1.0. Human-readable messages are not parsing contracts.
+guarantees for 1.x. Human-readable messages are not parsing contracts.
 
 Run `vexcalibur --help` or `vexcalibur COMMAND --help` for help generated from the installed version. Expected input and source errors are printed without a Python traceback. Automation should treat every nonzero status as failure.
 

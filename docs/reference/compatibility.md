@@ -1,8 +1,8 @@
 # Compatibility policy
 
-The guarantees below begin with Vexcalibur 1.0 and apply throughout 1.x.
-They do not make earlier releases stable. Before 1.0, pin an exact release
-and read its release notes before upgrading.
+The guarantees below apply to Vexcalibur 1.x. They do not retroactively apply
+to 0.x releases. Pin an exact release in automation and read its release notes
+before upgrading, regardless of the release series.
 
 ## Command line
 

@@ -127,7 +127,8 @@ The adapter rejects duplicate component references, unknown references, finding 
 
 This model represents generated snapshots only. Vexcalibur still does not read VEX documents or convert between formats.
 
-The document model is an internal pre-1.0 model. It is not yet a stable public API.
+The document model is an implementation detail, not a supported Python
+extension point. Use the exports in `vexcalibur.api` when embedding Vexcalibur.
 
 ## Network boundary
 

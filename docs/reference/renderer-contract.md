@@ -3,7 +3,7 @@
 `vexcalibur.api.VexRenderer` is the supported extension contract for serialized output. It is a structural Python protocol, so a renderer does not register with Vexcalibur or inherit a base class.
 
 The [compatibility policy](compatibility.md) guarantees the existing protocol
-call throughout 1.x. Before 1.0, pin an exact release.
+call throughout 1.x. Pin an exact package version in the embedding application.
 
 ## Method
 
