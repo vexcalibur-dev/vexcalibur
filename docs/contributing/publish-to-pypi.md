@@ -135,6 +135,48 @@ rerun can recreate a missing release from that tag, while recovery handles an
 interrupted release. The resolver rejects a second release tag on the same
 commit.
 
+### Promote an already released candidate
+
+If the candidate commit already has a release tag, prepare a distinct commit
+through the normal pull-request process before choosing a new version. Include
+the reviewed release-preparation work, such as documentation corrections. Do
+not remove the existing tag or commit a version number to create the next one.
+
+Include `[skip release]` in the squash commit message so the merge does not
+automatically publish another patch release. A `docs:` title alone is not
+enough: version selection also reads the commit body and earlier unreleased
+commits. The skip marker affects automatic selection, not an explicit version.
+After merging,
+wait for its checks and the automatic `Release` workflow to finish. That
+workflow should skip publication. Fetch the merged commit and check its tags:
+
+```bash
+git fetch origin main --tags
+RELEASE_SHA="$(git rev-parse origin/main)"
+git tag --points-at "$RELEASE_SHA" --list 'v[0-9]*'
+```
+
+The tag-list command must print nothing. If it names a release tag, stop: that
+commit cannot receive a second release version. Otherwise, replace the
+placeholder below with the approved `MAJOR.MINOR.PATCH` version, without a `v`
+prefix, and dispatch from `main`:
+
+```bash
+RELEASE_VERSION=REPLACE_WITH_APPROVED_VERSION
+gh workflow run release.yml --repo vexcalibur-dev/vexcalibur \
+  --ref main -f version="$RELEASE_VERSION" -f expected-sha="$RELEASE_SHA"
+```
+
+The workflow rejects a dispatch if `main` advanced beyond `RELEASE_SHA` before
+the run started. Reassess the new commit before approving another dispatch;
+don't replace the expected SHA merely to make the check pass.
+
+Omitting `recovery-tag` selects normal mode. A successful command means GitHub
+accepted the dispatch, not that publication finished. Inspect the queued
+`Release` run and require it to pass. The workflow builds and validates new
+distributions for that version; it does not rename the candidate's existing
+artifacts.
+
 ## Start a normal release
 
 Push the release commit to `main`. The `Release` workflow normally starts from

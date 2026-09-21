@@ -70,6 +70,41 @@ def _run_create_release_step(
     return completed, calls
 
 
+@pytest.mark.parametrize(
+    ("expected_sha", "accepted"),
+    (
+        ("", True),
+        ("a" * 40, True),
+        ("b" * 40, False),
+        ("a" * 39, False),
+        ("A" * 40, False),
+        ("a" * 40 + "\n", False),
+        ("$(exit 0)", False),
+    ),
+)
+def test_dispatch_commit_guard_binds_approval_before_release_resolution(
+    tmp_path: Path, expected_sha: str, accepted: bool
+) -> None:
+    resolve = _job(_workflow_text(), "resolve")
+    assert resolve.index("Verify approved dispatch commit") < resolve.index(
+        "Determine release version"
+    )
+    assert "expected-sha:" in _workflow_text()
+    harness = ReleaseRecoveryHarness(tmp_path)
+
+    completed = harness.run_release_step(
+        "resolve",
+        "Verify approved dispatch commit",
+        expression_values={"github.event.inputs['expected-sha'] || ''": expected_sha},
+        runtime_environment={"GITHUB_SHA": "a" * 40},
+    )
+
+    assert (completed.returncode == 0) is accepted
+    assert not harness.calls("api")
+    if not accepted:
+        assert "approved expected-sha" in completed.stderr
+
+
 def test_release_publisher_rest_binds_the_downloaded_validation_artifact() -> None:
     publish = _job(_workflow_text(), "publish-release")
     verification = _step(publish, "Verify validated release assets")
