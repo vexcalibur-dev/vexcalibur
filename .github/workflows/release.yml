@@ -1021,6 +1021,7 @@ jobs:
           done < "${local_names}"
 
       - name: Publish immutable GitHub Release
+        id: publication
         env:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1220,14 +1221,53 @@ jobs:
             echo "Release assets changed during the pre-publication byte check." >&2
             exit 1
           fi
+          release_metadata="${RUNNER_TEMP}/pre-publish-release-metadata.json"
+          if ! gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "${release_metadata}"; then
+            echo "Could not list GitHub Release metadata for latest-release planning." >&2
+            exit 1
+          fi
+          if ! make_latest="$(
+            jq -ser --arg release_tag "${RELEASE_TAG}" '
+              def semver:
+                capture("^v(?<major>0|[1-9][0-9]{0,5})\\.(?<minor>0|[1-9][0-9]{0,5})\\.(?<patch>0|[1-9][0-9]{0,5})$") |
+                [(.major | tonumber), (.minor | tonumber), (.patch | tonumber)];
+              if length == 0 or (all(.[]; type == "array") | not) then
+                error("release metadata pages are missing or malformed")
+              else
+                [.[][]] as $releases |
+                if (all($releases[]; type == "object" and
+                    (.tag_name | type == "string") and
+                    (.draft | type == "boolean") and
+                    (.prerelease | type == "boolean")) | not) then
+                  error("release metadata is malformed")
+                else
+                  [$releases[] | select(.draft == false and .prerelease == false)] as $published |
+                  if (all($published[]; (.tag_name | test("^v(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"))) | not) then
+                    error("published release metadata has a malformed semantic version")
+                  else
+                    ($release_tag | semver) as $release_version |
+                    if all($published[]; ((.tag_name | semver) <= $release_version))
+                    then "true" else "false" end
+                  end
+                end
+              end
+            ' "${release_metadata}"
+          )"; then
+            echo "GitHub returned missing or malformed release metadata for latest-release planning." >&2
+            exit 1
+          fi
+          printf 'make_latest=%s\n' "${make_latest}" >> "${GITHUB_OUTPUT}"
+
           if [[ "${current_published}" == "false" ]]; then
             publication_transition="${RUNNER_TEMP}/immutable-publication-transition.json"
             jq -n \
               --arg tag "${RELEASE_TAG}" \
               --arg sha "${RELEASE_SHA}" \
+              --arg make_latest "${make_latest}" \
               --rawfile body "${notes_path}" \
               '{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body,
-                draft: false, prerelease: false}' \
+                draft: false, prerelease: false, make_latest: $make_latest}' \
               > "${publication_transition}"
             policy_error="${RUNNER_TEMP}/immutable-release-policy-final.error"
             if ! policy_status="$(
@@ -1314,6 +1354,57 @@ jobs:
               exit 1
             fi
           done < "${local_names}"
+
+      - name: Verify latest-release projection
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MAKE_LATEST: ${{ steps.publication.outputs.make_latest }}
+          RELEASE_TAG: ${{ needs.validation.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${MAKE_LATEST}" != "true" && "${MAKE_LATEST}" != "false" ]]; then
+            echo "Latest-release plan is malformed." >&2
+            exit 1
+          fi
+          latest_path="${RUNNER_TEMP}/latest-github-release.json"
+          latest_error="${RUNNER_TEMP}/latest-github-release.error"
+          if ! gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+            > "${latest_path}" 2> "${latest_error}"; then
+            echo "Could not read GitHub's latest release projection." >&2
+            sed -n '1,5p' "${latest_error}" >&2
+            exit 1
+          fi
+          if ! latest_tag="$(
+            jq -ser '
+              if length != 1 then error("expected one latest release response")
+              else .[0] |
+              if type == "object" and
+                 (.tag_name | type == "string" and
+                  test("^v(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"))
+              then .tag_name else error("latest release metadata is malformed") end
+              end
+            ' "${latest_path}"
+          )"; then
+            echo "GitHub returned a malformed latest-release projection." >&2
+            exit 1
+          fi
+          if [[ "${MAKE_LATEST}" == "true" ]]; then
+            if [[ "${latest_tag}" != "${RELEASE_TAG}" ]]; then
+              echo "GitHub did not promote ${RELEASE_TAG} to latest." >&2
+              exit 1
+            fi
+            exit 0
+          fi
+          if ! jq -ne --arg recovery_tag "${RELEASE_TAG}" --arg latest_tag "${latest_tag}" '
+            def semver:
+              capture("^v(?<major>0|[1-9][0-9]{0,5})\\.(?<minor>0|[1-9][0-9]{0,5})\\.(?<patch>0|[1-9][0-9]{0,5})$") |
+              [(.major | tonumber), (.minor | tonumber), (.patch | tonumber)];
+            ($latest_tag | semver) > ($recovery_tag | semver)
+          ' >/dev/null; then
+            echo "Recovery incorrectly changed latest away from a newer published release." >&2
+            exit 1
+          fi
 
       - name: Verify release and every asset attestation
         env:

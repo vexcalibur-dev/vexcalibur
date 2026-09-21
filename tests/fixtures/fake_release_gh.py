@@ -154,6 +154,8 @@ def _handle_api(path: Path, state: dict[str, Any], arguments: list[str]) -> int:
     tag_object_endpoint = f"repos/{repository}/git/tags/{state['tag_object_sha']}"
     policy_endpoint = f"repos/{repository}/immutable-releases"
     artifact_endpoint = f"repos/{repository}/actions/runs/{state['run_id']}/artifacts?per_page=100"
+    releases_endpoint = f"repos/{repository}/releases?per_page=100"
+    latest_release_endpoint = f"repos/{repository}/releases/latest"
 
     if arguments == ["api", main_endpoint, "--jq", ".object.sha"]:
         print(state["main_sha"])
@@ -165,6 +167,37 @@ def _handle_api(path: Path, state: dict[str, Any], arguments: list[str]) -> int:
         _write_json(state["tag_ref"])
     elif arguments == ["api", tag_object_endpoint]:
         _write_json(state["tag_object"])
+    elif arguments == ["api", "--paginate", releases_endpoint]:
+        if not state["release_metadata_available"]:
+            print("simulated release metadata request failure", file=sys.stderr)
+            return 1
+        pages = list(state["release_metadata_pages"])
+        if (
+            release is not None
+            and release["draft"] is False
+            and pages
+            and all(type(page) is list for page in pages)
+        ):
+            pages[-1] = [
+                *pages[-1],
+                {
+                    "tag_name": release["tag_name"],
+                    "draft": release["draft"],
+                    "prerelease": release["prerelease"],
+                },
+            ]
+        for page in pages:
+            _write_json(page)
+    elif arguments == ["api", latest_release_endpoint]:
+        if state["latest_release_objects"] is not None:
+            for item in state["latest_release_objects"]:
+                _write_json(item)
+            return 0
+        latest_release_tag = state["latest_release_tag"]
+        if latest_release_tag is None:
+            print("HTTP 404: no latest release", file=sys.stderr)
+            return 1
+        _write_json({"tag_name": latest_release_tag})
     elif arguments == ["api", "--paginate", artifact_endpoint, "--jq", ARTIFACT_QUERY]:
         for artifact in state["run_artifacts"]:
             expiration = "invalid" if artifact["expired"] else "current"
@@ -259,16 +292,22 @@ def _handle_api(path: Path, state: dict[str, Any], arguments: list[str]) -> int:
         if not _is_exact_file(arguments[5], expected_input):
             return _reject(path, state, arguments)
         payload = json.loads(expected_input.read_text(encoding="utf-8"))
-        if set(payload) != {
+        required_fields = {
             "tag_name",
             "target_commitish",
             "name",
             "body",
             "draft",
             "prerelease",
-        }:
+        }
+        if set(payload) != required_fields and set(payload) != required_fields | {"make_latest"}:
             return _reject(path, state, arguments)
-        release.update(payload)
+        make_latest = payload.get("make_latest")
+        if make_latest is not None and make_latest not in {"true", "false"}:
+            return _reject(path, state, arguments)
+        release.update({key: value for key, value in payload.items() if key != "make_latest"})
+        if release.get("draft") is False and make_latest != "false":
+            state["latest_release_tag"] = release["tag_name"]
         if (
             release.get("draft") is False
             and state["publication_completes"]

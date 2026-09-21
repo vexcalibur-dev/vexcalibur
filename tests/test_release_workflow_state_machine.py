@@ -127,6 +127,7 @@ def test_release_state_machine_allows_only_exact_draft_or_immutable_published_st
     create = _step(publish, "Create GitHub Release")
     reconcile = _step(publish, "Reconcile exact release assets")
     immutable = _step(publish, "Publish immutable GitHub Release")
+    latest = _step(publish, "Verify latest-release projection")
 
     assert "release(tagName:$tag){databaseId}" in create
     assert "data.repository.release == null" in create
@@ -149,13 +150,19 @@ def test_release_state_machine_allows_only_exact_draft_or_immutable_published_st
 
     assert "immutable-publication-transition.json" in immutable
     assert "{tag_name: $tag, target_commitish: $sha, name: $tag, body: $body," in immutable
-    assert "draft: false, prerelease: false" in immutable
+    assert "draft: false, prerelease: false, make_latest: $make_latest" in immutable
+    assert "make_latest" not in _job(_workflow_text(), "resolve")
+    assert "id: publication" in immutable
     assert '--input "${publication_transition}"' in immutable
     assert "-F draft=false" not in immutable
     assert ".draft == false and .prerelease == false" in immutable
     assert ".immutable == true" in immutable
     assert "GitHub Release did not reach the exact immutable published state" in immutable
     assert "Published immutable release asset" in immutable
+
+    assert "repos/${GITHUB_REPOSITORY}/releases/latest" in latest
+    assert '"${MAKE_LATEST}" == "true"' in latest
+    assert "Recovery incorrectly changed latest away from a newer published release." in latest
 
 
 def test_release_resolver_recovers_an_existing_draft_without_creating(

@@ -121,6 +121,7 @@ def test_recovery_transitions_are_unique_and_ordered_in_the_workflows() -> None:
             "Create GitHub Release",
             "Reconcile exact release assets",
             "Publish immutable GitHub Release",
+            "Verify latest-release projection",
             "Verify release and every asset attestation",
         ),
     )
@@ -187,6 +188,11 @@ def test_workflow_wires_recovery_outputs_into_each_transition() -> None:
             "RELEASE_MODE": "${{ needs.resolve.outputs.mode }}",
             "RELEASE_PUBLISHED": "${{ steps.release.outputs.published }}",
             "RELEASE_SHA": "${{ needs.validation.outputs.sha }}",
+            "RELEASE_TAG": "${{ needs.validation.outputs.tag }}",
+        },
+        "Verify latest-release projection": {
+            "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+            "MAKE_LATEST": "${{ steps.publication.outputs.make_latest }}",
             "RELEASE_TAG": "${{ needs.validation.outputs.tag }}",
         },
         "Verify release and every asset attestation": {

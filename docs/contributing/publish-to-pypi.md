@@ -272,6 +272,19 @@ the GraphQL `release(tagName:)` lookup, then reads the exact release by its
 numeric ID. A null lookup permits draft creation; a malformed response stops
 recovery.
 
+Immediately before publication, the workflow reads every page of GitHub
+Release metadata and compares `MAJOR.MINOR.PATCH` numerically. Publishing the
+newest version makes that version latest. Recovering an older version
+sets `make_latest: "false"` on the immutable publication request, so an already
+published newer version remains latest. A missing or malformed metadata response
+stops recovery.
+
+After publication, the workflow reads GitHub's latest-release projection. It
+must name the recovered tag when the recovery is newest. For an older recovery,
+it must name a numerically newer tag. This check also runs for an already
+immutable release, so a retry verifies the current projection without changing
+the tag or assets.
+
 If the exact release is already published and immutable, recovery is
 idempotent: it reconstructs and rechecks the protected notes, verifies every
 asset, and repeats the immutable/attestation checks.
@@ -279,6 +292,43 @@ asset, and repeats the immutable/attestation checks.
 Stop and investigate if the existing tag, author, target, title, notes, asset
 set, or any completed asset differs. The workflow intentionally offers no
 force or clobber recovery path.
+
+### Check and correct the latest designation
+
+Use an authenticated GitHub CLI to inspect the current designation and list all
+published, non-prerelease versions:
+
+```bash
+gh api repos/vexcalibur-dev/vexcalibur/releases/latest --jq .tag_name
+gh api --paginate 'repos/vexcalibur-dev/vexcalibur/releases?per_page=100' \
+  --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
+```
+
+The first command should name the numerically highest published version. Don't
+use publication time or string sorting to choose it: `v1.2.10` is newer than
+`v1.2.9`.
+
+If the designation is wrong, set `LATEST_TAG` to that highest version and inspect
+its metadata before making a change. Stop if `draft` or `prerelease` is true,
+`immutable` is not true, or the release verification fails:
+
+```bash
+LATEST_TAG=REPLACE_WITH_HIGHEST_PUBLISHED_TAG
+gh api "repos/vexcalibur-dev/vexcalibur/releases/tags/${LATEST_TAG}" \
+  --jq '{tag_name, draft, prerelease, immutable}'
+gh release verify "$LATEST_TAG" --repo vexcalibur-dev/vexcalibur
+```
+
+With repository Contents write permission, correct only the latest designation:
+
+```bash
+gh release edit "$LATEST_TAG" --repo vexcalibur-dev/vexcalibur --latest
+gh api repos/vexcalibur-dev/vexcalibur/releases/latest --jq .tag_name
+```
+
+The final command must print `LATEST_TAG`'s value. This changes release metadata,
+not the tag, protected notes, or asset bytes. Do not delete or recreate a tag or
+release to repair this designation.
 
 ## Let PyPI publish the exact release bytes
 
