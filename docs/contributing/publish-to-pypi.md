@@ -135,6 +135,40 @@ rerun can recreate a missing release from that tag, while recovery handles an
 interrupted release. The resolver rejects a second release tag on the same
 commit.
 
+### Promote an already released candidate
+
+If the candidate commit already has a release tag, prepare a distinct commit
+through the normal pull-request process before choosing a new version. Include
+the reviewed release-preparation work, such as documentation corrections. Do
+not remove the existing tag or commit a version number to create the next one.
+
+For documentation-only preparation, use a `docs:` squash commit title so the
+merge does not automatically publish another patch release. After merging,
+wait for its checks and the automatic `Release` workflow to finish. That
+workflow should skip publication. Fetch the merged commit and check its tags:
+
+```bash
+git fetch origin main --tags
+git tag --points-at origin/main --list 'v[0-9]*'
+```
+
+The second command must print nothing. If it names a release tag, stop: that
+commit cannot receive a second release version. Otherwise, replace the
+placeholder below with the approved `MAJOR.MINOR.PATCH` version, without a `v`
+prefix, and dispatch from `main`:
+
+```bash
+RELEASE_VERSION=REPLACE_WITH_APPROVED_VERSION
+gh workflow run release.yml --repo vexcalibur-dev/vexcalibur \
+  --ref main -f version="$RELEASE_VERSION"
+```
+
+Omitting `recovery-tag` selects normal mode. A successful command means GitHub
+accepted the dispatch, not that publication finished. Inspect the queued
+`Release` run and require it to pass. The workflow builds and validates new
+distributions for that version; it does not rename the candidate's existing
+artifacts.
+
 ## Start a normal release
 
 Push the release commit to `main`. The `Release` workflow normally starts from
