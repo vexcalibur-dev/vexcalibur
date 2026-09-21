@@ -167,6 +167,10 @@ class ReleaseRecoveryHarness:
                     "expired": False,
                 }
             ],
+            "release_metadata_pages": [[]],
+            "release_metadata_available": True,
+            "latest_release_tag": None,
+            "latest_release_objects": None,
             "authentication_failures": 0,
             "policy_responses": [],
             "policy_failures": [],
@@ -267,6 +271,7 @@ class ReleaseRecoveryHarness:
             "publication_completes",
             "concurrent_create",
             "graphql_scripted",
+            "release_metadata_available",
         )
         if not all(type(state[field]) is str for field in string_fields):
             raise ValueError("fake GitHub string state is malformed")
@@ -287,6 +292,7 @@ class ReleaseRecoveryHarness:
             "policy_failures",
             "policy_responses",
             "run_artifacts",
+            "release_metadata_pages",
             "unmodeled_calls",
         ):
             if type(state[field]) is not list:
@@ -297,6 +303,13 @@ class ReleaseRecoveryHarness:
             raise ValueError("fake REST lookup id is malformed")
         if type(state["pypi_response"]) is not dict:
             raise ValueError("fake PyPI response is malformed")
+        if state["latest_release_tag"] is not None and type(state["latest_release_tag"]) is not str:
+            raise ValueError("fake latest release tag is malformed")
+        if (
+            state["latest_release_objects"] is not None
+            and type(state["latest_release_objects"]) is not list
+        ):
+            raise ValueError("fake latest release objects are malformed")
         if type(state["tag_ref"]) is not dict or type(state["tag_object"]) is not dict:
             raise ValueError("fake tag state is malformed")
         if not all(type(root) is str for root in state["allowed_asset_roots"]):

@@ -74,6 +74,23 @@ def _run_reconcile(
     )
 
 
+def _run_latest_projection(
+    harness: ReleaseRecoveryHarness,
+    *,
+    resolution: dict[str, str] | None = None,
+    make_latest: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    context = _release_context(harness, resolution=resolution)
+    context["steps.publication.outputs.make_latest"] = (
+        harness.outputs()["make_latest"] if make_latest is None else make_latest
+    )
+    return harness.run_release_step(
+        "publish-release",
+        "Verify latest-release projection",
+        expression_values=context,
+    )
+
+
 def test_release_recovery_executes_the_complete_allowed_transition(tmp_path: Path) -> None:
     harness = ReleaseRecoveryHarness(tmp_path)
     repository = harness.create_recovery_repository()
@@ -96,6 +113,7 @@ def test_release_recovery_executes_the_complete_allowed_transition(tmp_path: Pat
     resolution = harness.outputs()
     assert resolution["mode"] == "recovery"
     assert resolution["sha"] == harness.release_sha
+    assert "make_latest" not in resolution
     assert artifact["artifact_name"] == f"release-assets-{resolution['sha']}"
 
     verified_assets = harness.run_release_step(
@@ -150,6 +168,10 @@ def test_release_recovery_executes_the_complete_allowed_transition(tmp_path: Pat
         ),
     )
     assert published.returncode == 0, published.stderr
+    assert harness.outputs()["make_latest"] == "true"
+
+    latest = _run_latest_projection(harness, resolution=resolution)
+    assert latest.returncode == 0, latest.stderr
 
     verified = harness.run_release_step(
         "publish-release",
@@ -186,6 +208,285 @@ def test_release_recovery_executes_the_complete_allowed_transition(tmp_path: Pat
     patch_index = next(index for index, call in enumerate(calls) if "PATCH" in call)
     release_endpoint = f"repos/{state['repository']}/releases/{state['release_id']}"
     assert calls[patch_index + 1 :].count(["api", release_endpoint]) == 6
+
+
+def test_implicit_publication_patch_promotes_an_older_recovery_to_latest(
+    tmp_path: Path,
+) -> None:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    harness.update_state(
+        release=harness.contract_release(),
+        release_metadata_pages=[
+            [],
+            [{"tag_name": "v1.2.10", "draft": False, "prerelease": False}],
+        ],
+        latest_release_tag="v1.2.10",
+    )
+    transition = harness.runner_temp / "immutable-publication-transition.json"
+    transition.write_text(
+        json.dumps(
+            {
+                "tag_name": harness.release_tag,
+                "target_commitish": harness.release_sha,
+                "name": harness.release_tag,
+                "body": harness.notes,
+                "draft": False,
+                "prerelease": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = harness.run_test_script(
+        "gh api --method PATCH "
+        f"repos/{harness.state['repository']}/releases/{harness.state['release_id']} "
+        '--input "${RUNNER_TEMP}/immutable-publication-transition.json"'
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert harness.state["latest_release_tag"] == harness.release_tag
+
+
+def test_older_recovery_preserves_newer_release_published_after_resolve(tmp_path: Path) -> None:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    repository = harness.create_recovery_repository()
+    resolved = harness.run_release_step(
+        "resolve",
+        "Determine release version",
+        cwd=repository,
+        expression_values={
+            "github.event.inputs.version || ''": "",
+            "github.event.inputs['recovery-tag'] || ''": harness.release_tag,
+            "github.token": harness.read_token,
+        },
+        runtime_environment={"GITHUB_SHA": harness.main_sha},
+    )
+    assert resolved.returncode == 0, resolved.stderr
+    resolution = harness.outputs()
+    assert "make_latest" not in resolution
+    metadata_call = [
+        "api",
+        "--paginate",
+        f"repos/{harness.state['repository']}/releases?per_page=100",
+    ]
+    assert metadata_call not in harness.calls("api")
+
+    harness.prepare_validated_assets()
+    harness.update_state(
+        release=harness.contract_release(),
+        release_metadata_pages=[
+            [{"tag_name": "v1.2.2", "draft": False, "prerelease": False}],
+            [{"tag_name": "v1.2.10", "draft": False, "prerelease": False}],
+        ],
+        latest_release_tag="v1.2.10",
+    )
+    for asset in harness.asset_dir.iterdir():
+        harness.add_remote_asset(asset)
+    release = {"id": str(harness.state["release_id"]), "published": "false"}
+    published = harness.run_release_step(
+        "publish-release",
+        "Publish immutable GitHub Release",
+        expression_values=_release_context(harness, resolution=resolution, release=release),
+    )
+    assert published.returncode == 0, published.stderr
+    assert harness.outputs()["make_latest"] == "false"
+    calls = harness.calls("api")
+    metadata_index = calls.index(metadata_call)
+    asset_endpoint = (
+        f"repos/{harness.state['repository']}/releases/{release['id']}/assets?per_page=100"
+    )
+    assert sum(asset_endpoint in call for call in calls[:metadata_index]) == 2
+    assert metadata_index < next(index for index, call in enumerate(calls) if "PATCH" in call)
+
+    latest = _run_latest_projection(harness, resolution=resolution)
+    assert latest.returncode == 0, latest.stderr
+    assert harness.state["latest_release_tag"] == "v1.2.10"
+
+
+@pytest.mark.parametrize("newer_published", (False, True))
+def test_already_published_recovery_keeps_latest_without_a_patch(
+    tmp_path: Path, newer_published: bool
+) -> None:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    harness.prepare_validated_assets()
+    latest_tag = "v1.2.10" if newer_published else harness.release_tag
+    harness.update_state(
+        release=harness.contract_release(published=True),
+        release_metadata_pages=[[{"tag_name": latest_tag, "draft": False, "prerelease": False}]],
+        latest_release_tag=latest_tag,
+    )
+    for asset in harness.asset_dir.iterdir():
+        harness.add_remote_asset(asset)
+    release = {"id": str(harness.state["release_id"]), "published": "true"}
+
+    published = harness.run_release_step(
+        "publish-release",
+        "Publish immutable GitHub Release",
+        expression_values=_release_context(harness, release=release),
+    )
+
+    assert published.returncode == 0, published.stderr
+    assert harness.outputs()["make_latest"] == ("false" if newer_published else "true")
+    assert not any("PATCH" in call for call in harness.calls("api"))
+    latest = _run_latest_projection(harness)
+    assert latest.returncode == 0, latest.stderr
+    assert harness.state["latest_release_tag"] == latest_tag
+
+
+@pytest.mark.parametrize("mode", ("normal", "recovery"))
+@pytest.mark.parametrize(
+    ("release_metadata_pages", "latest_tag", "expected"),
+    (
+        ([[]], None, "true"),
+        ([[{"tag_name": "v1.2.2", "draft": False, "prerelease": False}]], "v1.2.2", "true"),
+        ([[], [{"tag_name": "v1.2.10", "draft": False, "prerelease": False}]], "v1.2.10", "false"),
+        ([[{"tag_name": "v1.10.0", "draft": False, "prerelease": False}]], "v1.10.0", "false"),
+        ([[{"tag_name": "v2.0.0", "draft": False, "prerelease": False}]], "v2.0.0", "false"),
+        (
+            [
+                [
+                    {"tag_name": "v9.0.0", "draft": True, "prerelease": False},
+                    {"tag_name": "v9.0.0-rc1", "draft": False, "prerelease": True},
+                ]
+            ],
+            None,
+            "true",
+        ),
+    ),
+)
+def test_publication_selects_latest_for_normal_and_recovery_modes(
+    tmp_path: Path,
+    mode: str,
+    release_metadata_pages: list[object],
+    latest_tag: str | None,
+    expected: str,
+) -> None:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    harness.configure_commits(release_sha=harness.release_sha, main_sha=harness.release_sha)
+    asset = harness.write_asset()
+    harness.update_state(
+        release=harness.contract_release(),
+        release_metadata_pages=release_metadata_pages,
+        latest_release_tag=latest_tag,
+    )
+    harness.add_remote_asset(asset)
+    resolution = {"mode": mode, "sha": harness.release_sha, "tag": harness.release_tag}
+
+    completed = harness.run_release_step(
+        "publish-release",
+        "Publish immutable GitHub Release",
+        expression_values=_release_context(
+            harness,
+            resolution=resolution,
+            release={"id": str(harness.state["release_id"]), "published": "false"},
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert harness.outputs()["make_latest"] == expected
+    transition = json.loads(
+        (harness.runner_temp / "immutable-publication-transition.json").read_text(encoding="utf-8")
+    )
+    assert transition["make_latest"] == expected
+    assert harness.state["latest_release_tag"] == (
+        harness.release_tag if expected == "true" else latest_tag
+    )
+    verified = _run_latest_projection(harness, resolution=resolution)
+    assert verified.returncode == 0, verified.stderr
+
+
+@pytest.mark.parametrize(
+    ("release_metadata_available", "release_metadata_pages", "error"),
+    (
+        (False, [[]], "Could not list GitHub Release metadata"),
+        (True, [], "malformed release metadata"),
+        (True, [{"unexpected": "response"}], "malformed release metadata"),
+        (
+            True,
+            [[{"tag_name": "v1.2.10", "draft": "false", "prerelease": False}]],
+            "malformed release metadata",
+        ),
+        (
+            True,
+            [[{"tag_name": "not-a-version", "draft": False, "prerelease": False}]],
+            "malformed release metadata",
+        ),
+    ),
+)
+@pytest.mark.parametrize("published", (False, True))
+def test_recovery_latest_planning_fails_closed_on_missing_or_malformed_metadata(
+    tmp_path: Path,
+    release_metadata_available: bool,
+    release_metadata_pages: list[object],
+    error: str,
+    published: bool,
+) -> None:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    asset = harness.write_asset()
+    harness.update_state(
+        release=harness.contract_release(published=published),
+        release_metadata_available=release_metadata_available,
+        release_metadata_pages=release_metadata_pages,
+    )
+    harness.add_remote_asset(asset)
+    before = harness.state["release"]
+
+    completed = harness.run_release_step(
+        "publish-release",
+        "Publish immutable GitHub Release",
+        expression_values=_release_context(
+            harness,
+            release={"id": str(harness.state["release_id"]), "published": str(published).lower()},
+        ),
+    )
+
+    assert completed.returncode != 0
+    assert error in completed.stderr
+    assert not any("PATCH" in call for call in harness.calls("api"))
+    assert harness.state["release"] == before
+
+
+@pytest.mark.parametrize(
+    ("latest_release_tag", "error"),
+    (
+        (None, "Could not read GitHub's latest release projection."),
+        ("not-a-release-tag", "malformed latest-release projection"),
+    ),
+)
+def test_latest_projection_fails_closed_on_missing_or_malformed_metadata(
+    tmp_path: Path,
+    latest_release_tag: str | None,
+    error: str,
+) -> None:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    harness.update_state(latest_release_tag=latest_release_tag)
+
+    verified = _run_latest_projection(harness, make_latest="true")
+
+    assert verified.returncode != 0
+    assert error in verified.stderr
+
+
+@pytest.mark.parametrize(
+    "objects",
+    (
+        [],
+        [[]],
+        [{"tag_name": "v1.2.3"}, {"tag_name": "v1.2.10"}],
+        [{"tag_name": "v1.2.10"}, {"tag_name": "v1.2.3"}],
+        [{"tag_name": "v1.2.10"}, {"tag_name": "v1.2.10"}],
+    ),
+)
+def test_older_latest_projection_requires_exactly_one_object(
+    tmp_path: Path, objects: list[object]
+) -> None:
+    harness = ReleaseRecoveryHarness(tmp_path)
+    harness.update_state(latest_release_objects=objects)
+
+    verified = _run_latest_projection(harness, make_latest="false")
+
+    assert verified.returncode != 0
+    assert "malformed latest-release projection" in verified.stderr
 
 
 @pytest.mark.parametrize(
