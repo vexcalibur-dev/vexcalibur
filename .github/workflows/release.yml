@@ -10,6 +10,10 @@ on:
         description: Optional explicit MAJOR.MINOR.PATCH version. Empty computes the next version.
         required: false
         type: string
+      expected-sha:
+        description: Optional full main commit SHA approved for this dispatch. A mismatch stops the run.
+        required: false
+        type: string
       recovery-tag:
         description: Existing annotated vMAJOR.MINOR.PATCH tag to resume. Mutually exclusive with version.
         required: false
@@ -48,6 +52,19 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify approved dispatch commit
+        env:
+          EXPECTED_SHA: ${{ github.event.inputs['expected-sha'] || '' }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${EXPECTED_SHA}" ]]; then
+            if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ || "${EXPECTED_SHA}" != "${GITHUB_SHA}" ]]; then
+              echo "Workflow commit differs from the approved expected-sha, or the input is malformed." >&2
+              exit 1
+            fi
+          fi
 
       - name: Determine release version
         id: release
