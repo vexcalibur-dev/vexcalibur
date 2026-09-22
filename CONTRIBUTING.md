@@ -1,6 +1,6 @@
 # Contributing
 
-Vexcalibur is pre-1.0, so a small change can still alter a public contract. Keep each pull request focused. State any effect on CLI behavior, Python APIs, VEX output, or data-sharing boundaries.
+Keep each pull request focused. State any effect on CLI behavior, Python APIs, VEX output, or data-sharing boundaries, and follow the [compatibility policy](docs/reference/compatibility.md).
 
 This file covers the expectations for a pull request. The [contributor
 documentation](docs/contributing/index.md) goes deeper on one area each: the
@@ -33,8 +33,13 @@ CSAF example.
 Activate the pinned tools with `mise`, `asdf`, or an equivalent version manager. Then install the locked dependencies:
 
 ```bash
-uv sync
+uv sync --frozen
 ```
+
+The [quickstart](docs/tutorials/quickstart.md) walks through local generation
+using the repository's sample SBOM and findings. Dependency installation may
+contact the package index; the offline generation example does not contact a
+vulnerability service.
 
 On Linux, run the local quality gate before opening a pull request:
 
@@ -116,7 +121,7 @@ inputs.
 Build the manual after changing documentation, CLI behavior, package metadata, or a public Python API:
 
 ```bash
-uv sync --extra docs
+uv sync --frozen --extra docs
 make docs
 ```
 
@@ -146,3 +151,7 @@ Include:
 - security notes when the change affects VEX output, package URLs, provider access, tokens, or CI permissions.
 
 Report vulnerabilities through the private channel in [SECURITY.md](SECURITY.md), not in a pull request or public issue.
+
+## Questions and community guidelines
+
+Use the [issue forms](https://github.com/vexcalibur-dev/vexcalibur/issues) for questions, bugs, and feature requests. The organization [support policy](https://github.com/vexcalibur-dev/.github/blob/main/SUPPORT.md) explains which public route to use, and the [code of conduct](https://github.com/vexcalibur-dev/.github/blob/main/CODE_OF_CONDUCT.md) applies to project spaces.
