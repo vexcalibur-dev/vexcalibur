@@ -1,0 +1,1 @@
+{"spdxVersion":"SPDX-2.3","packages":[{"externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:pypi/demo@1.0"},{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:npm/demo@1.0"}]}]}

@@ -1,0 +1,41 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Example inventory",
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://sbom.example.test/spdx2-demo",
+  "creationInfo": {
+    "creators": ["Tool: example"],
+    "created": "2026-06-23T00:00:00Z"
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-django",
+      "name": "django",
+      "versionInfo": "1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/django@1.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-minimist",
+      "name": "minimist",
+      "versionInfo": "0.0.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/minimist@0.0.8"
+        }
+      ]
+    }
+  ]
+}

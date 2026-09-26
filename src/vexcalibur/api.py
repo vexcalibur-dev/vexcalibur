@@ -94,6 +94,7 @@ from vexcalibur.sources.osv import (
     OsvConfigurationError,
     OsvResponseError,
 )
+from vexcalibur.spdx2_sbom import load_spdx2_sbom
 from vexcalibur.spdx3 import Spdx3JsonRenderer, Spdx3RenderError
 from vexcalibur.spdx3_sbom import load_spdx3_sbom
 from vexcalibur.vex import CycloneDxJsonRenderer
@@ -535,6 +536,7 @@ __all__ = [
     "generate_vex_from_source_result",
     "load_cyclonedx_sbom",
     "load_sbom",
+    "load_spdx2_sbom",
     "load_spdx3_sbom",
     "parse_generation_execution_report",
 ]

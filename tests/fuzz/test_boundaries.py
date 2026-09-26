@@ -63,6 +63,9 @@ CORPUS_EXPECTATIONS: dict[str, tuple[str, str | None]] = {
     "sbom/spdx3-duplicate-identifier.json": ("rejected", "SbomError"),
     "sbom/valid-json.json": ("accepted", None),
     "sbom/valid-spdx3.json": ("accepted", None),
+    "sbom/valid-spdx2.json": ("accepted", None),
+    "sbom/spdx2-conflicting-version.json": ("rejected", "SbomError"),
+    "sbom/spdx2-ambiguous-purls.json": ("rejected", "SbomError"),
     "sbom/valid-xml.xml": ("accepted", None),
 }
 

@@ -256,7 +256,8 @@ def generate(
             dir_okay=False,
             readable=True,
             help=(
-                "CycloneDX JSON or XML, or SPDX 3 JSON-LD SBOM to convert into VEX. "
+                "CycloneDX JSON or XML, SPDX 2.3 JSON, or SPDX 3 JSON-LD SBOM "
+                "to convert into VEX. "
                 "Omit when using --github-repo."
             ),
         ),
