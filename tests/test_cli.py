@@ -3,8 +3,8 @@ import shlex
 from pathlib import Path
 
 import pytest
-from click import unstyle
 from packageurl import PackageURL
+from rich.text import Text
 from typer.testing import CliRunner
 
 import vexcalibur.csaf as csaf_module
@@ -1575,7 +1575,7 @@ def test_generate_help_advertises_spdx3_input() -> None:
     result = runner.invoke(cli.app, ["generate", "--help"], terminal_width=120)
 
     assert result.exit_code == 0
-    help_text = " ".join(unstyle(result.output).replace("│", " ").split())
+    help_text = " ".join(Text.from_ansi(result.output).plain.replace("│", " ").split())
     assert "SPDX 3 JSON-LD" in help_text
     assert "SPDX 2.3 JSON" in help_text
 
