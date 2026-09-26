@@ -8,7 +8,7 @@ This diagram traces inventory through one finding source and one renderer. The
 report-aware path retains the normalized values used at those boundaries.
 
 ```text
-CycloneDX or SPDX 3 file      GitHub Dependency Graph SBOM
+CycloneDX or SPDX file        GitHub Dependency Graph SBOM
         |                                 |
         v                                 v
   local SBOM loaders              GitHub SBOM client
@@ -71,13 +71,18 @@ when Vexcalibur cannot infer it.
 
 ## Inventory boundary
 
-`vexcalibur.sbom` handles local CycloneDX JSON and XML, and `vexcalibur.spdx3_sbom` handles local SPDX 3.0.1 JSON-LD. `vexcalibur.sbom_selection` picks the parser for a local file: XML content is CycloneDX, and JSON content selects its format from one top-level marker, `bomFormat` for CycloneDX or `@graph` for SPDX 3. A JSON document carrying both markers is rejected instead of guessed. A shared input reader opens each path once in nonblocking mode, verifies the opened target is a regular file, and reads no more than the configured limit from that descriptor. Symbolic links to regular files remain usable, while FIFOs, devices, and links to them fail before a read can block.
+`vexcalibur.sbom` handles local CycloneDX JSON and XML, and `vexcalibur.spdx3_sbom` handles local SPDX 3.0.1 JSON-LD. `vexcalibur.sbom_selection` picks the parser for a local file: XML content is CycloneDX, and JSON content selects its format from one top-level marker, `bomFormat` for CycloneDX, `spdxVersion` for SPDX 2, or `@graph` for SPDX 3. A JSON document carrying markers for multiple formats is rejected instead of guessed. A shared input reader opens each path once in nonblocking mode, verifies the opened target is a regular file, and reads no more than the configured limit from that descriptor. Symbolic links to regular files remain usable, while FIFOs, devices, and links to them fail before a read can block.
 
-A shared JSON decoder rejects duplicate keys, excessive nesting, oversized integers, invalid UTF-8, and malformed syntax for CycloneDX, local SPDX 3, local findings, GitHub SPDX, and OSV responses. CycloneDX XML uses its hardened XML path. The inventory loaders also apply component-count, package URL, duplicate-reference, and XML checks before they return components.
+A shared JSON decoder rejects duplicate keys, excessive nesting, oversized integers, invalid UTF-8, and malformed syntax for CycloneDX, local SPDX 2.3 and SPDX 3, local findings, GitHub SPDX, and OSV responses. CycloneDX XML uses its hardened XML path. The inventory loaders also apply component-count, package URL, duplicate-reference, and XML checks before they return components.
+
+`vexcalibur.spdx2_sbom` owns SPDX 2.3 package extraction for local files and
+the GitHub adapter. It reads package-manager purl references from `externalRefs`
+and uses `SPDXID` as the component reference. Both local SPDX loaders extract
+inventory fields rather than validate the complete SPDX standard.
 
 Local SPDX 3 input is pinned to the 3.0.1 JSON-LD context. The loader reads `software_Package` elements and the derived `ai_AIPackage` and `dataset_DatasetPackage` types: a package URL may come from `software_packageUrl` or an `externalIdentifier` entry of type `packageUrl` (inline, or a reference resolved through `@graph`), equivalent values collapse to their canonical form, and distinct values for one package are ambiguous and rejected. The element's `spdxId` becomes the component reference.
 
-`vexcalibur.github_sbom` handles GitHub's asynchronous Dependency Graph API. It requests the SPDX 2.3 JSON report and waits for the download. It then validates the response and extracts package URL references. Multiple equivalent references collapse to their canonical package URL; multiple distinct package URLs for one package are ambiguous and rejected. All loaders produce the same component fields.
+`vexcalibur.github_sbom` handles GitHub's asynchronous Dependency Graph API. It requests the SPDX 2.3 JSON report and waits for the download. It validates the response and uses the shared SPDX 2.3 extractor for package URL references. The GitHub adapter excludes its repository package; local SPDX 2.3 input does not apply that exclusion. Multiple equivalent references collapse to their canonical package URL; multiple distinct package URLs for one package are ambiguous and rejected. All loaders produce the same component fields.
 
 Components without package URLs do not cross this boundary. Source adapters need package identity, and a VEX `affects` entry needs a stable component reference.
 

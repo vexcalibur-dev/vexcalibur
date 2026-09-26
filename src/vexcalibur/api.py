@@ -114,7 +114,7 @@ def generate_vex_from_sbom(
     """Generate VEX JSON from a local SBOM using an OSV-compatible source.
 
     Args:
-        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
+        input_file: CycloneDX JSON/XML, SPDX 2.3 JSON, or SPDX 3 JSON-LD file to read.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.
         osv_base_url: OSV-compatible endpoint.

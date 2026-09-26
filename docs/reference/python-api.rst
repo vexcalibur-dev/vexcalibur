@@ -193,13 +193,20 @@ SBOM ingest and GitHub
 ----------------------
 
 ``load_cyclonedx_sbom`` reads CycloneDX JSON or XML 1.4, 1.5, or 1.6.
-``load_spdx3_sbom`` reads SPDX 3.0.1 JSON-LD. ``load_sbom`` selects the parser
+``load_spdx2_sbom`` reads SPDX 2.3 JSON, and ``load_spdx3_sbom`` reads SPDX
+3.0.1 JSON-LD. ``load_sbom`` selects the parser
 from the file's content: XML is CycloneDX, and a JSON document picks its format
-from one top-level marker, ``bomFormat`` for CycloneDX or ``@graph`` for
-SPDX 3. Each loader returns component identities sorted by package URL and
+from one top-level marker: ``bomFormat`` for CycloneDX, ``spdxVersion`` for
+SPDX 2, or ``@graph`` for SPDX 3. Mixed markers are rejected.
+Each loader returns component identities sorted by package URL and
 reference. Components without package URLs are omitted.
 
-SPDX input supports package-identity extraction from the compact JSON form,
+SPDX 2.3 input extracts package-manager purl references from the ``packages``
+array. It uses the same identity rules as the GitHub adapter but keeps local
+repository packages. This is not full SPDX validation. See
+:doc:`SPDX 2.3 input fields <../how-to/use-spdx2-sbom-input>`.
+
+SPDX 3 input supports package-identity extraction from the compact JSON form,
 not full SPDX validation or general JSON-LD processing. It requires the exact
 SPDX 3.0.1 context string and a string ``type`` on every graph node. It does
 not expand contexts or fetch referenced documents. See the
@@ -245,6 +252,8 @@ service.
 .. autofunction:: load_sbom
 
 .. autofunction:: load_spdx3_sbom
+
+.. autofunction:: load_spdx2_sbom
 
 Sources and renderers
 ---------------------

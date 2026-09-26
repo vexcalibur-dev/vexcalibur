@@ -68,7 +68,7 @@ def main(
             "--in-file",
             "-i",
             help=(
-                "CycloneDX JSON or XML, or SPDX 3 JSON-LD SBOM file to read. "
+                "CycloneDX JSON/XML, SPDX 2.3 JSON, or SPDX 3 JSON-LD SBOM file to read. "
                 "Stdin input is not supported."
             ),
         ),

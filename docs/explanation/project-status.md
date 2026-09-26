@@ -26,6 +26,7 @@ documentation and schemas from that tag.
 ## Capabilities on this branch
 
 - CycloneDX JSON and XML SBOM input for versions 1.4, 1.5, and 1.6
+- SPDX 2.3 JSON SBOM input for local files
 - SPDX 3.0.1 JSON-LD SBOM input for local files
 - GitHub Dependency Graph SBOM input through `--github-repo OWNER/REPO`
 - public OSV queries with `--allow-public-osv`

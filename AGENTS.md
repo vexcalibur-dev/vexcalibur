@@ -4,7 +4,7 @@ This file gives automated contributors the repository rules needed to work safel
 
 ## Project state
 
-Vexcalibur is an ecosystem-neutral VEX toolkit. It reads CycloneDX files, SPDX 3 files,
+Vexcalibur is an ecosystem-neutral VEX toolkit. It reads CycloneDX JSON/XML, SPDX 2.3 JSON, and SPDX 3 JSON-LD files,
 or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services
 or local JSON. It renders CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX
 3.0.1 JSON.
@@ -84,9 +84,10 @@ Core modules live under `src/vexcalibur/`:
 | `generation_output.py` | VEX and report publication transactions |
 | `execution_report_destination.py` | Descriptor-bound POSIX file writes |
 | `sbom.py` | Local CycloneDX parsing and component extraction |
+| `spdx2_sbom.py` | SPDX 2.3 package extraction shared by local files and GitHub |
 | `spdx3_sbom.py` | Local SPDX 3 JSON-LD parsing and component extraction |
 | `sbom_selection.py` | Local SBOM format selection |
-| `github_sbom.py` | GitHub Dependency Graph SBOM access and SPDX extraction |
+| `github_sbom.py` | GitHub Dependency Graph SBOM access and repository-package filtering |
 | `domain.py` | Provider-neutral components, findings, and source protocol |
 | `document.py` | Immutable format-neutral document, product, and assertion values |
 | `sources/osv.py` | OSV policy, client, parsing, and domain mapping |
