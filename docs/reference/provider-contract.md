@@ -100,7 +100,7 @@ finding service.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `ref` | `str` | CycloneDX `bom-ref`, local SPDX 3 `spdxId`, GitHub SPDX `SPDXID`, or a package URL fallback |
+| `ref` | `str` | CycloneDX `bom-ref`, SPDX 3 `spdxId`, local or GitHub SPDX 2 `SPDXID`, or a package URL fallback |
 | `name` | `str` | Component name |
 | `version` | `str \| None` | Component version when supplied |
 | `purl` | `packageurl.PackageURL` | Parsed package URL |

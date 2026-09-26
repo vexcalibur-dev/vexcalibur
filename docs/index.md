@@ -1,7 +1,7 @@
 # Vexcalibur
 
 Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
-documents. It reads CycloneDX files, SPDX 3 files, or a GitHub Dependency
+documents. It reads CycloneDX files, SPDX 2.3 and SPDX 3 files, or a GitHub Dependency
 Graph SBOM, collects findings from OSV-compatible services or local JSON, and
 writes CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX 3.0.1 JSON.
 
@@ -37,6 +37,7 @@ follow [Install Vexcalibur](install.md) first if you haven't:
 - [Generate OpenVEX](how-to/generate-openvex.md)
 - [Generate CSAF VEX](how-to/generate-csaf.md)
 - [Generate SPDX 3 VEX](how-to/generate-spdx3.md)
+- [Use an SPDX 2.3 SBOM as input](how-to/use-spdx2-sbom-input.md)
 - [Use an SPDX 3 SBOM as input](how-to/use-spdx3-sbom-input.md)
 - [Use a private OSV mirror](how-to/use-private-osv-mirror.md)
 
@@ -123,6 +124,7 @@ how-to/generate-openvex
 how-to/generate-csaf
 how-to/generate-spdx3
 how-to/use-spdx3-sbom-input
+how-to/use-spdx2-sbom-input
 how-to/use-private-osv-mirror
 how-to/consume-execution-report
 how-to/use-python-api

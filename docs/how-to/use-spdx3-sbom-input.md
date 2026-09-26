@@ -128,8 +128,8 @@ one context per release instead of guessing across versions.
 both `bomFormat` and `@graph`. Fix the document instead of relying on a
 guessed format.
 
-`not a supported SBOM document` means the JSON has neither marker. Confirm the
-file is a CycloneDX SBOM or an SPDX 3.0.1 JSON-LD document.
+`not a supported SBOM document` means the JSON has no recognized format marker.
+Confirm the file is a supported CycloneDX, SPDX 2.3, or SPDX 3.0.1 document.
 
 `multiple distinct package URL identities` means one package carries two
 different package URLs. Keep one identity per package.

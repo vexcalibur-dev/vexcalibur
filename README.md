@@ -47,7 +47,7 @@ vexcalibur generate sbom.json \
 
 This writes CycloneDX VEX to `vex.json` without contacting a vulnerability service. For a guided example with sample inputs, follow the [quickstart](https://vexcalibur-dev.github.io/vexcalibur/tutorials/quickstart.html).
 
-Vexcalibur reads CycloneDX and SPDX 3 SBOM files, or fetches an SBOM from GitHub. It generates CycloneDX, OpenVEX, CSAF, and SPDX 3 VEX documents. The [generation guides](https://vexcalibur-dev.github.io/vexcalibur/#how-to-guides) explain the inputs and metadata each format needs.
+Vexcalibur reads CycloneDX, SPDX 2.3, and SPDX 3 SBOM files, or fetches an SBOM from GitHub. It generates CycloneDX, OpenVEX, CSAF, and SPDX 3 VEX documents. The [generation guides](https://vexcalibur-dev.github.io/vexcalibur/#how-to-guides) explain the inputs and metadata each format needs.
 
 Findings can also come from an OSV-compatible service. Public OSV requires explicit `--allow-public-osv` consent, which sends package URLs and versions to `https://api.osv.dev`. Fetching an SBOM from GitHub does not grant that consent. See the [finding-source options](https://vexcalibur-dev.github.io/vexcalibur/how-to/generate-cyclonedx-vex.html) before using a network provider with private inventory.
 

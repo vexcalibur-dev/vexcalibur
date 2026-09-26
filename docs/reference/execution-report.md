@@ -102,7 +102,7 @@ findings, the object is empty.
 
 | Value | Input |
 | --- | --- |
-| `sbom_file` | Local CycloneDX JSON or XML, or SPDX 3 JSON-LD |
+| `sbom_file` | Local CycloneDX JSON or XML, SPDX 2.3 JSON, or SPDX 3 JSON-LD |
 | `github_dependency_graph` | GitHub Dependency Graph SBOM API |
 | `custom` | Inventory supplied by an embedding through the Python API |
 

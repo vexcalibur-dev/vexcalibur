@@ -37,6 +37,7 @@ DOCS_ROOT = Path(__file__).parent.parent / "docs"
 DOCUMENTED_INPUT_PATHS = {
     "sbom.json": str(FIXTURE_ROOT / "cyclonedx-json-simple.json"),
     "sbom.spdx3.json": str(FIXTURE_ROOT / "spdx3-json-simple.json"),
+    "sbom.spdx2.json": str(FIXTURE_ROOT / "spdx2-json-simple.json"),
     "sbom.xml": str(FIXTURE_ROOT / "cyclonedx-xml-1.5-simple.xml"),
     "findings.json": str(FINDINGS_ROOT / "all-analysis-states.json"),
 }
@@ -2154,15 +2155,17 @@ def test_documented_spdx3_local_example_executes(tmp_path: Path) -> None:
     assert len(relationship_types) == 5
 
 
-def test_documented_spdx3_input_example_executes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version, count", [("spdx2", 1), ("spdx3", 2)])
+def test_documented_spdx_input_example_executes(tmp_path: Path, version: str, count: int) -> None:
     output_path = tmp_path / "vexcalibur-vex.json"
     args = _documented_generate_args(
-        DOCS_ROOT / "how-to" / "use-spdx3-sbom-input.md",
-        "spdx3-input-example",
+        DOCS_ROOT / "how-to" / f"use-{version}-sbom-input.md",
+        f"{version}-input-example",
     )
     args = [str(output_path) if arg.endswith("/vexcalibur-vex.json") else arg for arg in args]
+    args = [str(output_path) if arg == "vex.json" else arg for arg in args]
     args = [
-        str(FINDINGS_ROOT / "spdx3-input-findings.json")
+        str(FINDINGS_ROOT / f"{version}-input-findings.json")
         if arg == DOCUMENTED_INPUT_PATHS["findings.json"]
         else arg
         for arg in args
@@ -2174,7 +2177,7 @@ def test_documented_spdx3_input_example_executes(tmp_path: Path) -> None:
     assert result.output == ""
     document = json.loads(output_path.read_text(encoding="utf-8"))
     assert document["bomFormat"] == "CycloneDX"
-    assert len(document["vulnerabilities"]) == 2
+    assert len(document["vulnerabilities"]) == count
 
 
 def test_generate_spdx3_requires_creator_before_network(monkeypatch) -> None:

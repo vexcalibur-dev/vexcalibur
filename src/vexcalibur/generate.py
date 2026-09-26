@@ -61,7 +61,7 @@ def generate_vex_from_source(
     """Generate VEX JSON from a local SBOM and source provider.
 
     Args:
-        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
+        input_file: CycloneDX JSON/XML, SPDX 2.3 JSON, or SPDX 3 JSON-LD file to read.
         source: Provider used to find vulnerabilities for the SBOM components.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.
@@ -335,7 +335,7 @@ def generate_vex_from_sbom(
     true. A private mirror may be selected with ``osv_base_url``.
 
     Args:
-        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
+        input_file: CycloneDX JSON/XML, SPDX 2.3 JSON, or SPDX 3 JSON-LD file to read.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.
         osv_client: Injected OSV client, primarily for private endpoints and
@@ -703,7 +703,7 @@ def generate_vex_from_local_findings(
     """Generate VEX JSON from a local SBOM and local findings.
 
     Args:
-        input_file: CycloneDX JSON or XML, or SPDX 3 JSON-LD file to read.
+        input_file: CycloneDX JSON/XML, SPDX 2.3 JSON, or SPDX 3 JSON-LD file to read.
         findings_file: Local findings JSON file to read.
         timestamp: Document timestamp. The renderer uses the current UTC time
             when this is ``None``.
