@@ -21,6 +21,10 @@ Before you begin:
 - Open a Bash-compatible shell.
 - Confirm that `/tmp` is writable, or replace the example output path.
 
+The minimum version above covers the output format. For SPDX input, also
+check that `vexcalibur generate --help` lists your input format: SPDX 2.3 JSON
+or SPDX 3 JSON-LD. If it doesn't, install a newer release.
+
 This example needs no service credentials and contacts no network service.
 
 ## Generate from local inputs

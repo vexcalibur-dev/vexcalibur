@@ -1,7 +1,7 @@
 # Vexcalibur
 
 Vexcalibur turns SBOM package inventories and vulnerability findings into VEX
-documents. It reads CycloneDX files, SPDX 2.3 and SPDX 3 files, or a GitHub Dependency
+documents. It reads CycloneDX JSON/XML, SPDX 2.3 JSON, and SPDX 3 JSON-LD files, or a GitHub Dependency
 Graph SBOM, collects findings from OSV-compatible services or local JSON, and
 writes CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX 3.0.1 JSON.
 
