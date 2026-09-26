@@ -1,0 +1,8 @@
+{
+  "findings": [
+    {
+      "id": "CVE-2026-0001",
+      "component_ref": "SPDXRef-django"
+    }
+  ]
+}

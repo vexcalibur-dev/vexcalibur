@@ -14,15 +14,16 @@ from vexcalibur.sbom import (
     component_identities_from_cyclonedx_json,
     component_identities_from_cyclonedx_xml,
 )
+from vexcalibur.spdx2_sbom import component_identities_from_spdx2_document
 from vexcalibur.spdx3_sbom import component_identities_from_spdx3_document
 
 
 def load_sbom(path: Path) -> tuple[ComponentIdentity, ...]:
-    """Load component identities from a CycloneDX or SPDX 3 SBOM file.
+    """Load component identities from a CycloneDX or SPDX SBOM file.
 
     XML content is CycloneDX. JSON content selects its format from one
-    top-level marker: ``bomFormat`` for CycloneDX or ``@graph`` for SPDX 3
-    JSON-LD. A document carrying both markers is rejected instead of guessed.
+    top-level marker: ``bomFormat`` for CycloneDX, ``spdxVersion`` for SPDX 2,
+    or ``@graph`` for SPDX 3 JSON-LD. Mixed markers are rejected.
 
     Args:
         path: Regular file containing a supported SBOM document.
@@ -50,6 +51,9 @@ def load_sbom(path: Path) -> tuple[ComponentIdentity, ...]:
 
     is_cyclonedx = "bomFormat" in raw_document
     is_spdx3 = "@graph" in raw_document
+    is_spdx2 = "spdxVersion" in raw_document
+    if is_spdx2 and (is_cyclonedx or is_spdx3):
+        raise SbomError(f"SBOM {path} carries conflicting SBOM format markers")
     if is_cyclonedx and is_spdx3:
         msg = f"SBOM {path} carries both CycloneDX and SPDX 3 format markers"
         raise SbomError(msg)
@@ -57,8 +61,10 @@ def load_sbom(path: Path) -> tuple[ComponentIdentity, ...]:
         return component_identities_from_cyclonedx_json(raw_document, path=path)
     if is_spdx3:
         return component_identities_from_spdx3_document(raw_document, path=path)
+    if is_spdx2:
+        return component_identities_from_spdx2_document(raw_document, source=f"SBOM {path}")
     msg = (
         f"SBOM {path} is not a supported SBOM document; expected CycloneDX "
-        "1.4-1.6 JSON or XML, or SPDX 3.0.1 JSON-LD"
+        "1.4-1.6 JSON or XML, SPDX 2.3 JSON, or SPDX 3.0.1 JSON-LD"
     )
     raise SbomError(msg)

@@ -14,9 +14,10 @@ from urllib.parse import ParseResult, quote, urlparse
 import httpx
 from packageurl import PackageURL
 
-from vexcalibur.domain import ComponentIdentity, ComponentVersionError
+from vexcalibur.domain import ComponentIdentity
 from vexcalibur.json_boundary import JsonFailureKind, StrictJsonError, strict_json_loads
-from vexcalibur.sbom import MAX_COMPONENTS, MAX_SBOM_BYTES, SbomError
+from vexcalibur.sbom import MAX_SBOM_BYTES, SbomError
+from vexcalibur.spdx2_sbom import component_identities_from_spdx2_document
 from vexcalibur.url_policy import BaseUrlValidationError, validate_base_url
 
 DEFAULT_GITHUB_API_URL = "https://api.github.com"
@@ -313,34 +314,17 @@ def component_identities_from_github_spdx_sbom(
 ) -> tuple[ComponentIdentity, ...]:
     """Extract component identities from GitHub Dependency Graph SPDX JSON."""
     raw_sbom = _github_spdx_sbom_document(raw_response, source=source)
-    packages = raw_sbom.get("packages")
-    if not isinstance(packages, list):
-        msg = f"GitHub SBOM {source} field 'packages' must be a list"
-        raise GithubSbomClientError(msg)
-    if len(packages) > MAX_COMPONENTS:
-        msg = f"GitHub SBOM {source} contains more than {MAX_COMPONENTS} packages"
-        raise GithubSbomClientError(msg)
-
     repository_spdx_ids = _github_spdx_repository_package_ids(raw_sbom, source=source)
-    components = tuple(
-        component
-        for package in packages
-        for component in (
-            _github_spdx_package_identity(
-                package,
-                source=source,
-                repository_spdx_ids=repository_spdx_ids,
+    try:
+        return component_identities_from_spdx2_document(
+            raw_sbom,
+            source=f"GitHub SBOM {source}",
+            skip_package=lambda spdx_id, purl: _is_github_repository_package(
+                spdx_id=spdx_id, purl=purl, repository_spdx_ids=repository_spdx_ids
             ),
         )
-        if component is not None
-    )
-    _validate_unique_component_refs(components)
-    return tuple(
-        sorted(
-            _dedupe_components(components),
-            key=lambda component: (component.purl.to_string(), component.ref),
-        )
-    )
+    except SbomError as exc:
+        raise GithubSbomClientError(str(exc)) from exc
 
 
 def parse_github_repository(value: str) -> GithubRepository:
@@ -583,54 +567,6 @@ def _github_spdx_repository_package_ids(raw_sbom: dict[str, Any], *, source: str
     return frozenset(repository_spdx_ids)
 
 
-def _github_spdx_package_identity(
-    package: Any,
-    *,
-    source: str,
-    repository_spdx_ids: frozenset[str],
-) -> ComponentIdentity | None:
-    if not isinstance(package, dict):
-        msg = f"GitHub SBOM {source} packages must be objects"
-        raise GithubSbomClientError(msg)
-
-    purl = _github_spdx_package_purl(package, source=source)
-    if purl is None:
-        return None
-
-    spdx_id = package.get("SPDXID")
-    if spdx_id is not None and not isinstance(spdx_id, str):
-        msg = f"GitHub SBOM {source} package SPDXID values must be strings"
-        raise GithubSbomClientError(msg)
-    if _is_github_repository_package(
-        spdx_id=spdx_id,
-        purl=purl,
-        repository_spdx_ids=repository_spdx_ids,
-    ):
-        return None
-
-    name = package.get("name")
-    if name is not None and not isinstance(name, str):
-        msg = f"GitHub SBOM {source} package names must be strings"
-        raise GithubSbomClientError(msg)
-
-    version = package.get("versionInfo")
-    if version is not None and not isinstance(version, str):
-        msg = f"GitHub SBOM {source} package versionInfo values must be strings"
-        raise GithubSbomClientError(msg)
-
-    ref = spdx_id.strip() if isinstance(spdx_id, str) and spdx_id.strip() else purl.to_string()
-    try:
-        return ComponentIdentity(
-            ref=ref,
-            name=name or purl.name,
-            version=version,
-            purl=purl,
-        )
-    except ComponentVersionError as exc:
-        msg = f"GitHub SBOM {source} package has conflicting version identity: {exc}"
-        raise GithubSbomClientError(msg) from exc
-
-
 def _is_github_repository_package(
     *,
     spdx_id: Any,
@@ -642,57 +578,6 @@ def _is_github_repository_package(
     if spdx_id == "SPDXRef-Repository":
         return True
     return isinstance(spdx_id, str) and spdx_id in repository_spdx_ids
-
-
-def _github_spdx_package_purl(package: dict[str, Any], *, source: str) -> PackageURL | None:
-    external_refs = package.get("externalRefs", [])
-    if not isinstance(external_refs, list):
-        msg = f"GitHub SBOM {source} package externalRefs values must be lists"
-        raise GithubSbomClientError(msg)
-    package_urls: dict[str, PackageURL] = {}
-    for external_ref in external_refs:
-        if not isinstance(external_ref, dict):
-            msg = f"GitHub SBOM {source} package externalRefs entries must be objects"
-            raise GithubSbomClientError(msg)
-        if external_ref.get("referenceCategory") != "PACKAGE-MANAGER":
-            continue
-        if external_ref.get("referenceType") != "purl":
-            continue
-        reference_locator = external_ref.get("referenceLocator")
-        if not isinstance(reference_locator, str) or reference_locator.strip() == "":
-            msg = f"GitHub SBOM {source} package purl referenceLocator values must be strings"
-            raise GithubSbomClientError(msg)
-        try:
-            package_url = PackageURL.from_string(reference_locator)
-            canonical_purl = package_url.to_string()
-        except ValueError as exc:
-            msg = f"GitHub SBOM {source} package purl is invalid: {exc}"
-            raise GithubSbomClientError(msg) from exc
-        package_urls[canonical_purl] = package_url
-    if len(package_urls) > 1:
-        msg = f"GitHub SBOM {source} package has multiple distinct package URL references"
-        raise GithubSbomClientError(msg)
-    return next(iter(package_urls.values()), None)
-
-
-def _validate_unique_component_refs(components: tuple[ComponentIdentity, ...]) -> None:
-    seen_refs: set[str] = set()
-    duplicate_refs: set[str] = set()
-    for component in components:
-        if component.ref in seen_refs:
-            duplicate_refs.add(component.ref)
-        seen_refs.add(component.ref)
-    if duplicate_refs:
-        duplicate_list = ", ".join(sorted(duplicate_refs))
-        msg = f"GitHub SBOM contains duplicate component bom-ref values: {duplicate_list}"
-        raise GithubSbomClientError(msg)
-
-
-def _dedupe_components(components: tuple[ComponentIdentity, ...]) -> tuple[ComponentIdentity, ...]:
-    deduped: dict[tuple[str, str], ComponentIdentity] = {}
-    for component in components:
-        deduped[(component.ref, component.purl.to_string())] = component
-    return tuple(deduped.values())
 
 
 def _github_cli_hostname(api_url: str) -> str:

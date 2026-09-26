@@ -1226,7 +1226,7 @@ def test_generate_reports_unsupported_sbom_formats_without_traceback(
 
     assert result.exit_code == 1
     assert "SBOM ingest failed" in result.output
-    assert "expected CycloneDX 1.4-1.6 JSON or XML, or SPDX 3.0.1 JSON-LD" in result.output
+    assert "expected CycloneDX 1.4-1.6 JSON or XML, SPDX 2.3 JSON" in result.output
     assert "Traceback" not in result.output
 
 
@@ -1574,7 +1574,9 @@ def test_generate_help_advertises_spdx3_input() -> None:
     result = runner.invoke(cli.app, ["generate", "--help"], terminal_width=120)
 
     assert result.exit_code == 0
-    assert "SPDX 3 JSON-LD" in result.output
+    help_text = " ".join(result.output.replace("│", " ").split())
+    assert "SPDX 3 JSON-LD" in help_text
+    assert "SPDX 2.3 JSON" in help_text
 
 
 def test_generate_openvex_matches_golden() -> None:
