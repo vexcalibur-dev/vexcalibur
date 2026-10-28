@@ -147,6 +147,16 @@ Match the command runner to the reader. In a source checkout — tutorials and c
 
 For a substantial documentation change, use the scorched-earth documentation review and Green Thumb prose pass when those skills are available.
 
+## Design documents
+
+Read `.trellis.yaml` and [the planning guide](docs/planning/README.md) before
+changing behavior. The guide defines the document map and authority order:
+Accepted ADRs, then living pages and reference contracts, then open proposals.
+Load only the architecture sections and contracts relevant to the task.
+Keep proposals separate from supported behavior, and update living pages
+when the implementation changes. GitHub issues track execution; don't copy
+their task lists into a second roadmap.
+
 ## Versions and releases
 
 `setuptools-scm` derives versions from `vMAJOR.MINOR.PATCH` tags. Do not add a literal project version or commit generated `src/vexcalibur/_version.py`.

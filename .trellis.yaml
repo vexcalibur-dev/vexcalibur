@@ -1,0 +1,10 @@
+style: trellis
+paths:
+  adrs: docs/adrs
+  design: docs/design
+  living: docs/explanation
+  requirements: docs/reference/compatibility.md
+  evidence: docs/planning/evidence
+adrs:
+  naming: date
+precedence: docs/planning/README.md

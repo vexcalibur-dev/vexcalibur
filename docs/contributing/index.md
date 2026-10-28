@@ -30,6 +30,12 @@ it does, and the rest are runbooks.
   formats, which are maintained by this repository and are not part of the
   package's Python API
 
+## Planning changes
+
+The [planning and design guide](../planning/README.md) maps current contracts,
+open designs, decision records, and evidence. Start there before proposing a
+new distribution method or changing an architectural decision.
+
 ## Automation and governance
 
 - [CI, release, and recurring automation](ci.md)
@@ -42,6 +48,7 @@ it does, and the rest are runbooks.
 python-style
 fuzzing
 ../external/README
+../planning/README
 self-release-evidence
 build-release-evidence
 publish-to-pypi
