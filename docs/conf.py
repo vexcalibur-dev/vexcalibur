@@ -66,15 +66,18 @@ def _copy_static_documents(app: Sphinx, exception: Exception | None) -> None:
         copy2(source, target)
 
 
-# Pages that moved when the manual split into user and contributor sections.
+# Pages moved by documentation reorganizations.
 # Keep these until the published links have had time to age out; dropping one
 # turns an external bookmark into a 404.
 MOVED_PAGES = {
     "how-to/install": "install",
     "how-to/build-release-evidence": "contributing/build-release-evidence",
     "how-to/publish-to-pypi": "contributing/publish-to-pypi",
-    "reference/release-evidence": "contributing/release-evidence",
-    "explanation/self-release-evidence": "contributing/self-release-evidence",
+    "reference/release-evidence": "architecture/release-evidence",
+    "explanation/self-release-evidence": "architecture/self-release-evidence",
+    "explanation/architecture": "architecture/overview",
+    "contributing/release-evidence": "architecture/release-evidence",
+    "contributing/self-release-evidence": "architecture/self-release-evidence",
     "development/ci": "contributing/ci",
     "development/fuzzing": "contributing/fuzzing",
     "development/github-governance": "contributing/github-governance",
