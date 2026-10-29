@@ -23,18 +23,18 @@ one area each.
 Read these in order. The first explains why the release process looks the way
 it does, and the rest are runbooks.
 
-- [Why Vexcalibur publishes evidence about itself](self-release-evidence.md)
+- [Why Vexcalibur publishes evidence about itself](../architecture/self-release-evidence.md)
 - [Build and review local release evidence](build-release-evidence.md)
 - [Publish Vexcalibur to GitHub and PyPI](publish-to-pypi.md)
-- [Release-evidence reference](release-evidence.md) — the evidence file
+- [Release-evidence reference](../architecture/release-evidence.md) — the evidence file
   formats, which are maintained by this repository and are not part of the
   package's Python API
 
 ## Planning changes
 
-The [planning and design guide](../planning/README.md) maps current contracts,
-open designs, decision records, and evidence. Start there before proposing a
-new distribution method or changing an architectural decision.
+Start with [internal architecture and requirements](../architecture/README.md)
+before changing behavior. The [planning and design guide](../planning/README.md)
+explains how to propose a change and record its decision and evidence.
 
 ## Automation and governance
 
@@ -49,10 +49,8 @@ python-style
 fuzzing
 ../external/README
 ../planning/README
-self-release-evidence
 build-release-evidence
 publish-to-pypi
-release-evidence
 ci
 github-governance
 ```

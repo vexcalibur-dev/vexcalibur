@@ -12,34 +12,36 @@ is open for review. It does not provide an installable image.
 
 ## Document map
 
-The existing Diataxis paths remain in use. Trellis adds records for decisions
-and proposals rather than moving the user manual into a new hierarchy.
+Internal architecture and requirements live together in `docs/architecture/`.
+The user manual keeps its Diataxis paths. This separates contributor design
+material from documentation for people using the CLI or Python API.
 
 | Kind | Home | How it changes |
 | --- | --- | --- |
-| Living explanation | [Architecture and trust boundaries](../explanation/architecture.md) and [project status](../explanation/project-status.md) | Update these with the implementation. Put dated history in a decision record, evidence receipt, or commit message. |
-| Current contracts | [Compatibility policy](../reference/compatibility.md) and the other [reference pages](../index.md) | Keep each obligation in its existing reference page rather than copying it into a plan. |
+| Internal requirements | [Quality attributes and internal requirements](../architecture/quality-attributes.md) | Maintain internal obligations here. Plans and agent guidance link to this page rather than keeping their own policy lists. |
+| Living architecture | [Architecture overview](../architecture/overview.md), [release architecture](../architecture/self-release-evidence.md), and [internal evidence formats](../architecture/release-evidence.md) | Update these with the implementation. Put dated history in a decision record, evidence receipt, or commit message. |
+| User documentation | [Compatibility policy](../reference/compatibility.md), [reference pages](../index.md), and [project status](../explanation/project-status.md) | Keep supported interfaces and user guarantees in the user manual. Link to them from internal docs instead of copying their detailed contracts. |
 | Open design | [Design documents](../design/README.md) | Compare options while Draft or In review. Freeze the reasoning once Decided or Abandoned. |
 | Architecture decision record (ADR) | [Decision records](../adrs/README.md) | One durable decision per record. Accepted, Rejected, and Superseded records retain their history. |
 | Evidence receipt | [Planning evidence](evidence/README.md) | Add a dated receipt for a claim. Add a new receipt when results change; don't overwrite the old one. |
 | Execution tracking | [GitHub issues](https://github.com/vexcalibur-dev/vexcalibur/issues) | Track tasks, dependencies, acceptance checks, and completion. Link the relevant design and ADR instead of duplicating their text. |
 
-The [self-release evidence explanation](../contributing/self-release-evidence.md)
-and [release-evidence reference](../contributing/release-evidence.md) keep their
-current paths. They describe how release evidence works; they aren't receipts.
-The root `release-evidence/` directory contains machine-consumed review inputs.
-Neither those inputs nor published release assets move into this planning tree.
+The root `release-evidence/` directory contains machine-consumed review inputs,
+not documentation. Neither those inputs nor published release assets move into
+this planning tree. Contributor procedures stay in
+[`docs/contributing/`](../contributing/index.md); they link to architecture
+and requirements rather than defining another set of design policies.
 
 ## Reading order and authority
 
-Before changing behavior, read the relevant architecture section and reference
-contract, then any Accepted ADRs in scope. Open designs explain proposals, not
-current behavior.
+Before changing behavior, read the internal requirements, relevant architecture
+section and public reference contract, then any Accepted ADRs in scope. Open
+designs explain proposals, not current behavior.
 
 When documents disagree, use this order:
 
 1. Accepted ADRs
-2. Living explanations and current reference contracts
+2. Internal requirements, living architecture, and public reference contracts
 3. Proposed ADRs and open design documents
 
 Issues define the scope of work but don't override an Accepted ADR. Report a
@@ -75,11 +77,17 @@ covers setup and the other local checks.
 
 ## Settings and migration limits
 
-`.trellis.yaml` selects native Trellis style for new planning records and maps
-the existing documentation. No ADR has been retrospectively marked Accepted.
-Existing reference contracts remain authoritative without newly invented
-requirement IDs. Before assigning IDs, agree on a scheme and map each
-obligation to its checks; keep assigned IDs stable and never reuse them.
+`.trellis.yaml` maps living architecture and internal requirements to one
+directory, alongside the design, ADR, and evidence directories. The previous
+architecture and release-design pages have moved there; generated redirects
+preserve their published HTML URLs, including the older pre-contributor URLs.
+Repository links use the new paths. There are no second copies of the pages
+at their former Markdown paths.
+
+No ADR has been retrospectively marked Accepted. Requirement IDs remain unset;
+before assigning them, agree on a scheme and map each obligation to its checks.
+Keep assigned IDs stable and never reuse them. Consolidating the policy does
+not claim that test-to-requirement traceability is complete.
 
 No shared ADR home is configured. These records govern the CLI repository, not
 organization-wide governance. Confirm the owning repository before recording
@@ -98,4 +106,5 @@ mechanical checks don't replace the Sphinx build or review of the design.
 ../design/README
 ../adrs/README
 evidence/README
+../architecture/README
 ```

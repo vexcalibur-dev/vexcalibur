@@ -2,8 +2,8 @@ style: trellis
 paths:
   adrs: docs/adrs
   design: docs/design
-  living: docs/explanation
-  requirements: docs/reference/compatibility.md
+  living: docs/architecture
+  requirements: docs/architecture/quality-attributes.md
   evidence: docs/planning/evidence
 adrs:
   naming: date

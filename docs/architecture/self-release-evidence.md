@@ -1,5 +1,10 @@
 # Why Vexcalibur publishes evidence about itself
 
+This page explains the release architecture. The
+[internal requirements](quality-attributes.md) define release policy, the
+[evidence reference](release-evidence.md) defines the file formats, and the
+[publishing runbook](../contributing/publish-to-pypi.md) gives the operator steps.
+
 Vexcalibur should be able to describe its own vulnerability posture using the
 same package and GitHub Action that downstream users run. That is useful only
 if the evidence is tied to the release bytes. A VEX file generated from a

@@ -9,16 +9,12 @@ or a GitHub Dependency Graph SBOM. Findings come from OSV-compatible services
 or local JSON. It renders CycloneDX 1.6, OpenVEX 0.2.0, CSAF 2.0, or SPDX
 3.0.1 JSON.
 
-The implementation is Python, but domain and product decisions should remain ecosystem-neutral unless an issue narrows the scope. Do not present a planned input, provider, or output format as available.
+The implementation is Python. See the [internal requirements](docs/architecture/quality-attributes.md) for product and behavior constraints.
 
 ## Non-negotiable rules
 
-- Never send SBOM content, package URLs, versions, or project inventory to a public service without explicit consent.
-- Require `--allow-public-osv` for public OSV. Use fixtures, fakes, private mirrors, or local findings for normal tests and examples.
-- Do not construct or query an OSV client in local-findings mode.
 - Preserve unrelated user changes and keep each change within the active task.
-- Document changes to a CLI, Python API, output contract, provider, or trust boundary.
-- Treat documentation as a tested product surface.
+- Read the [internal requirements](docs/architecture/quality-attributes.md) before behavior or release work.
 
 ## Toolchain
 
@@ -73,49 +69,9 @@ UV_CACHE_DIR=/tmp/vexcalibur-uv-cache uv run --frozen pytest -m "not live"
 
 ## Code boundaries
 
-Core modules live under `src/vexcalibur/`:
-
-| Module | Responsibility |
-| --- | --- |
-| `cli.py` | Typer commands and user-facing errors |
-| `generate.py` | Workflow orchestration |
-| `generate_command.py` | Validated CLI generation requests |
-| `generation_result.py` | Immutable generation results and report models |
-| `generation_output.py` | VEX and report publication transactions |
-| `execution_report_destination.py` | Descriptor-bound POSIX file writes |
-| `sbom.py` | Local CycloneDX parsing and component extraction |
-| `spdx2_sbom.py` | SPDX 2.3 package extraction shared by local files and GitHub |
-| `spdx3_sbom.py` | Local SPDX 3 JSON-LD parsing and component extraction |
-| `sbom_selection.py` | Local SBOM format selection |
-| `github_sbom.py` | GitHub Dependency Graph SBOM access and repository-package filtering |
-| `domain.py` | Provider-neutral components, findings, and source protocol |
-| `document.py` | Immutable format-neutral document, product, and assertion values |
-| `sources/osv.py` | OSV policy, client, parsing, and domain mapping |
-| `sources/local.py` | Local findings validation and matching |
-| `render.py` | Format-neutral renderer protocol and output selector |
-| `vex.py` | CycloneDX 1.6 rendering |
-| `openvex.py` | Native OpenVEX 0.2.0 rendering |
-| `csaf.py` | Native CSAF 2.0 VEX rendering and document metadata |
-| `compat/vexy.py` | Limited legacy command adapter |
-
-Keep provider code in `sources/`. A provider returns domain findings and does not render a VEX format. A renderer consumes domain values and does not query a source.
-
-Keep format-specific mapping inside its renderer. Do not silently treat source update times as statement revision times or analysis prose as remediation guidance.
-
-`vexcalibur.api` is the supported Python facade. Public examples and external
-consumer tests must import through it. Other modules are implementation details
-unless that facade re-exports a name.
-
-## Public data policy
-
-Public vulnerability services fail closed.
-
-- `query-osv` and `generate` require `--allow-public-osv` for `https://api.osv.dev`.
-- Private OSV-compatible services use `--osv-url`.
-- Tests use fake clients unless marked `live`.
-- Host checks account for case, trailing dots, and IDNA dot normalization.
-- An injected client remains subject to public-endpoint checks when its URL is knowable.
-- Fetching a GitHub SBOM does not grant consent for a later public OSV query.
+See the [module map](docs/architecture/overview.md#module-map) for module
+responsibilities and [source and rendering boundaries](docs/architecture/quality-attributes.md#source-and-rendering-boundaries)
+for the rules governing them.
 
 ## Style and tests
 
@@ -134,9 +90,11 @@ validator is a CI/development dependency, not a Python runtime dependency.
 
 ## Documentation
 
-Keep the README a concise front door. Put guided learning in tutorials, task recipes in how-to guides, contracts in reference, and design context in explanation.
+Keep the README a concise front door. User docs follow Diataxis: tutorials,
+how-to guides, reference, and explanation. Internal architecture and requirements
+live in `docs/architecture/`; follow the planning guide for their lifecycle.
 
-Do not promise planned behavior. Verify commands against the current CLI and build Sphinx with warnings treated as errors:
+Verify commands against the current CLI and build Sphinx with warnings treated as errors:
 
 ```bash
 uv sync --frozen --extra docs
@@ -149,53 +107,15 @@ For a substantial documentation change, use the scorched-earth documentation rev
 
 ## Design documents
 
-Read `.trellis.yaml` and [the planning guide](docs/planning/README.md) before
-changing behavior. The guide defines the document map and authority order:
-Accepted ADRs, then living pages and reference contracts, then open proposals.
-Load only the architecture sections and contracts relevant to the task.
-Keep proposals separate from supported behavior, and update living pages
-when the implementation changes. GitHub issues track execution; don't copy
-their task lists into a second roadmap.
+Read `.trellis.yaml`, [the planning guide](docs/planning/README.md), and the
+[internal requirements](docs/architecture/quality-attributes.md) before
+changing behavior. Load the architecture sections and contracts relevant to the
+task. GitHub issues track execution; don't copy their task lists into a second
+roadmap.
 
 ## Versions and releases
 
-`setuptools-scm` derives versions from `vMAJOR.MINOR.PATCH` tags. Do not add a literal project version or commit generated `src/vexcalibur/_version.py`.
-
-The tag is the release. Nothing commits to the repository after the release
-version is calculated: no version bump, no changelog write-back, no
-substituting the tag into tracked files. A process that commits after tagging
-leaves the tagged commit holding something other than the released bytes, which
-breaks the evidence tying a release to what shipped. Anything needing the
-version derives it at build time from the tag.
-
-That covers documentation, not only code. Don't write the current release
-version into prose, install commands, or examples, because no release step
-updates it afterward. Install commands install unpinned. Where a guide has to
-show how to pin, use a permanently true version such as the first release and
-say it is there for the form. Where a reader needs the current version, give
-them a command that computes it rather than a number to copy. Historical
-references are fine — which release first shipped a format, or a minimum
-supported version — because they stay true.
-
-Versions owned by another repository don't belong here either. The GitHub
-Action depends on Vexcalibur rather than the reverse, so its commit pins,
-inputs, and compatibility declarations are documented in
-`vexcalibur-dev/vexcalibur-action`.
-
-`.github/workflows/release.yml` derives a version from Conventional Commits and validates the exact `main` commit. The `vexcalibur-dev-automation` GitHub App creates the tag and GitHub Release.
-
-`.github/workflows/pypi.yml` accepts only an automation-authored immutable
-release whose exact tagged commit remains an ancestor of current `main`. It
-publishes through Trusted Publishing.
-
-Follow [docs/contributing/publish-to-pypi.md](docs/contributing/publish-to-pypi.md) for release work. Do not add a manual upload path without a security review.
-
-GitHub organization, repository, environment, and security settings are covered
-by the read-only policy in
-[docs/contributing/github-governance.md](docs/contributing/github-governance.md).
-Run `make governance-check` after changing those settings. The command must fail
-if any required endpoint is inaccessible; do not add a stored administrator
-token to CI to make it periodic.
+Read the [version and release requirements](docs/architecture/quality-attributes.md#version-and-release-integrity) and follow the [release procedure](docs/contributing/publish-to-pypi.md). For GitHub settings, follow the [governance requirements](docs/architecture/quality-attributes.md#governance-checks).
 
 ## Pull requests
 

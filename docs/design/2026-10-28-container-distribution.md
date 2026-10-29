@@ -13,7 +13,7 @@
 | Status | In review |
 | Owner | Vexcalibur maintainer |
 | Author | Codex |
-| Related | [Release runbook](../contributing/publish-to-pypi.md); [self-release evidence](../contributing/self-release-evidence.md); [Orb image evaluation](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/4) |
+| Related | [Release runbook](../contributing/publish-to-pypi.md); [self-release evidence](../architecture/self-release-evidence.md); [Orb image evaluation](https://github.com/vexcalibur-dev/vexcalibur-orb/issues/4) |
 | Decision | Not decided |
 
 ## Problem
@@ -42,15 +42,17 @@ PyPI distribution and its release process remain in place.
 
 ## Requirements in scope
 
-Main has no Trellis requirement IDs or accepted ADRs for this choice. The
-following are existing constraints, not newly assigned requirements:
+The [internal requirements](../architecture/quality-attributes.md) are the
+canonical source of contributor obligations. This design is constrained by
+their public-data and network policy, source and rendering boundaries, and
+version and release integrity rules. It does not define a second requirements
+list. Requirement IDs and an accepted container ADR have not been assigned.
 
-- [Public OSV policy](../install.md) requires explicit consent before sending
-  inventory to public OSV; the [CLI reference](../reference/cli.md)
-  specifies that local findings do not construct an OSV client.
-- The [release runbook](../contributing/publish-to-pypi.md) publishes the
-  verified wheel from an immutable GitHub Release to PyPI without rebuilding.
-  Versions come from Git tags, with no source version write-back.
+The following documents supply the detailed contracts this design relies on:
+
+- The [release architecture](../architecture/self-release-evidence.md) and
+  [evidence reference](../architecture/release-evidence.md) define the
+  validated release artifacts used as image inputs.
 - The [CLI reference](../reference/cli.md) defines inputs, outputs, failure
   behavior, credentials, and the offline and public OSV boundaries.
 - The [execution report reference](../reference/execution-report.md) requires
@@ -296,7 +298,10 @@ blocks the proposed multi-platform release; it is not silently omitted.
 
 ## Outcome
 
-Not decided. No ADR or living page has changed as a result of this proposal.
+Not decided. This proposal has not changed any runtime or publication behavior,
+and no container ADR has been accepted.
 
 - 2026-10-28: Initial proposal submitted for review; refined the registry,
   image build, refresh, and publication proposals.
+- 2026-10-29: Linked the consolidated internal requirements and relocated
+  release architecture; the container recommendation is unchanged.

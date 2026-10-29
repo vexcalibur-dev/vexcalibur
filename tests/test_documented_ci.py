@@ -123,7 +123,7 @@ def test_release_recovery_guide_fails_closed_when_status_cannot_run(tmp_path: Pa
 def test_publication_verification_guide_stops_after_a_failed_fetch(tmp_path: Path) -> None:
     if BASH is None:
         raise RuntimeError("bash is required to test publication verification")
-    documentation = (ROOT / "docs/contributing/release-evidence.md").read_text(encoding="utf-8")
+    documentation = (ROOT / "docs/architecture/release-evidence.md").read_text(encoding="utf-8")
     section = documentation.split(
         "Verify a schema-2 publication bundle against an exact tag and commit:",
         maxsplit=1,

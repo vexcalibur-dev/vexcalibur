@@ -16,6 +16,6 @@ Prefer a short sanitized result with links to retained artifacts. A CI link
 alone is not durable evidence if its artifacts will expire.
 
 Release evidence remains a separate, machine-checked publication contract.
-Read the [release-evidence reference](../../contributing/release-evidence.md)
+Read the [release-evidence reference](../../architecture/release-evidence.md)
 for its assets and verification rules. Planning receipts don't replace those
 checks or certify the contents of a future container image.

@@ -16,7 +16,7 @@ identifiers here.
 
 Maintainers should follow [Build and review local release
 evidence](../docs/contributing/build-release-evidence.md) before changing either JSON
-file. The [release-evidence reference](../docs/contributing/release-evidence.md)
+file. The [release-evidence reference](../docs/architecture/release-evidence.md)
 defines both local and immutable-publication bundles and their omission rules.
 
 `recovery-contract.json` is separate release metadata. Its schema version marks
