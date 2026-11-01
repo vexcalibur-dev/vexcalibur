@@ -320,7 +320,9 @@ def test_distribution_metadata_checks_use_one_isolated_locked_wrapper() -> None:
     assert 'sys.path.insert(0, str(repo_root / "scripts"))' in wrapper
     assert 'str(repo_root / "scripts" / "verify-dist-metadata.py")' in wrapper
     assert pyproject["tool"]["uv"]["default-groups"] == ["dev"]
-    assert {"include-group": "dist-verify"} in pyproject["dependency-groups"]["dev"]
+    assert {"include-group": "test"} in pyproject["dependency-groups"]["dev"]
+    assert {"include-group": "dist-verify"} in pyproject["dependency-groups"]["test"]
+    assert pyproject["tool"]["uv"]["dependency-groups"]["dev"] == {"requires-python": ">=3.14"}
     assert pyproject["dependency-groups"]["dist-verify"] == [
         "packaging>=24,<27",
         "tomli>=2.4.0,<3; python_version < '3.11'",
@@ -353,7 +355,26 @@ def test_distribution_verifier_dependencies_do_not_enter_runtime_export(
     )
 
     assert re.search(r"(?m)^httpx==", result.stdout) is not None
-    assert re.search(r"(?m)^(?:packaging|tomli)(?:==| @ )", result.stdout) is None
+    assert (
+        re.search(
+            r"(?m)^(?:packaging|tomli|pytest|hypothesis|filelock|virtualenv)(?:==| @ )",
+            result.stdout,
+        )
+        is None
+    )
+
+
+def test_compatibility_jobs_use_tests_without_development_tools() -> None:
+    for workflow in (CI_WORKFLOW.read_text(encoding="utf-8"), _validation_text()):
+        for name in ("test", "execution-report-windows", "execution-report-macos"):
+            job = _job(workflow, name)
+            assert 'UV_NO_DEV: "true"' in job
+            assert "uv sync --frozen --group test" in job
+        assert "uv run --frozen --group test pytest" in _job(workflow, "test")
+
+    for path in (POSIX_PLATFORM_CONTRACT, WINDOWS_PLATFORM_CONTRACT):
+        contract = path.read_text(encoding="utf-8")
+        assert "uv run --frozen --no-dev --group test pytest" in contract
 
 
 def test_ci_bounds_execution_report_jobs() -> None:

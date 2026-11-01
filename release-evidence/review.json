@@ -2,11 +2,11 @@
   "schema_version": 1,
   "review_kind": "production",
   "analysis_revision": 11,
-  "reviewed_at": "2026-11-01T15:45:04Z",
+  "reviewed_at": "2026-11-01T15:50:52Z",
   "reviewed_by": "Vexcalibur dependency review automation",
   "inventory": {
     "path": "uv.lock",
-    "sha256": "3ecad8244dbc1df1:614ddb7072c67e93:671830c4e1343172:9aa4362a8abed3ff",
+    "sha256": "4c5aee9956401ac4:415a38f6e4706829:f9812a4e4437d6b7:64a8b3f4e288434b",
     "coverage": "cross-platform-reference-runtime"
   },
   "findings": {
@@ -18,5 +18,5 @@
       "in_triage"
     ]
   },
-  "conclusion": "Analysis revision 11 covers security updates to certifi, filelock, msgpack, setuptools, urllib3, and virtualenv, plus required python-discovery, packaging, and typing-extensions updates. Both setuptools build pins agree. The Python 3.14 installed dependency audit reports no known vulnerabilities. Python 3.10 development tools still resolve filelock 4.1.0, which has known vulnerabilities; patched releases require Python 3.11 or newer. The runtime findings snapshot remains empty and makes no VEX assertions. It does not claim that every locked dependency is free of vulnerabilities."
+  "conclusion": "Analysis revision 11 covers security updates to certifi, filelock, msgpack, setuptools, urllib3, and virtualenv, plus required python-discovery, packaging, and typing-extensions updates. Both setuptools build pins agree. Development tools now require Python 3.14 or newer; a separate test group retains Python 3.10 runtime compatibility without vulnerable development dependencies. The runtime findings snapshot remains empty and makes no VEX assertions. It does not claim that every locked dependency is free of vulnerabilities."
 }

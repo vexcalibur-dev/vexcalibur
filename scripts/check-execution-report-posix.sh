@@ -18,11 +18,11 @@ if [[ -z "$expected_python" ]]; then
     'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 fi
 if [[ -z "$expected_version" ]]; then
-  expected_version="$(uv run --frozen python -I -c \
+  expected_version="$(uv run --frozen --no-dev --group test python -I -c \
     'import importlib.metadata; print(importlib.metadata.version("vexcalibur"))')"
 fi
 
-uv run --frozen pytest -q \
+uv run --frozen --no-dev --group test pytest -q \
   tests/test_installed_cli_fixture.py \
   tests/test_execution_report_destination.py \
   tests/test_execution_report_destination_cli.py \

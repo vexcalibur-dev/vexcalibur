@@ -139,6 +139,8 @@ jobs:
         run: git ls-files -z | xargs -0 uv run --frozen detect-secrets-hook --baseline .secrets.baseline --
 
   test:
+    env:
+      UV_NO_DEV: "true"
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -162,10 +164,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --group test
 
       - name: Run offline tests
-        run: uv run --frozen pytest -m "not live and not fuzz" --cov-fail-under=75
+        run: uv run --frozen --group test pytest -m "not live and not fuzz" --cov-fail-under=75
 
       - name: Enforce coverage policy
         if: matrix.python-version == env.MAX_PYTHON
@@ -185,6 +187,8 @@ jobs:
           retention-days: 14
 
   execution-report-windows:
+    env:
+      UV_NO_DEV: "true"
     name: Execution report Windows contract (Python ${{ matrix.python-version }})
     runs-on: windows-latest
     timeout-minutes: 20
@@ -208,7 +212,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --group test
 
       - name: Build distributions
         run: uv build --clear --no-create-gitignore --no-sources
@@ -221,6 +225,8 @@ jobs:
             -ExpectedPython "${{ matrix.python-version }}"
 
   execution-report-macos:
+    env:
+      UV_NO_DEV: "true"
     name: Execution report macOS contract (Python ${{ matrix.python-version }})
     runs-on: macos-latest
     timeout-minutes: 20
@@ -244,7 +250,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --group test
 
       - name: Build distributions
         run: uv build --clear --no-create-gitignore --no-sources --out-dir dist-macos
@@ -553,7 +559,7 @@ jobs:
         with:
           version-file: .tool-versions
           enable-cache: true
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --frozen --extra docs
