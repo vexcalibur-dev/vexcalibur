@@ -66,7 +66,7 @@ fuzz = [
   "atheris>=3.1,<4; implementation_name == 'cpython' and python_version >= '3.12' and python_version < '3.15' and sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 sdist-build = [
-  "setuptools==83.0.0",
+  "setuptools==84.1.0",
   "setuptools-scm==10.2.0",
   "vcs-versioning==2.2.2",
   "wheel==0.47.0",
@@ -91,7 +91,7 @@ vexy = "vexcalibur.compat.vexy:app"
 
 [build-system]
 requires = [
-  "setuptools==83.0.0",
+  "setuptools==84.1.0",
   "setuptools-scm==10.2.0",
   "vcs-versioning==2.2.2",
   "wheel==0.47.0",

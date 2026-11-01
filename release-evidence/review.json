@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "review_kind": "production",
-  "analysis_revision": 10,
-  "reviewed_at": "2026-09-18T19:20:22Z",
+  "analysis_revision": 11,
+  "reviewed_at": "2026-11-01T15:45:04Z",
   "reviewed_by": "Vexcalibur dependency review automation",
   "inventory": {
     "path": "uv.lock",
-    "sha256": "112e7f78c62460b5:4f309c602f446909:194c2f027751a4c8:eb0eebc54bbbf466",
+    "sha256": "3ecad8244dbc1df1:614ddb7072c67e93:671830c4e1343172:9aa4362a8abed3ff",
     "coverage": "cross-platform-reference-runtime"
   },
   "findings": {
@@ -18,5 +18,5 @@
       "in_triage"
     ]
   },
-  "conclusion": "Analysis revision 10 covers the AnyIO update from 4.14.1 to 4.14.2 and an installed-package minimum of 4.14.2 for the disclosed TLS hostname, supplementary-group, and process-pool fixes. The repository-pinned uv also normalized redundant dependency markers. The cross-platform export of all groups and extras differs only in AnyIO's version and hashes. The findings snapshot remains empty; it does not assert that the inventory has no vulnerabilities."
+  "conclusion": "Analysis revision 11 covers security updates to certifi, filelock, msgpack, setuptools, urllib3, and virtualenv, plus required python-discovery, packaging, and typing-extensions updates. Both setuptools build pins agree. The Python 3.14 installed dependency audit reports no known vulnerabilities. Python 3.10 development tools still resolve filelock 4.1.0, which has known vulnerabilities; patched releases require Python 3.11 or newer. The runtime findings snapshot remains empty and makes no VEX assertions. It does not claim that every locked dependency is free of vulnerabilities."
 }
