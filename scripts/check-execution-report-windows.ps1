@@ -55,7 +55,7 @@ function Assert-DistributionDigest {
 
 try {
   New-Item -ItemType Directory -Path $work | Out-Null
-  uv run --frozen pytest -q `
+  uv run --frozen --no-dev --group test pytest -q `
     tests/test_execution_report_rollback.py::test_native_windows_report_request_fails_closed `
     tests/test_cli_execution_report_failures.py::test_native_windows_cli_fails_closed_for_report_and_keeps_normal_output `
     tests/test_documented_ci.py::test_execution_report_schema_checkout_bytes_are_pinned_to_lf `
@@ -87,7 +87,7 @@ try {
 
   if ([string]::IsNullOrWhiteSpace($ExpectedVersion)) {
     $ExpectedVersion = (
-      uv run --frozen python -I -c `
+      uv run --frozen --no-dev --group test python -I -c `
         "import importlib.metadata; print(importlib.metadata.version('vexcalibur'))"
     )
   }
@@ -163,7 +163,7 @@ try {
       "",
       [System.Text.UTF8Encoding]::new($false)
     )
-    uv run --frozen python scripts/append_locked_distribution_requirement.py `
+    uv run --frozen --no-dev --group test python scripts/append_locked_distribution_requirement.py `
       $installDistribution `
       $requirements
     uv venv $venv

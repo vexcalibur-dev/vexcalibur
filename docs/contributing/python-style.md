@@ -6,6 +6,10 @@ When they differ, follow the local policy. Vexcalibur does not adopt the upstrea
 
 ## Tooling
 
+Development tools require Python 3.14 or newer. The checkout's `.python-version`
+selects Python 3.14 for uv. This does not change the supported runtime range:
+Vexcalibur still runs on Python 3.10 through 3.14.
+
 | Tool | Project rule |
 | --- | --- |
 | Ruff | Formatter, import sorter, and linter; 100-character line length |
@@ -43,6 +47,19 @@ make secrets-pr
 - Fail closed before sending package inventory to a public service.
 
 ## Test conventions
+
+The `test` dependency group supports every runtime in the CI matrix without
+installing development tools. To check Python 3.10 locally, keep its environment
+separate from your development environment:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv310 uv sync --frozen --python 3.10 --no-dev --group test
+UV_PROJECT_ENVIRONMENT=.venv310 uv run --frozen --python 3.10 --no-dev --group test pytest -m "not live"
+```
+
+uv can download the requested interpreter if it isn't installed. A passing run
+confirms the runtime tests; it doesn't replace the Python 3.14 development gate.
+Run ordinary `uv sync --frozen` commands outside that compatibility environment.
 
 - Put tests under `tests/`.
 - Mark external-service tests with `@pytest.mark.live`.

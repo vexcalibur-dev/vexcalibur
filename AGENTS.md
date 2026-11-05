@@ -22,7 +22,7 @@ The implementation is Python, but domain and product decisions should remain eco
 
 ## Toolchain
 
-- Python 3.10–3.14
+- Python 3.14+ for development tools; Python 3.10–3.14 for runtime compatibility
 - `uv` with `pyproject.toml` and `uv.lock`
 - Typer, HTTPX, Pydantic, and `cyclonedx-python-lib`
 - Ruff, strict MyPy, Pytest, `actionlint`, `shellcheck`, `pip-audit`, and `detect-secrets`
@@ -43,6 +43,11 @@ Install dependencies:
 ```bash
 uv sync --frozen
 ```
+
+The default `dev` group requires Python 3.14+. To test an older supported
+runtime, use `uv sync --frozen --python 3.10 --no-dev --group test` and
+`uv run --frozen --python 3.10 --no-dev --group test pytest -m "not live"`.
+Use a separate `UV_PROJECT_ENVIRONMENT` for that compatibility environment.
 
 Run the local gate:
 

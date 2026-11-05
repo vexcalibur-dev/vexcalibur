@@ -7,6 +7,12 @@ into one privileged job.
 
 ## Pull requests and pushes
 
+Development and security checks use Python 3.14. Runtime and native-platform
+matrices retain their existing Python versions, but install the `test` group
+with the default `dev` group disabled. This keeps development-only dependencies
+out of older runtime environments. For local compatibility checks, see the
+[Python style policy](python-style.md).
+
 The `CI` workflow runs on pull requests and pushes to `main`:
 
 | Area | Checks |
