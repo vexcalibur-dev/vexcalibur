@@ -2,6 +2,10 @@
 
 Vexcalibur separates package inventory, source access, provider findings, atomic assertions, and VEX rendering. Provider rules stay out of the output writer. Format rules stay out of network clients.
 
+This page describes the implementation for contributors. The
+[internal requirements](quality-attributes.md) define the obligations a change
+must preserve; the [user reference](../index.md) documents supported behavior.
+
 ## Generation flow
 
 This diagram traces inventory through one finding source and one renderer. The
@@ -68,6 +72,33 @@ caller first needs them. Built-in workflows also retain source categories and
 the selected format, so an execution report cannot relabel a completed
 operation. Custom sources and renderers can provide the same context explicitly
 when Vexcalibur cannot infer it.
+
+## Module map
+
+Core modules live under `src/vexcalibur/`:
+
+| Module | Responsibility |
+| --- | --- |
+| `cli.py` | Typer commands and user-facing errors |
+| `generate.py` | Workflow orchestration |
+| `generate_command.py` | Validated CLI generation requests |
+| `generation_result.py` | Immutable generation results and report models |
+| `generation_output.py` | VEX and report publication transactions |
+| `execution_report_destination.py` | Descriptor-bound POSIX file writes |
+| `sbom.py` | Local CycloneDX parsing and component extraction |
+| `spdx2_sbom.py` | SPDX 2.3 package extraction shared by local files and GitHub |
+| `spdx3_sbom.py` | Local SPDX 3 JSON-LD parsing and component extraction |
+| `sbom_selection.py` | Local SBOM format selection |
+| `github_sbom.py` | GitHub Dependency Graph SBOM access and repository-package filtering |
+| `domain.py` | Provider-neutral components, findings, and source protocol |
+| `document.py` | Immutable format-neutral document, product, and assertion values |
+| `sources/osv.py` | OSV policy, client, parsing, and domain mapping |
+| `sources/local.py` | Local findings validation and matching |
+| `render.py` | Format-neutral renderer protocol and output selector |
+| `vex.py` | CycloneDX 1.6 rendering |
+| `openvex.py` | Native OpenVEX 0.2.0 rendering |
+| `csaf.py` | Native CSAF 2.0 VEX rendering and document metadata |
+| `compat/vexy.py` | Limited legacy command adapter |
 
 ## Inventory boundary
 

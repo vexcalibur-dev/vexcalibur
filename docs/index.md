@@ -67,10 +67,8 @@ output formats, and the two extension points.
 
 ### Explanation
 
-Why Vexcalibur is built the way it is, what it supports, and where its limits
-apply.
+What Vexcalibur supports, how compatibility works, and where its limits apply.
 
-- [Architecture and trust boundaries](explanation/architecture.md)
 - [Project status and compatibility](explanation/project-status.md)
 
 ## Running Vexcalibur in CI
@@ -96,7 +94,8 @@ verifies published components and execution-report artifacts in CircleCI.
 Separate from the guides above: how this repository is tested, released, and
 governed. The [contributor documentation](contributing/index.md) covers the
 style policy, fuzzing guide, CI layout, governance checks, and release
-runbooks.
+runbooks. [Internal architecture and requirements](architecture/README.md)
+describe the implementation and the policies a change must preserve.
 
 ```{toctree}
 :hidden:
@@ -154,7 +153,6 @@ reference/renderer-contract
 :caption: Explanation
 :maxdepth: 2
 
-explanation/architecture
 explanation/project-status
 ```
 

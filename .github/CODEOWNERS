@@ -16,8 +16,7 @@
 /tests/fixtures/governance/ @dannysauer
 /tests/test_github_governance.py @dannysauer
 /docs/contributing/github-governance.md @dannysauer
-/docs/explanation/self-release-evidence.md @dannysauer
-/docs/how-to/build-release-evidence.md @dannysauer
-/docs/reference/release-evidence.md @dannysauer
+/docs/architecture/ @dannysauer
+/docs/contributing/build-release-evidence.md @dannysauer
 /pyproject.toml @dannysauer
 /uv.lock @dannysauer

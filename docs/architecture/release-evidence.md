@@ -1,5 +1,9 @@
 # Release-evidence reference
 
+Read the [release architecture](self-release-evidence.md) for the reasons
+behind these formats and the [publishing runbook](../contributing/publish-to-pypi.md)
+for release operations.
+
 This page defines Vexcalibur's repository-maintained evidence formats. They are
 not part of the package's supported Python API.
 
